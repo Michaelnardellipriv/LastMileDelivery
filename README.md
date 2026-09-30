@@ -2,10 +2,9 @@
 
 | | |
 |---|---|
-| **Cliente** | *Nome del cliente simulato — es. "NordFacility S.r.l."* |
-| **Team** | *Nome/numero team, es. "Team 3"* |
+| **Team** | *GLS/*3 |
 | **Membri** | *Un nome per riga, con il ruolo se già definito* |
-| **Data** | *Data di questo commit del README* |
+| **Data** | 30/09/2026* |
 | **Versione** | *v0.1 — aumenta quando il contenuto cambia in modo sostanziale* |
 
 ## Cosa fa questo progetto
