@@ -1,121 +1,69 @@
-# LastMileDelivery
+# <Nome progetto>
 
-## Laboratorio — Lezione 1: Dall'applicazione all'architettura software
+| | |
+|---|---|
+| **Cliente** | *Nome del cliente simulato — es. "NordFacility S.r.l."* |
+| **Team** | *Nome/numero team, es. "Team 3"* |
+| **Membri** | *Un nome per riga, con il ruolo se già definito* |
+| **Data** | *Data di questo commit del README* |
+| **Versione** | *v0.1 — aumenta quando il contenuto cambia in modo sostanziale* |
 
-**Durata: 70 minuti** (23/09/2026, dopo la parte teorica)
+## Cosa fa questo progetto
 
-## Obiettivo
+*In 2-3 righe, senza gergo tecnico: quale problema del cliente risolve.
+Rimandate ai dettagli in `docs/requirements.md`, non riscriveteli qui.*
 
-A fine laboratorio ogni team esiste, ha un cliente assegnato e ha messo per
-scritto tre cose che prima non esistevano: il problema del cliente con i suoi
-casi d'uso, una prima architettura a componenti, e un backlog con le domande
-ancora aperte.
+> Esempio (Smart Maintenance, NordFacility): applicazione per centralizzare le
+> segnalazioni di guasto sugli edifici gestiti, assegnare gli interventi ai
+> tecnici e seguirne lo stato dall'apertura alla chiusura.
 
-## Prerequisiti
+## Stack
 
-È il **primo** laboratorio del corso: non serve nulla dalle lezioni
-precedenti. Vi serve solo aver seguito la parte teorica della mattina
-(applicazione vs sistema, client-server, tre livelli, API, requisiti e casi
-d'uso, componenti) e avere a disposizione un computer, un modo per scrivere in
-Markdown e l'accesso a Gemini se volete usarlo nel confronto finale.
-
-## I passi
-
-### 1 · Team e traccia — 10 minuti
-
-Formate il team (3-4 persone). Il docente vi assegna un cliente tra i cinque
-disponibili e vi consegna la relativa richiesta. Decidete un canale di
-comunicazione del team (chat, board, cartella condivisa: quello che preferite)
-e ruoli iniziali indicativi — **verranno ruotati** nelle prossime lezioni,
-oggi servono solo per partire senza perdere tempo.
-
-**Producete**: nome del team, elenco membri, cliente assegnato — scritto da
-qualche parte visibile al docente (lavagna, foglio, canale condiviso).
-
-### 2 · Problema, attori, casi d'uso — 25 minuti
-
-Leggete la richiesta del vostro cliente. Riducete il problema a **tre righe**:
-cosa non funziona oggi, per chi, con quale conseguenza concreta. Elencate gli
-**attori** (ruoli, non persone) e per ciascuno i **casi d'uso** principali, nel
-formato *attore + azione + risultato osservabile*.
-
-**Producete**: `docs/requirements.md` (problema, requisiti funzionali e non
-funzionali) e `docs/use-cases.md` (attori e casi d'uso) — compilando i
-template in `template/`.
-
-### 3 · Componenti e architettura v1 — 25 minuti
-
-Applicate il metodo visto in teoria: sostantivi ricorrenti → candidati a
-entità, verbi ricorrenti → candidate a operazioni. Raggruppate ciò che cambia
-insieme in componenti, e per ciascuno scrivete una riga di responsabilità e
-una di **non**-responsabilità. Disegnate il diagramma: scatole, frecce con
-sopra cosa passa, cosa è dentro e cosa è fuori dal vostro perimetro.
-
-**Producete**: `docs/architecture-v1.md`, compilando il template — diagramma
-incluso (va bene descritto a parole, con un blocco Mermaid, o su carta
-fotografata: quello che riuscite a condividere col team in tempo).
-
-### 4 · Backlog e domande al cliente — 10 minuti
-
-Scrivete le prime **8-10 voci di backlog**, ordinate per valore e rischio, nel
-formato *"Come \<attore\> voglio \<azione\> per \<beneficio\>"* con relativo
-*"Fatto quando"*. In parallelo, elencate ogni punto della richiesta cliente
-che è rimasto ambiguo: non indovinatelo, scrivetelo come **domanda**.
-
-**Producete**: backlog iniziale e lista delle domande al cliente — usando
-`template/backlog.md` e `template/domande-cliente.md`, o le sezioni
-equivalenti se preferite un unico file.
-
-## Fatto quando
-
-- Il team esiste, ha un nome, un cliente assegnato e un canale di lavoro
-- `docs/requirements.md` contiene il problema in tre righe e almeno 3
-  requisiti funzionali e 3 non funzionali verificabili (sì/no, non aggettivi)
-- `docs/use-cases.md` elenca almeno 3 attori e, per ciascuno, almeno un caso
-  d'uso nel formato attore + azione + risultato
-- `docs/architecture-v1.md` elenca almeno 3 componenti, ciascuno con una riga
-  di responsabilità e una di non-responsabilità, più un diagramma con frecce
-  etichettate
-- Il backlog ha tra 8 e 10 voci, ordinate, ciascuna con un "Fatto quando"
-- Esiste una lista di almeno 3 domande da porre al cliente
-- Ogni membro del team sa spiegare a voce, senza leggere, il problema del
-  proprio cliente e la scelta di almeno un componente
-
-## Errori tipici
-
-- **Requisito non verificabile** ("il sistema deve essere intuitivo") — non
-  potrete mai dire se è stato rispettato, né in questo progetto né all'esame
-- **Confondere requisito con soluzione tecnica** ("usare React") — il cliente
-  non ha chiesto una tecnologia, ha chiesto di risolvere un problema
-- **Un componente con due responsabilità scritte con "e"** — è quasi sempre
-  segno che sono due componenti, non uno
-- **Ambiguità risolta a intuito** invece di scritta come domanda — vi costerà
-  rilavoro quando il cliente (il docente, più avanti) la chiarirà diversamente
-- **Diagramma senza etichette sulle frecce** — una scatola collegata a un'altra
-  senza dire cosa ci passa sopra non è ancora un'architettura
-- **Backlog con voci troppo grandi** ("fare il backend") — non è una voce di
-  backlog, è un intero progetto: scomponetela
-
-## Cosa consegnate
+*Dichiarate qui, in una riga per componente, cosa avete scelto — non è
+imposto dal corso, ma va detto esplicitamente perché chi clona il repository
+sappia cosa aspettarsi.*
 
 ```
-docs/
-├── requirements.md      il problema, i requisiti funzionali e non funzionali
-├── use-cases.md         attori e casi d'uso principali
-└── architecture-v1.md   componenti, responsabilità, diagramma, dipendenze
+Stack: <linguaggio/framework backend>
+Frontend: <framework o "nessuno, per ora">
+Database: <tecnologia scelta>
 ```
 
-- **Backlog iniziale** del team: 8-10 voci ordinate per valore e rischio
-- **Lista delle domande** da porre al cliente
+> Esempio: `Stack: Node.js + Express` · `Frontend: React` · `Database: PostgreSQL`
 
-Oggi basta che questi file esistano e siano condivisi nel team, in qualunque
-strumento stiate usando. Dalla lezione 2 vivranno nel repository Git del
-progetto.
+## Come si esegue
 
-## Se restate indietro
+*Anche solo pochi comandi indicativi, aggiornateli quando l'applicazione
+esiste davvero — oggi può bastare "non ancora eseguibile, in costruzione".*
 
-Puntate tutto sul passo 2 e 3: senza problema-attori-casi d'uso e senza almeno
-tre componenti con responsabilità chiare non avete nulla su cui costruire la
-prossima lezione. Se il tempo stringe, riducete il backlog a 5 voci e le
-domande al cliente a 2-3, ma non saltateli: sono l'unico modo per non
-inventare da soli ciò che andava chiesto.
+```
+<comando o comandi per avviare il progetto in locale, quando esisteranno>
+```
+
+## Struttura del repository
+
+```
+.
+├── README.md            questo file
+├── CONTRIBUTING.md       come contribuire: branch, commit, Definition of Done
+└── docs/
+    ├── requirements.md   requisiti (lezione 1)
+    ├── use-cases.md      casi d'uso (lezione 1)
+    └── architecture-v1.md architettura (lezione 1)
+```
+
+*Aggiornate l'albero quando aggiungete cartelle vere (es. `src/`, `tests/`):
+questo file deve restare uno specchio fedele di cosa c'è nel repository.*
+
+## Stato del progetto
+
+*Una riga onesta su cosa è già fatto e cosa manca — non un elenco di feature
+desiderate. Aggiornatela a ogni lezione.*
+
+> Esempio: "Lezione 2: repository creato, branch strategy concordata, backlog
+> trasferito in issue. Non esiste ancora codice applicativo."
+
+## Come contribuire
+
+Branch strategy, convenzioni di commit e Definition of Done sono in
+[`CONTRIBUTING.md`](./CONTRIBUTING.md) — leggetelo prima di aprire il primo branch.
