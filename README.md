@@ -119,3 +119,6 @@ tre componenti con responsabilità chiare non avete nulla su cui costruire la
 prossima lezione. Se il tempo stringe, riducete il backlog a 5 voci e le
 domande al cliente a 2-3, ma non saltateli: sono l'unico modo per non
 inventare da soli ciò che andava chiesto.
+
+
+ciao
