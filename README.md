@@ -121,7 +121,3 @@ domande al cliente a 2-3, ma non saltateli: sono l'unico modo per non
 inventare da soli ciò che andava chiesto.
 
 
-ciao gianluca
-
-buongiorno
-
