@@ -1,7 +1,5 @@
 # Requisiti — [Nome progetto] / [Cliente]
 
-| | |
-|---|---|
 | **Team** | *(nome team, componenti)* |
 | **Cliente** | *(es. NordFacility S.r.l.)* |
 | **Data** | 23/09/2026 |

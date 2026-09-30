@@ -6,7 +6,7 @@
 | **Cliente** | *(es. NordFacility S.r.l.)* |
 | **Data** | 23/09/2026 |
 
-*Ogni punto della richiesta cliente rimasto ambiguo va scritto qui come
+*Ogni punto della richiezzsta cliente rimasto ambiguo va scritto qui come
 domanda, non deciso a intuito. Ciò che resta ambiguo non è un requisito: è
 una domanda da porre al cliente.*
 
