@@ -4,7 +4,7 @@
 |---|---|
 | **Cliente** | *veloce24* |
 | **Team** | *GLS* |
-| **Membri** | *Dennis Pasquali*|| *Francesco Plateroti*|| *Michael Nardelli*|| *Gianluca Vivaldi*|| *Amine Reddad*|| *Amine Reddad*|| *Christian Pellegrini*|
+| **Membri** | *Dennis Pasquali*,  *Francesco Plateroti*, *Michael Nardelli*, *Gianluca Vivaldi*, *Amine Reddad*, *Christian Pellegrini*
 | **Data** | *07/10/2026* |
 | **Versione** | *v0.1* |
 
