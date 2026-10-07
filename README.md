@@ -1,6 +1,5 @@
 # LastMileDelivery
 
-| | |
 |---|---|
 | **Cliente** | *veloce24* |
 | **Team** | *GLS* |
