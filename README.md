@@ -2,20 +2,16 @@
 
 | | |
 |---|---|
-| **Cliente** | *Nome del cliente simulato — es. "NordFacility S.r.l."* |
-| **Team** | *Nome/numero team, es. "Team 3"* |
-| **Membri** | *Un nome per riga, con il ruolo se già definito* |
-| **Data** | *Data di questo commit del README* |
-| **Versione** | *v0.1 — aumenta quando il contenuto cambia in modo sostanziale* |
+| **Cliente** | *veloce24* |
+| **Team** | *GLS* |
+| **Membri** | *Dennis Pasquali*|| *Francesco Plateroti*|| *Michael Nardelli*|| *Gianluca Vivaldi*|| *Amine Reddad*|| *Amine Reddad*|| *Christian Pellegrini*|
+| **Data** | *07/10/2026* |
+| **Versione** | *v0.1* |
 
 ## Cosa fa questo progetto
 
-*In 2-3 righe, senza gergo tecnico: quale problema del cliente risolve.
-Rimandate ai dettagli in `docs/requirements.md`, non riscriveteli qui.*
-
-> Esempio (Smart Maintenance, NordFacility): applicazione per centralizzare le
-> segnalazioni di guasto sugli edifici gestiti, assegnare gli interventi ai
-> tecnici e seguirne lo stato dall'apertura alla chiusura.
+*- Centralizzare le spedizione
+- e il suo ciclo di vita di spedizione *
 
 ## Stack
 
@@ -57,8 +53,7 @@ questo file deve restare uno specchio fedele di cosa c'è nel repository.*
 
 ## Stato del progetto
 
-*Una riga onesta su cosa è già fatto e cosa manca — non un elenco di feature
-desiderate. Aggiornatela a ogni lezione.*
+*in progettazione *
 
 > Esempio: "Lezione 2: repository creato, branch strategy concordata, backlog
 > trasferito in issue. Non esiste ancora codice applicativo."
