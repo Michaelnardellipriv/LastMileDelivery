@@ -1,9 +1,9 @@
-# Backlog iniziale — [Nome progetto] / [Cliente]
+# Backlog iniziale — [Last Mile Delivery] / [Veloce24]
 
 | | |
 |---|---|
-| **Team** | *(nome team, componenti)* |
-| **Cliente** | *(es. NordFacility S.r.l.)* |
+| **Team** | *(GLS, Francesco Platenotti, Dennis Pasquali, Gianluca Vivaldi, Micheal Nandelli, Mohammad Amine Reddad, Pellegrini Christian)* |
+| **Cliente** | *Veloce24* |
 | **Data** | 23/09/2026 |
 
 *8-10 voci, ordinate per valore e rischio: prima le cose che fanno paura,
