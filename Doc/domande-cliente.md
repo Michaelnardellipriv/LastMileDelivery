@@ -1,9 +1,9 @@
-# Domande al cliente — \[Nome progetto\] / \[Cliente\]
+# Domande al cliente — \[Last Mile Delivery\] / \[Veloce24\]
 
 |  |  |
 | :---- | :---- |
-| **Team** | *(nome team, componenti)* |
-| **Cliente** | *(es. NordFacility S.r.l.)* |
+| **Team** | *(GLS, Francesco Platenotti, Dennis Pasquali, Gianluca Vivaldi, Micheal Nandelli, Mohammad Amine Reddad, Pellegrini Christian)* |
+| **Cliente** | *Veloce24* |
 | **Data** | 23/09/2026 |
 
 *Ogni punto della richiesta cliente rimasto ambiguo va scritto qui come domanda, non deciso a intuito. Ciò che resta ambiguo non è un requisito: è una domanda da porre al cliente.*
