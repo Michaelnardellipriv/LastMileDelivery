@@ -2,8 +2,8 @@
 
 | | |
 |---|---|
-| **Progetto** | *Veloce 24* |
-| **Team** | *GLS/*3 |
+| **Progetto** | *Last Mile Delivery* |
+| **Team** | *GLS / Francesco Platenotti, Dennis Pasquali, Gianluca Vivaldi, Micheal Nandelli, Mohammad Amine Reddad, Pellegrini Christian* |
 | **Data** | 30/09/2026* |
 | **Versione** | *v0.1 — riscrivetela quando le regole cambiano davvero* |
 
@@ -49,10 +49,10 @@ futuro — anche voi, tra un mese — deve capire perché quel commit esiste.*
 
 *Rispondete a queste tre domande, in modo verificabile:*
 
-- Chi può fare merge su `main`? lo si fa insieme in team
-- Quante approvazioni servono prima del merge? da tutto il team
-- Cosa NON è accettabile in una review? approvare senza aver letto il
-  diff, bloccare per una preferenza di stile senza motivo,approvarla senza dirlo a nessuno
+- Chi può fare merge su `main`? Lo si fa insieme in team.
+- Quante approvazioni servono prima del merge? Da tutto il team.
+- Cosa NON è accettabile in una review? Approvare senza aver letto il
+  diff, bloccare per una preferenza di stile senza motivo, approvarla senza dirlo a nessuno
 
 ## Gestione dei conflitti
 
@@ -69,6 +69,32 @@ non è decorativa, è il criterio con cui si accetta o si rifiuta una PR.*
 > Esempio: "una issue è fatta quando: il codice è mergiato su `main` · esiste
 > un modo di verificarla (test o passi manuali) · la issue collegata è
 > aggiornata a 'fatto' · nessun segreto o dato finto è rimasto nel codice.
+
+-Requisiti e Funzionalità
+
+Tutti i criteri di accettazione specifici ("Fatto quando") della voce di backlog sono soddisfatti e verificati.
+
+-Qualità del Codice e Architettura
+
+Il codice è stato revisionato (Code Review) da almeno un altro membro del team ed è integrato nel ramo principale del repository.
+
+I vincoli di dominio sono rispettati: i passaggi di stato non validi nel workflow della spedizione vengono bloccati dal backend.   
+
+-Sicurezza e Accessi (RBAC)
+
+I ruoli e i permessi sono applicati: il cliente destinatario vede solo la propria spedizione (senza note interne), mentre il corriere agisce solo sulle spedizioni a lui assegnate.   
+
+-Testing e Integrità
+
+Le API sono documentate e testate (es. test d'integrazione o Postman/Automated tests) per verificare il successo e la gestione degli errori (HTTP 401, 403, ecc.).   
+
+La persistenza dei dati è verificata: in caso di riavvio del server/container, i dati e lo storico delle spedizioni rimangono inalterati.   
+
+-Documentazione e Rilascio
+
+L'API o l'endpoint è documentato (es. OpenAPI / Swagger).   
+
+Le istruzioni per il deploy e l'avvio locale del componente/servizio sono aggiornate.
 
 ## Issue e board
 
