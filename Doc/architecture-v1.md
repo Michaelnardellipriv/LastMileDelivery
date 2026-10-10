@@ -1,9 +1,9 @@
-# Architettura v1 — \[Nome progetto\] / \[Cliente\]
+# Architettura v1 — \[Last Mile Delivery\] / \[Veloce24\]
 
 |  |  |
 | :---- | :---- |
-| **Team** | *(nome team, componenti)* |
-| **Cliente** | *(es. NordFacility S.r.l.)* |
+| **Team** | *(GLS, Francesco Platenotti, Dennis Pasquali, Gianluca Vivaldi, Micheal Nandelli, Mohammad Amine Reddad, Pellegrini Christian)* |
+| **Cliente** | *Veloce24* |
 | **Data** | 23/09/2026 |
 | **Versione** | v1 — provvisoria per definizione, la confronterete con la v2 a dicembre |
 
