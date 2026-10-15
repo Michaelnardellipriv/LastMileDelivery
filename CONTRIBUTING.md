@@ -49,7 +49,7 @@ futuro — anche voi, tra un mese — deve capire perché quel commit esiste.*
 
 *Rispondete a queste tre domande, in modo verificabile:*
 
-- Chi può fare merge su `main`? lo si fa insieme in team tranne per la documentazione
+- Chi può fare merge su `main`? lo si fa insieme in team tranne per la documentazione questa puo essere pushata direttamente sul main senza che debba essere rivista da tutto il team
 - Quante approvazioni servono prima del merge? da tutto il team
 - Cosa NON è accettabile in una review? approvare senza aver letto il
   diff, bloccare per una preferenza di stile senza motivo,approvarla senza dirlo a nessuno
