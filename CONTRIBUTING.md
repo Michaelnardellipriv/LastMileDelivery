@@ -49,7 +49,7 @@ futuro — anche voi, tra un mese — deve capire perché quel commit esiste.*
 
 *Rispondete a queste tre domande, in modo verificabile:*
 
-- Chi può fare merge su `main`? lo si fa insieme in team
+- Chi può fare merge su `main`? lo si fa insieme in team tranne per la documentazione
 - Quante approvazioni servono prima del merge? da tutto il team
 - Cosa NON è accettabile in una review? approvare senza aver letto il
   diff, bloccare per una preferenza di stile senza motivo,approvarla senza dirlo a nessuno
@@ -66,9 +66,7 @@ futuro — anche voi, tra un mese — deve capire perché quel commit esiste.*
 *Riprendete la Definition of Done concordata alla lezione 1 (se già scritta):
 non è decorativa, è il criterio con cui si accetta o si rifiuta una PR.*
 
-> Esempio: "una issue è fatta quando: il codice è mergiato su `main` · esiste
-> un modo di verificarla (test o passi manuali) · la issue collegata è
-> aggiornata a 'fatto' · nessun segreto o dato finto è rimasto nel codice.
+> una issue è fatta quando: il codice è mergiato su `main` dopo esser stata verificata insieme 
 
 ## Issue e board
 
