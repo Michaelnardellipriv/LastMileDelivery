@@ -1,8 +1,8 @@
-# Attori e casi d'uso — \[Nome progetto\] / \[Cliente\]
+# Attori e casi d'uso — \[Last Mile Delivery\] / \[Veloce24\]
 
 |  |  |
 | :---- | :---- |
-| **Team** | *(nome team, componenti)* |
+| **Team** | *(GLS, Dennis Pasquali, Francesco Plateroti, Michael Nardelli, Gianluca Vivaldi, Amine Reddad, Christian Pellegrini )* |
 | **Cliente** | *(Last mile delivery S.r.l.)* |
 | **Data** | 23/09/2026 |
 | **Versione** | v1 |
