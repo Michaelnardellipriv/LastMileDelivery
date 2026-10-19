@@ -11,7 +11,7 @@
 
 *In tre righe: cosa non funziona oggi per il cliente, per chi, con quale conseguenza concreta. Non descrivete ancora una soluzione.*
 
-> Per l’azienda last mile delivery il problema riguarda il fatto che le spedizioni e il loro ciclo di vita viene tenuto tramite fogli condivisi e telefonate rendendo molto difficile all’azienda avere una visione d’insieme su uno o più spedizioni che sia univoca per tutti gli operatori, inoltre si ha un problema anche per quanto riguarda possibile perdita di dati se gli operatori con le telefonate non scrivono poi nei loro fogli condivisi la nuova spedizione o i dati associati a essa  
+> Per l’azienda Veloce24 il problema riguarda il fatto che le spedizioni e il loro ciclo di vita viene tenuto tramite fogli condivisi e telefonate rendendo molto difficile all’azienda avere una visione d’insieme su uno o più spedizioni che sia univoca per tutti gli operatori, inoltre si ha un problema anche per quanto riguarda possibile perdita di dati se gli operatori con le telefonate non scrivono poi nei loro fogli condivisi la nuova spedizione o i dati associati a essa  
 >   
 >   
 > Obiettivi del progetto  
