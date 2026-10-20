@@ -54,7 +54,6 @@ CREATE TABLE utenti (
     cognome      VARCHAR(100) NOT NULL,
     prefisso     VARCHAR(5)   NOT NULL,          -- es. '+39'
     nr_telefono  VARCHAR(20)  NOT NULL,
-    pwd_hash     VARCHAR(255) NOT NULL,
     email        VARCHAR(254) NOT NULL,
     CONSTRAINT uq_utenti_email    UNIQUE (email),
     CONSTRAINT uq_utenti_telefono UNIQUE (prefisso, nr_telefono),
@@ -67,22 +66,27 @@ CREATE TABLE clienti (
     id         INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     id_utente  INTEGER NOT NULL UNIQUE
                REFERENCES utenti (id) ON UPDATE CASCADE ON DELETE RESTRICT
+    
 );
 
 CREATE TABLE corrieri (
     id         INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    pwd_hash     VARCHAR(255) NOT NULL,
     id_utente  INTEGER NOT NULL UNIQUE
                REFERENCES utenti (id) ON UPDATE CASCADE ON DELETE RESTRICT
+            
 );
 
 CREATE TABLE operatori_logistici (
     id         INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    pwd_hash     VARCHAR(255) NOT NULL,
     id_utente  INTEGER NOT NULL UNIQUE
                REFERENCES utenti (id) ON UPDATE CASCADE ON DELETE RESTRICT
 );
 
 CREATE TABLE amministratori (
     id         INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    pwd_hash     VARCHAR(255) NOT NULL,
     id_utente  INTEGER NOT NULL UNIQUE
                REFERENCES utenti (id) ON UPDATE CASCADE ON DELETE RESTRICT
 );
