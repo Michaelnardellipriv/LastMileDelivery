@@ -1,0 +1,1795 @@
+{
+  "version": 2,
+  "nodes": [
+    {
+      "id": "1744ba4663ee381a115e30b0e",
+      "type": "entity",
+      "x": 2215.691277759278,
+      "y": 404.2279131192938,
+      "w": 140,
+      "h": 60,
+      "label": "Utente",
+      "attributes": [
+        {
+          "id": "423d70a34a4c181a115e329bd",
+          "name": "id",
+          "type": "int",
+          "key": true,
+          "nullable": false,
+          "multivalued": false,
+          "composite": false,
+          "children": []
+        },
+        {
+          "id": "54ab2f843fd1581a115e3a5ca",
+          "name": "nome",
+          "type": "string",
+          "key": false,
+          "nullable": false,
+          "multivalued": false,
+          "composite": false,
+          "children": []
+        },
+        {
+          "id": "42bc821c92cc381a115e3c470",
+          "name": "cognome",
+          "type": "string",
+          "key": false,
+          "nullable": false,
+          "multivalued": false,
+          "composite": false,
+          "children": []
+        },
+        {
+          "id": "ea6fe63e685371a115e3d7fc",
+          "name": "email",
+          "type": "string",
+          "key": false,
+          "nullable": false,
+          "multivalued": false,
+          "composite": false,
+          "children": []
+        },
+        {
+          "id": "91a38b26dc24a1a115e3ffb3",
+          "name": "pwd_hash",
+          "type": "string",
+          "key": false,
+          "nullable": false,
+          "multivalued": false,
+          "composite": false,
+          "children": []
+        },
+        {
+          "id": "cc1bd528092c41a13997395b",
+          "name": "nr telefono",
+          "type": "string",
+          "key": false,
+          "nullable": false,
+          "multivalued": false,
+          "composite": false,
+          "children": []
+        },
+        {
+          "id": "cf7d4fb75e5771a139975ca3",
+          "name": "prefisso",
+          "type": "string",
+          "key": false,
+          "nullable": false,
+          "multivalued": false,
+          "composite": false,
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "attr:1744ba4663ee381a115e30b0e:423d70a34a4c181a115e329bd",
+      "type": "key_attribute",
+      "x": 2355.691277759278,
+      "y": 319.8679131192938,
+      "r": 10,
+      "label": "id",
+      "pinned": false
+    },
+    {
+      "id": "attr:1744ba4663ee381a115e30b0e:54ab2f843fd1581a115e3a5ca",
+      "type": "attribute",
+      "x": 2355.691277759278,
+      "y": 383.82791311929384,
+      "r": 10,
+      "label": "nome",
+      "pinned": false
+    },
+    {
+      "id": "attr:1744ba4663ee381a115e30b0e:42bc821c92cc381a115e3c470",
+      "type": "attribute",
+      "x": 2355.691277759278,
+      "y": 447.7879131192938,
+      "r": 10,
+      "label": "cognome",
+      "pinned": false
+    },
+    {
+      "id": "attr:1744ba4663ee381a115e30b0e:ea6fe63e685371a115e3d7fc",
+      "type": "attribute",
+      "x": 2098.691277759278,
+      "y": 504.2279131192938,
+      "r": 10,
+      "label": "email",
+      "pinned": false
+    },
+    {
+      "id": "attr:1744ba4663ee381a115e30b0e:91a38b26dc24a1a115e3ffb3",
+      "type": "attribute",
+      "x": 2176.691277759278,
+      "y": 504.2279131192938,
+      "r": 10,
+      "label": "pwd_hash",
+      "pinned": false
+    },
+    {
+      "id": "91791fc770b2181a115e4aab7",
+      "type": "entity",
+      "x": 1175.9661936961443,
+      "y": 980.2811965817506,
+      "w": 140,
+      "h": 60,
+      "label": "Corriere",
+      "attributes": []
+    },
+    {
+      "id": "5920c7c5197da1a115e577c1",
+      "type": "entity",
+      "x": 2165.240122911823,
+      "y": 970.0834959753927,
+      "w": 140,
+      "h": 60,
+      "label": "Cliente",
+      "attributes": [
+        {
+          "id": "7ab1d0b72dfed81a139c51126",
+          "name": "ID",
+          "type": "string",
+          "key": true,
+          "nullable": false,
+          "multivalued": false,
+          "composite": false,
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "3bdfa3001178781a115e76a40",
+      "type": "entity",
+      "x": 2261.685044706689,
+      "y": 1147.5665038240677,
+      "w": 140,
+      "h": 60,
+      "label": "Operatore logistico",
+      "attributes": []
+    },
+    {
+      "id": "8853be76e2d3e81a13990f032",
+      "type": "entity",
+      "x": 1711.0252936106672,
+      "y": 292.66790796799984,
+      "w": 140,
+      "h": 60,
+      "label": "Nazione",
+      "attributes": [
+        {
+          "id": "f44f738ab09671a13991064d",
+          "name": "id",
+          "type": "string",
+          "key": true,
+          "nullable": false,
+          "multivalued": false,
+          "composite": false,
+          "children": []
+        },
+        {
+          "id": "413989dedf31e1a139923c5e",
+          "name": "nome",
+          "type": "string",
+          "key": false,
+          "nullable": false,
+          "multivalued": false,
+          "composite": false,
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "attr:8853be76e2d3e81a13990f032:f44f738ab09671a13991064d",
+      "type": "key_attribute",
+      "x": 1851.0252936106672,
+      "y": 240.28790796799984,
+      "r": 10,
+      "label": "id",
+      "pinned": false
+    },
+    {
+      "id": "6d454a6345eca1a139918ed8",
+      "type": "entity",
+      "x": 1326.050129869576,
+      "y": 315.79362451781805,
+      "w": 140,
+      "h": 60,
+      "label": "Regione",
+      "attributes": [
+        {
+          "id": "3c7de776717c81a13991b6a1",
+          "name": "nome",
+          "type": "string",
+          "key": false,
+          "nullable": false,
+          "multivalued": false,
+          "composite": false,
+          "children": []
+        },
+        {
+          "id": "2b53ae13f7d3181a1399226e3",
+          "name": "id",
+          "type": "string",
+          "key": true,
+          "nullable": false,
+          "multivalued": false,
+          "composite": false,
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "attr:6d454a6345eca1a139918ed8:3c7de776717c81a13991b6a1",
+      "type": "attribute",
+      "x": 1466.050129869576,
+      "y": 263.41362451781805,
+      "r": 10,
+      "label": "nome",
+      "pinned": false
+    },
+    {
+      "id": "attr:6d454a6345eca1a139918ed8:2b53ae13f7d3181a1399226e3",
+      "type": "key_attribute",
+      "x": 1466.050129869576,
+      "y": 327.37362451781803,
+      "r": 10,
+      "label": "id",
+      "pinned": false
+    },
+    {
+      "id": "attr:8853be76e2d3e81a13990f032:413989dedf31e1a139923c5e",
+      "type": "attribute",
+      "x": 1851.0252936106672,
+      "y": 304.2479079679998,
+      "r": 10,
+      "label": "nome",
+      "pinned": false
+    },
+    {
+      "id": "b8dbd345f04f21a139926769",
+      "type": "entity",
+      "x": 1153.312561241294,
+      "y": 182.06157451430488,
+      "w": 140,
+      "h": 60,
+      "label": "Citta",
+      "attributes": [
+        {
+          "id": "826443675a76a81a13992805b",
+          "name": "nome",
+          "type": "string",
+          "key": false,
+          "nullable": false,
+          "multivalued": false,
+          "composite": false,
+          "children": []
+        },
+        {
+          "id": "a96f1a9694b41a139929224",
+          "name": "id",
+          "type": "string",
+          "key": true,
+          "nullable": false,
+          "multivalued": false,
+          "composite": false,
+          "children": []
+        },
+        {
+          "id": "b07588e9aa6e381a13bac0e5d",
+          "name": "cod_postale",
+          "type": "string",
+          "key": false,
+          "nullable": false,
+          "multivalued": false,
+          "composite": false,
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "attr:b8dbd345f04f21a139926769:826443675a76a81a13992805b",
+      "type": "attribute",
+      "x": 1293.312561241294,
+      "y": 97.7015745143049,
+      "r": 10,
+      "label": "nome",
+      "pinned": false
+    },
+    {
+      "id": "attr:b8dbd345f04f21a139926769:a96f1a9694b41a139929224",
+      "type": "key_attribute",
+      "x": 1293.312561241294,
+      "y": 161.66157451430487,
+      "r": 10,
+      "label": "id",
+      "pinned": false
+    },
+    {
+      "id": "ddc124248754f1a13992be44",
+      "type": "entity",
+      "x": 867.5253349819325,
+      "y": 570.1327542981138,
+      "w": 140,
+      "h": 60,
+      "label": "Indirizzo",
+      "attributes": [
+        {
+          "id": "42118a39b5fcc81a13992d778",
+          "name": "id",
+          "type": "string",
+          "key": true,
+          "nullable": false,
+          "multivalued": false,
+          "composite": false,
+          "children": []
+        },
+        {
+          "id": "1747ba6f68b41a13992f776",
+          "name": "via",
+          "type": "string",
+          "key": false,
+          "nullable": false,
+          "multivalued": false,
+          "composite": false,
+          "children": []
+        },
+        {
+          "id": "0467e6aa9880e81a139931210",
+          "name": "civico",
+          "type": "int",
+          "key": false,
+          "nullable": false,
+          "multivalued": false,
+          "composite": false,
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "attr:ddc124248754f1a13992be44:42118a39b5fcc81a13992d778",
+      "type": "key_attribute",
+      "x": 1007.5253349819325,
+      "y": 485.7727542981138,
+      "r": 10,
+      "label": "id",
+      "pinned": false
+    },
+    {
+      "id": "attr:ddc124248754f1a13992be44:1747ba6f68b41a13992f776",
+      "type": "attribute",
+      "x": 1007.5253349819325,
+      "y": 549.7327542981138,
+      "r": 10,
+      "label": "via",
+      "pinned": false
+    },
+    {
+      "id": "attr:ddc124248754f1a13992be44:0467e6aa9880e81a139931210",
+      "type": "attribute",
+      "x": 1007.5253349819325,
+      "y": 613.6927542981138,
+      "r": 10,
+      "label": "civico",
+      "pinned": false
+    },
+    {
+      "id": "d7a70af86712f1a1399357b2",
+      "type": "relation",
+      "x": 1546.424605226667,
+      "y": 294.02824423563624,
+      "w": 120,
+      "h": 70,
+      "label": "è in",
+      "attributes": []
+    },
+    {
+      "id": "553ab025e29b581a13993d454",
+      "type": "relation",
+      "x": 1150.5667513444853,
+      "y": 314.4332882501817,
+      "w": 120,
+      "h": 70,
+      "label": "è in",
+      "attributes": []
+    },
+    {
+      "id": "2a5e25d8670f981a139943b01",
+      "type": "relation",
+      "x": 919.3095858463032,
+      "y": 196.084032965818,
+      "w": 120,
+      "h": 70,
+      "label": "Ha",
+      "attributes": []
+    },
+    {
+      "id": "attr:1744ba4663ee381a115e30b0e:cc1bd528092c41a13997395b",
+      "type": "attribute",
+      "x": 2254.691277759278,
+      "y": 504.2279131192938,
+      "r": 10,
+      "label": "nr telefono",
+      "pinned": false
+    },
+    {
+      "id": "attr:1744ba4663ee381a115e30b0e:cf7d4fb75e5771a139975ca3",
+      "type": "attribute",
+      "x": 2332.691277759278,
+      "y": 504.2279131192938,
+      "r": 10,
+      "label": "prefisso",
+      "pinned": false
+    },
+    {
+      "id": "81da25c965bae81a13997a64c",
+      "type": "entity",
+      "x": 1407.9837862498503,
+      "y": 703.5180428262166,
+      "w": 140,
+      "h": 60,
+      "label": "Spedizione",
+      "attributes": [
+        {
+          "id": "51b06c553a6311a13997ec7b",
+          "name": "id",
+          "type": "string",
+          "key": true,
+          "nullable": false,
+          "multivalued": false,
+          "composite": false,
+          "children": []
+        },
+        {
+          "id": "5b797a3189b0f81a139980cd3",
+          "name": "stato",
+          "type": "string",
+          "key": false,
+          "nullable": false,
+          "multivalued": false,
+          "composite": false,
+          "children": []
+        },
+        {
+          "id": "5584dcc3dc5be1a13b7bbc47",
+          "name": "is reso",
+          "type": "string",
+          "key": false,
+          "nullable": false,
+          "multivalued": false,
+          "composite": false,
+          "children": []
+        },
+        {
+          "id": "3f4a0044627031a13b85367e",
+          "name": "cod_ordine",
+          "type": "string",
+          "key": false,
+          "nullable": false,
+          "multivalued": false,
+          "composite": false,
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "attr:81da25c965bae81a13997a64c:51b06c553a6311a13997ec7b",
+      "type": "key_attribute",
+      "x": 1547.9837862498503,
+      "y": 619.1580428262166,
+      "r": 10,
+      "label": "id",
+      "pinned": false
+    },
+    {
+      "id": "attr:81da25c965bae81a13997a64c:5b797a3189b0f81a139980cd3",
+      "type": "attribute",
+      "x": 1547.9837862498503,
+      "y": 683.1180428262167,
+      "r": 10,
+      "label": "stato",
+      "pinned": false
+    },
+    {
+      "id": "rel:isa:f2b9ffe38751c81a1399590d8:4e5155c03baf51a115e52a69",
+      "type": "relation",
+      "label": "è un",
+      "name": "è un",
+      "w": 120,
+      "h": 70,
+      "x": 2028.9486362258829,
+      "y": 658.2193116620575,
+      "attributes": []
+    },
+    {
+      "id": "rel:isa:f2b9ffe38751c81a1399590d8:5920c7c5197da1a115e577c1",
+      "type": "relation",
+      "label": "è un",
+      "name": "è un",
+      "w": 120,
+      "h": 70,
+      "x": 2201.568185117538,
+      "y": 835.3402863411544,
+      "attributes": []
+    },
+    {
+      "id": "rel:isa:f2b9ffe38751c81a1399590d8:3bdfa3001178781a115e76a40",
+      "type": "relation",
+      "label": "è un",
+      "name": "è un",
+      "w": 120,
+      "h": 70,
+      "x": 2348.568484431598,
+      "y": 979.2308742158773,
+      "attributes": []
+    },
+    {
+      "id": "ec16ada2834bf1a139b6cd97",
+      "type": "entity",
+      "x": 2720.8524525000416,
+      "y": 1270.8373632736518,
+      "w": 140,
+      "h": 60,
+      "label": "Amministratore",
+      "attributes": []
+    },
+    {
+      "id": "fa6da1e625cb81a139b77602",
+      "type": "relation",
+      "x": 2521.691239423358,
+      "y": 1252.8640175199982,
+      "w": 120,
+      "h": 70,
+      "label": "è un",
+      "attributes": []
+    },
+    {
+      "id": "94ffe82e701cc1a139b89f8c",
+      "type": "entity",
+      "x": 2386.538462906809,
+      "y": 1421.4400328874356,
+      "w": 140,
+      "h": 60,
+      "label": "Configurazioni",
+      "attributes": []
+    },
+    {
+      "id": "4145a4edd7d4081a139b8c950",
+      "type": "relation",
+      "x": 2585.797981272225,
+      "y": 1367.7095882696121,
+      "w": 120,
+      "h": 70,
+      "label": "gestisce",
+      "attributes": []
+    },
+    {
+      "id": "attr:5920c7c5197da1a115e577c1:7ab1d0b72dfed81a139c51126",
+      "type": "key_attribute",
+      "x": 2305.240122911823,
+      "y": 949.6834959753927,
+      "r": 10,
+      "label": "ID",
+      "pinned": false
+    },
+    {
+      "id": "972ae910cfb1c81a13b56b9ec",
+      "type": "relation",
+      "x": 1839.9106100960787,
+      "y": 848.5734775018192,
+      "w": 120,
+      "h": 70,
+      "label": "Spedisce",
+      "attributes": [
+        {
+          "id": "87e3ac9b2c9c181a13b64b2fb",
+          "name": "dataora richiesta sp",
+          "type": "string",
+          "key": false,
+          "nullable": false,
+          "multivalued": false,
+          "composite": false,
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "27df16ac37b561a13b579e97",
+      "type": "relation",
+      "x": 1850.2224365925888,
+      "y": 923.4399283424834,
+      "w": 120,
+      "h": 70,
+      "label": "Crea",
+      "attributes": [
+        {
+          "id": "6624a06b527b11a13b655ab1",
+          "name": "creata_il",
+          "type": "string",
+          "key": false,
+          "nullable": false,
+          "multivalued": false,
+          "composite": false,
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "efe012d4397c61a13b586549",
+      "type": "relation",
+      "x": 1799.675494974043,
+      "y": 1026.5785998967594,
+      "w": 120,
+      "h": 70,
+      "label": "archivia",
+      "attributes": [
+        {
+          "id": "7070d2fe76dc51a13b65a439",
+          "name": "archiviata_il",
+          "type": "string",
+          "key": false,
+          "nullable": false,
+          "multivalued": false,
+          "composite": false,
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "89ebb8df4b1ed1a13b59f6fa",
+      "type": "relation",
+      "x": 1914.9192923771736,
+      "y": 788.3800211699491,
+      "w": 120,
+      "h": 70,
+      "label": "Riceve",
+      "attributes": []
+    },
+    {
+      "id": "fa7bb2f982ccc1a13b5f324c",
+      "type": "entity",
+      "x": 1448.727083579201,
+      "y": 1164.3217215469808,
+      "w": 140,
+      "h": 60,
+      "label": "Assegnazioni",
+      "attributes": []
+    },
+    {
+      "id": "546fffa34444881a13b5f5827",
+      "type": "relation",
+      "x": 1718.9226704010036,
+      "y": 1098.0319479786044,
+      "w": 120,
+      "h": 70,
+      "label": "assegna",
+      "attributes": [
+        {
+          "id": "7b643f2a6d18181a13b65d882",
+          "name": "creata_il",
+          "type": "string",
+          "key": false,
+          "nullable": false,
+          "multivalued": false,
+          "composite": false,
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "a231adb9f0cab1a13b5fc85e",
+      "type": "relation",
+      "x": 1623.0942674207631,
+      "y": 991.2446964160681,
+      "w": 120,
+      "h": 70,
+      "label": "Riguarda",
+      "attributes": []
+    },
+    {
+      "id": "7e0c16aca7c971a13b60b104",
+      "type": "relation",
+      "x": 1369.0578036286352,
+      "y": 993.866517931817,
+      "w": 120,
+      "h": 70,
+      "label": "Riguardano",
+      "attributes": []
+    },
+    {
+      "id": "d8bd3a6ceb9761a13b6196b0",
+      "type": "relation",
+      "x": 1277.8272142154756,
+      "y": 551.8687638618878,
+      "w": 120,
+      "h": 70,
+      "label": "Possiede indirizzo r",
+      "attributes": []
+    },
+    {
+      "id": "4fae267bff38f81a13b635279",
+      "type": "relation",
+      "x": 1201.2705945048392,
+      "y": 611.6021960852888,
+      "w": 120,
+      "h": 70,
+      "label": "Posside indirizzo co",
+      "attributes": []
+    },
+    {
+      "id": "attr:972ae910cfb1c81a13b56b9ec:87e3ac9b2c9c181a13b64b2fb",
+      "type": "attribute",
+      "x": 1970.9106100960787,
+      "y": 824.5734775018192,
+      "r": 10,
+      "label": "dataora richiesta sp",
+      "pinned": false
+    },
+    {
+      "id": "attr:27df16ac37b561a13b579e97:6624a06b527b11a13b655ab1",
+      "type": "attribute",
+      "x": 1981.2224365925888,
+      "y": 899.4399283424834,
+      "r": 10,
+      "label": "creata_il",
+      "pinned": false
+    },
+    {
+      "id": "attr:efe012d4397c61a13b586549:7070d2fe76dc51a13b65a439",
+      "type": "attribute",
+      "x": 1930.675494974043,
+      "y": 1002.5785998967594,
+      "r": 10,
+      "label": "archiviata_il",
+      "pinned": false
+    },
+    {
+      "id": "attr:546fffa34444881a13b5f5827:7b643f2a6d18181a13b65d882",
+      "type": "attribute",
+      "x": 1849.9226704010036,
+      "y": 1074.0319479786044,
+      "r": 10,
+      "label": "creata_il",
+      "pinned": false
+    },
+    {
+      "id": "attr:81da25c965bae81a13997a64c:5584dcc3dc5be1a13b7bbc47",
+      "type": "attribute",
+      "x": 1547.9837862498503,
+      "y": 747.0780428262166,
+      "r": 10,
+      "label": "is reso",
+      "pinned": false
+    },
+    {
+      "id": "attr:81da25c965bae81a13997a64c:3f4a0044627031a13b85367e",
+      "type": "attribute",
+      "x": 1407.9837862498503,
+      "y": 803.5180428262166,
+      "r": 10,
+      "label": "cod_ordine",
+      "pinned": false
+    },
+    {
+      "id": "a1a2393c5f6921a13b917676",
+      "type": "entity",
+      "x": 1183.7468734805257,
+      "y": 1229.751475426677,
+      "w": 140,
+      "h": 60,
+      "label": "Note",
+      "attributes": [
+        {
+          "id": "0a41faef5289f1a13b918ec4",
+          "name": "is_interna",
+          "type": "string",
+          "key": false,
+          "nullable": false,
+          "multivalued": false,
+          "composite": false,
+          "children": []
+        },
+        {
+          "id": "32e391a62e6a81a13b91a44b",
+          "name": "motivo",
+          "type": "string",
+          "key": false,
+          "nullable": false,
+          "multivalued": false,
+          "composite": false,
+          "children": []
+        },
+        {
+          "id": "be1c208bc97ce1a13b91b6fa",
+          "name": "creata_il",
+          "type": "string",
+          "key": false,
+          "nullable": false,
+          "multivalued": false,
+          "composite": false,
+          "children": []
+        },
+        {
+          "id": "68122ce0a5c0c81a13b91d572",
+          "name": "nota",
+          "type": "string",
+          "key": false,
+          "nullable": false,
+          "multivalued": false,
+          "composite": false,
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "attr:a1a2393c5f6921a13b917676:0a41faef5289f1a13b918ec4",
+      "type": "attribute",
+      "x": 1323.7468734805257,
+      "y": 1145.391475426677,
+      "r": 10,
+      "label": "is_interna",
+      "pinned": false
+    },
+    {
+      "id": "attr:a1a2393c5f6921a13b917676:32e391a62e6a81a13b91a44b",
+      "type": "attribute",
+      "x": 1323.7468734805257,
+      "y": 1209.3514754266769,
+      "r": 10,
+      "label": "motivo",
+      "pinned": false
+    },
+    {
+      "id": "attr:a1a2393c5f6921a13b917676:be1c208bc97ce1a13b91b6fa",
+      "type": "attribute",
+      "x": 1323.7468734805257,
+      "y": 1273.311475426677,
+      "r": 10,
+      "label": "creata_il",
+      "pinned": false
+    },
+    {
+      "id": "attr:a1a2393c5f6921a13b917676:68122ce0a5c0c81a13b91d572",
+      "type": "attribute",
+      "x": 1183.7468734805257,
+      "y": 1329.751475426677,
+      "r": 10,
+      "label": "nota",
+      "pinned": false
+    },
+    {
+      "id": "21c128647f4fe1a13b926b21",
+      "type": "relation",
+      "x": 1218.555345420116,
+      "y": 1100.5450166281835,
+      "w": 120,
+      "h": 70,
+      "label": "Crea",
+      "attributes": []
+    },
+    {
+      "id": "d139ab1649c3381a13b92dd45",
+      "type": "relation",
+      "x": 1532.7116967786724,
+      "y": 944.4673388831683,
+      "w": 120,
+      "h": 70,
+      "label": "Riguardano",
+      "attributes": []
+    },
+    {
+      "id": "ba09fe2cea97a1a13b933325",
+      "type": "relation",
+      "x": 1128.5105313364536,
+      "y": 1428.7083390664204,
+      "w": 120,
+      "h": 70,
+      "label": "Crea",
+      "attributes": []
+    },
+    {
+      "id": "6e4cb701564d1a13b93ef58",
+      "type": "entity",
+      "x": 1556.7977581590758,
+      "y": 1422.2606857122817,
+      "w": 140,
+      "h": 60,
+      "label": "Cambiamenti spedizioni",
+      "attributes": [
+        {
+          "id": "e6b0fb6cdf9c71a13b944378",
+          "name": "valore_vecchio",
+          "type": "string",
+          "key": false,
+          "nullable": false,
+          "multivalued": false,
+          "composite": false,
+          "children": []
+        },
+        {
+          "id": "8996884cf48c481a13b9458ef",
+          "name": "valore_nuovo",
+          "type": "string",
+          "key": false,
+          "nullable": false,
+          "multivalued": false,
+          "composite": false,
+          "children": []
+        },
+        {
+          "id": "6d84d39baae71a13b946b22",
+          "name": "modificato_il",
+          "type": "string",
+          "key": false,
+          "nullable": false,
+          "multivalued": false,
+          "composite": false,
+          "children": []
+        },
+        {
+          "id": "b69d2814065771a13bc75ff3",
+          "name": "nome_attributo",
+          "type": "string",
+          "key": false,
+          "nullable": false,
+          "multivalued": false,
+          "composite": false,
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "d462e24c719121a13b941d2b",
+      "type": "relation",
+      "x": 2155.0214118902077,
+      "y": 1426.7073431978945,
+      "w": 120,
+      "h": 70,
+      "label": "Crea",
+      "attributes": []
+    },
+    {
+      "id": "attr:6e4cb701564d1a13b93ef58:e6b0fb6cdf9c71a13b944378",
+      "type": "attribute",
+      "x": 1696.7977581590758,
+      "y": 1337.9006857122818,
+      "r": 10,
+      "label": "valore_vecchio",
+      "pinned": false
+    },
+    {
+      "id": "attr:6e4cb701564d1a13b93ef58:8996884cf48c481a13b9458ef",
+      "type": "attribute",
+      "x": 1696.7977581590758,
+      "y": 1401.8606857122816,
+      "r": 10,
+      "label": "valore_nuovo",
+      "pinned": false
+    },
+    {
+      "id": "attr:6e4cb701564d1a13b93ef58:6d84d39baae71a13b946b22",
+      "type": "attribute",
+      "x": 1696.7977581590758,
+      "y": 1465.8206857122816,
+      "r": 10,
+      "label": "modificato_il",
+      "pinned": false
+    },
+    {
+      "id": "b3a8491082b9f81a13b954d57",
+      "type": "relation",
+      "x": 962.4278742488091,
+      "y": 1318.6535662974998,
+      "w": 120,
+      "h": 70,
+      "label": "Crea",
+      "attributes": []
+    },
+    {
+      "id": "26d2971743a7b81a13b95b73a",
+      "type": "relation",
+      "x": 1580.7355976232923,
+      "y": 1250.6197067676212,
+      "w": 120,
+      "h": 70,
+      "label": "è riferita",
+      "attributes": []
+    },
+    {
+      "id": "79d52b7bb33771a13ba032d1",
+      "type": "entity",
+      "x": 809.2597332186028,
+      "y": 1002.6931967928567,
+      "w": 140,
+      "h": 60,
+      "label": "Tentativi",
+      "attributes": [
+        {
+          "id": "2b4ade89cae1a1a13ba09878",
+          "name": "isConsegna",
+          "type": "string",
+          "key": false,
+          "nullable": false,
+          "multivalued": false,
+          "composite": false,
+          "children": []
+        },
+        {
+          "id": "c5aaa71938ee81a13ba0aba3",
+          "name": "id",
+          "type": "string",
+          "key": true,
+          "nullable": false,
+          "multivalued": false,
+          "composite": false,
+          "children": []
+        },
+        {
+          "id": "612425dffa9de1a13bb29e63",
+          "name": "effettuato_il",
+          "type": "string",
+          "key": false,
+          "nullable": false,
+          "multivalued": false,
+          "composite": false,
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "62fe79c322c5b81a13ba0721a",
+      "type": "relation",
+      "x": 929.6900401206207,
+      "y": 1137.9456953135848,
+      "w": 120,
+      "h": 70,
+      "label": "Riguardano",
+      "attributes": []
+    },
+    {
+      "id": "attr:79d52b7bb33771a13ba032d1:2b4ade89cae1a1a13ba09878",
+      "type": "attribute",
+      "x": 949.2597332186028,
+      "y": 918.3331967928567,
+      "r": 10,
+      "label": "isConsegna",
+      "pinned": false
+    },
+    {
+      "id": "attr:79d52b7bb33771a13ba032d1:c5aaa71938ee81a13ba0aba3",
+      "type": "key_attribute",
+      "x": 949.2597332186028,
+      "y": 982.2931967928567,
+      "r": 10,
+      "label": "id",
+      "pinned": false
+    },
+    {
+      "id": "576d4b124196c1a13ba1c8c5",
+      "type": "relation",
+      "x": 807.4069592662642,
+      "y": 802.593609940273,
+      "w": 120,
+      "h": 70,
+      "label": "riguardano",
+      "attributes": []
+    },
+    {
+      "id": "attr:b8dbd345f04f21a139926769:b07588e9aa6e381a13bac0e5d",
+      "type": "attribute",
+      "x": 1293.312561241294,
+      "y": 225.62157451430488,
+      "r": 10,
+      "label": "cod_postale",
+      "pinned": false
+    },
+    {
+      "id": "attr:79d52b7bb33771a13ba032d1:612425dffa9de1a13bb29e63",
+      "type": "attribute",
+      "x": 949.2597332186028,
+      "y": 1046.2531967928567,
+      "r": 10,
+      "label": "effettuato_il",
+      "pinned": false
+    },
+    {
+      "id": "attr:6e4cb701564d1a13b93ef58:b69d2814065771a13bc75ff3",
+      "type": "attribute",
+      "x": 1556.7977581590758,
+      "y": 1522.2606857122817,
+      "r": 10,
+      "label": "nome_attributo",
+      "pinned": false
+    }
+  ],
+  "edges": [
+    {
+      "id": "084ae40dcd541a115e329bf",
+      "from": "1744ba4663ee381a115e30b0e",
+      "to": "attr:1744ba4663ee381a115e30b0e:423d70a34a4c181a115e329bd",
+      "label": ""
+    },
+    {
+      "id": "7547a3d4e1d3781a115e3a5ca",
+      "from": "1744ba4663ee381a115e30b0e",
+      "to": "attr:1744ba4663ee381a115e30b0e:54ab2f843fd1581a115e3a5ca",
+      "label": ""
+    },
+    {
+      "id": "bb85d099a52a81a115e3c470",
+      "from": "1744ba4663ee381a115e30b0e",
+      "to": "attr:1744ba4663ee381a115e30b0e:42bc821c92cc381a115e3c470",
+      "label": ""
+    },
+    {
+      "id": "9b37a86b8be3881a115e3d7fc",
+      "from": "1744ba4663ee381a115e30b0e",
+      "to": "attr:1744ba4663ee381a115e30b0e:ea6fe63e685371a115e3d7fc",
+      "label": ""
+    },
+    {
+      "id": "ec25bd9ac70c41a115e3ffb3",
+      "from": "1744ba4663ee381a115e30b0e",
+      "to": "attr:1744ba4663ee381a115e30b0e:91a38b26dc24a1a115e3ffb3",
+      "label": ""
+    },
+    {
+      "id": "297c689c5bb951a13991064e",
+      "from": "8853be76e2d3e81a13990f032",
+      "to": "attr:8853be76e2d3e81a13990f032:f44f738ab09671a13991064d",
+      "label": ""
+    },
+    {
+      "id": "1e99d3da6f2fc1a13991b6a1",
+      "from": "6d454a6345eca1a139918ed8",
+      "to": "attr:6d454a6345eca1a139918ed8:3c7de776717c81a13991b6a1",
+      "label": ""
+    },
+    {
+      "id": "5a811bb79d9b31a1399226e3",
+      "from": "6d454a6345eca1a139918ed8",
+      "to": "attr:6d454a6345eca1a139918ed8:2b53ae13f7d3181a1399226e3",
+      "label": ""
+    },
+    {
+      "id": "0a855b57e3e1681a139923c5f",
+      "from": "8853be76e2d3e81a13990f032",
+      "to": "attr:8853be76e2d3e81a13990f032:413989dedf31e1a139923c5e",
+      "label": ""
+    },
+    {
+      "id": "268016911340d81a13992805b",
+      "from": "b8dbd345f04f21a139926769",
+      "to": "attr:b8dbd345f04f21a139926769:826443675a76a81a13992805b",
+      "label": ""
+    },
+    {
+      "id": "cb98ed9f30faf1a139929224",
+      "from": "b8dbd345f04f21a139926769",
+      "to": "attr:b8dbd345f04f21a139926769:a96f1a9694b41a139929224",
+      "label": ""
+    },
+    {
+      "id": "520c243e80dec81a13992d778",
+      "from": "ddc124248754f1a13992be44",
+      "to": "attr:ddc124248754f1a13992be44:42118a39b5fcc81a13992d778",
+      "label": ""
+    },
+    {
+      "id": "e37c0dd2b1f711a13992f777",
+      "from": "ddc124248754f1a13992be44",
+      "to": "attr:ddc124248754f1a13992be44:1747ba6f68b41a13992f776",
+      "label": ""
+    },
+    {
+      "id": "4ac2fba8e9ed61a139931211",
+      "from": "ddc124248754f1a13992be44",
+      "to": "attr:ddc124248754f1a13992be44:0467e6aa9880e81a139931210",
+      "label": ""
+    },
+    {
+      "id": "6751416f66a381a139937ddd",
+      "from": "d7a70af86712f1a1399357b2",
+      "to": "8853be76e2d3e81a13990f032",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "1",
+      "cardAMax": "1"
+    },
+    {
+      "id": "1416d6c5ae0051a139938ce5",
+      "from": "6d454a6345eca1a139918ed8",
+      "to": "d7a70af86712f1a1399357b2",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "1",
+      "cardAMax": "N"
+    },
+    {
+      "id": "a67cf1f73bf7381a13993deff",
+      "from": "553ab025e29b581a13993d454",
+      "to": "6d454a6345eca1a139918ed8",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "1",
+      "cardAMax": "1"
+    },
+    {
+      "id": "4439185beaffa81a139941a8c",
+      "from": "553ab025e29b581a13993d454",
+      "to": "b8dbd345f04f21a139926769",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "1",
+      "cardAMax": "N"
+    },
+    {
+      "id": "d42ba07fa6a9781a139945837",
+      "from": "2a5e25d8670f981a139943b01",
+      "to": "ddc124248754f1a13992be44",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "1",
+      "cardAMax": "N"
+    },
+    {
+      "id": "06130bbf0660e81a139946ebf",
+      "from": "2a5e25d8670f981a139943b01",
+      "to": "b8dbd345f04f21a139926769",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "1",
+      "cardAMax": "N"
+    },
+    {
+      "id": "0f95eae1d6fd81a13997395b",
+      "from": "1744ba4663ee381a115e30b0e",
+      "to": "attr:1744ba4663ee381a115e30b0e:cc1bd528092c41a13997395b",
+      "label": ""
+    },
+    {
+      "id": "ed02167daf16181a139975ca4",
+      "from": "1744ba4663ee381a115e30b0e",
+      "to": "attr:1744ba4663ee381a115e30b0e:cf7d4fb75e5771a139975ca3",
+      "label": ""
+    },
+    {
+      "id": "b2a337add7e941a13997ec7b",
+      "from": "81da25c965bae81a13997a64c",
+      "to": "attr:81da25c965bae81a13997a64c:51b06c553a6311a13997ec7b",
+      "label": ""
+    },
+    {
+      "id": "219714eac8c3181a139980cd4",
+      "from": "81da25c965bae81a13997a64c",
+      "to": "attr:81da25c965bae81a13997a64c:5b797a3189b0f81a139980cd3",
+      "label": ""
+    },
+    {
+      "id": "1ef63065a77551a139b471f4",
+      "from": "1744ba4663ee381a115e30b0e",
+      "to": "rel:isa:f2b9ffe38751c81a1399590d8:4e5155c03baf51a115e52a69",
+      "label": "",
+      "cardAMin": "1",
+      "cardAMax": "1"
+    },
+    {
+      "id": "afa2415fc75281a139b471f4",
+      "from": "1744ba4663ee381a115e30b0e",
+      "to": "rel:isa:f2b9ffe38751c81a1399590d8:5920c7c5197da1a115e577c1",
+      "label": "",
+      "cardAMin": "1",
+      "cardAMax": "1"
+    },
+    {
+      "id": "af2cea53b10d21a139b471f4",
+      "from": "3bdfa3001178781a115e76a40",
+      "to": "rel:isa:f2b9ffe38751c81a1399590d8:3bdfa3001178781a115e76a40",
+      "label": "",
+      "cardAMin": "0",
+      "cardAMax": "1"
+    },
+    {
+      "id": "af6d562f7c71e1a139b471f4",
+      "from": "1744ba4663ee381a115e30b0e",
+      "to": "rel:isa:f2b9ffe38751c81a1399590d8:3bdfa3001178781a115e76a40",
+      "label": "",
+      "cardAMin": "1",
+      "cardAMax": "1"
+    },
+    {
+      "id": "401839099b0b681a139b79bc2",
+      "from": "fa6da1e625cb81a139b77602",
+      "to": "ec16ada2834bf1a139b6cd97",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "0",
+      "cardAMax": "1"
+    },
+    {
+      "id": "51dd99fbb960b1a139b7fae8",
+      "from": "fa6da1e625cb81a139b77602",
+      "to": "1744ba4663ee381a115e30b0e",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "1",
+      "cardAMax": "1"
+    },
+    {
+      "id": "d8b5063dadab681a139c51126",
+      "from": "5920c7c5197da1a115e577c1",
+      "to": "attr:5920c7c5197da1a115e577c1:7ab1d0b72dfed81a139c51126",
+      "label": ""
+    },
+    {
+      "id": "89bc665b824bb81a13b55e49c",
+      "from": "rel:isa:f2b9ffe38751c81a1399590d8:5920c7c5197da1a115e577c1",
+      "to": "5920c7c5197da1a115e577c1",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "0",
+      "cardAMax": "1"
+    },
+    {
+      "id": "f1aef82e3bfd481a13b571620",
+      "from": "5920c7c5197da1a115e577c1",
+      "to": "972ae910cfb1c81a13b56b9ec",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "1",
+      "cardAMax": "1"
+    },
+    {
+      "id": "e26c2e98d15eb81a13b572384",
+      "from": "972ae910cfb1c81a13b56b9ec",
+      "to": "81da25c965bae81a13997a64c",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "1",
+      "cardAMax": "N"
+    },
+    {
+      "id": "090baabc35d0a1a13b57d40f",
+      "from": "27df16ac37b561a13b579e97",
+      "to": "81da25c965bae81a13997a64c",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "0",
+      "cardAMax": "N"
+    },
+    {
+      "id": "9718b17ad16fd1a13b57e2c8",
+      "from": "3bdfa3001178781a115e76a40",
+      "to": "27df16ac37b561a13b579e97",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "1",
+      "cardAMax": "1"
+    },
+    {
+      "id": "9b5e6388a6ea581a13b588cf1",
+      "from": "efe012d4397c61a13b586549",
+      "to": "81da25c965bae81a13997a64c",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "0",
+      "cardAMax": "N"
+    },
+    {
+      "id": "01a5657acd73e1a13b58997c",
+      "from": "efe012d4397c61a13b586549",
+      "to": "3bdfa3001178781a115e76a40",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "0",
+      "cardAMax": "1"
+    },
+    {
+      "id": "42ed11f46b56281a13b5cddf9",
+      "from": "81da25c965bae81a13997a64c",
+      "to": "89ebb8df4b1ed1a13b59f6fa",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "1",
+      "cardAMax": "N"
+    },
+    {
+      "id": "295bfaa8334841a13b5cf475",
+      "from": "89ebb8df4b1ed1a13b59f6fa",
+      "to": "5920c7c5197da1a115e577c1",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "1",
+      "cardAMax": "1"
+    },
+    {
+      "id": "d97983a29506381a13b5dc2f2",
+      "from": "ec16ada2834bf1a139b6cd97",
+      "to": "4145a4edd7d4081a139b8c950",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "1",
+      "cardAMax": "N"
+    },
+    {
+      "id": "dc0eeb52333ec81a13b5dd228",
+      "from": "4145a4edd7d4081a139b8c950",
+      "to": "94ffe82e701cc1a139b89f8c",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "1",
+      "cardAMax": "N"
+    },
+    {
+      "id": "e4b2e276052811a13b5f88b4",
+      "from": "3bdfa3001178781a115e76a40",
+      "to": "546fffa34444881a13b5f5827",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "1",
+      "cardAMax": "1"
+    },
+    {
+      "id": "bde4d456ed49d81a13b5f91e7",
+      "from": "546fffa34444881a13b5f5827",
+      "to": "fa7bb2f982ccc1a13b5f324c",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "0",
+      "cardAMax": "N"
+    },
+    {
+      "id": "cbd74842773691a13b5ff9e2",
+      "from": "a231adb9f0cab1a13b5fc85e",
+      "to": "81da25c965bae81a13997a64c",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "1",
+      "cardAMax": "1"
+    },
+    {
+      "id": "849db43f864e581a13b600f44",
+      "from": "a231adb9f0cab1a13b5fc85e",
+      "to": "fa7bb2f982ccc1a13b5f324c",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "0",
+      "cardAMax": "1"
+    },
+    {
+      "id": "d9b384d00c3961a13b60d107",
+      "from": "7e0c16aca7c971a13b60b104",
+      "to": "91791fc770b2181a115e4aab7",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "1",
+      "cardAMax": "1"
+    },
+    {
+      "id": "4a72eb42237fd1a13b60dc20",
+      "from": "fa7bb2f982ccc1a13b5f324c",
+      "to": "7e0c16aca7c971a13b60b104",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "0",
+      "cardAMax": "N"
+    },
+    {
+      "id": "2dbc617c0d62381a13b62caea",
+      "from": "d8bd3a6ceb9761a13b6196b0",
+      "to": "81da25c965bae81a13997a64c",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "1",
+      "cardAMax": "N"
+    },
+    {
+      "id": "c385358cc0ae41a13b631a24",
+      "from": "d8bd3a6ceb9761a13b6196b0",
+      "to": "ddc124248754f1a13992be44",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "1",
+      "cardAMax": "1"
+    },
+    {
+      "id": "45c8c6cd6257181a13b6396ed",
+      "from": "4fae267bff38f81a13b635279",
+      "to": "81da25c965bae81a13997a64c",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "1",
+      "cardAMax": "N"
+    },
+    {
+      "id": "6c1b8df315fab1a13b63ac13",
+      "from": "4fae267bff38f81a13b635279",
+      "to": "ddc124248754f1a13992be44",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "1",
+      "cardAMax": "1"
+    },
+    {
+      "id": "1342d810b572d1a13b64b2fc",
+      "from": "972ae910cfb1c81a13b56b9ec",
+      "to": "attr:972ae910cfb1c81a13b56b9ec:87e3ac9b2c9c181a13b64b2fb",
+      "label": ""
+    },
+    {
+      "id": "0cc27bedfb43f81a13b655ab2",
+      "from": "27df16ac37b561a13b579e97",
+      "to": "attr:27df16ac37b561a13b579e97:6624a06b527b11a13b655ab1",
+      "label": ""
+    },
+    {
+      "id": "6cb0ca2b77cfb1a13b65a439",
+      "from": "efe012d4397c61a13b586549",
+      "to": "attr:efe012d4397c61a13b586549:7070d2fe76dc51a13b65a439",
+      "label": ""
+    },
+    {
+      "id": "a1ef69b21b71881a13b65d882",
+      "from": "546fffa34444881a13b5f5827",
+      "to": "attr:546fffa34444881a13b5f5827:7b643f2a6d18181a13b65d882",
+      "label": ""
+    },
+    {
+      "id": "a821760b308d081a13b7696c2",
+      "from": "rel:isa:f2b9ffe38751c81a1399590d8:4e5155c03baf51a115e52a69",
+      "to": "91791fc770b2181a115e4aab7",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "0",
+      "cardAMax": "1"
+    },
+    {
+      "id": "96cb4d82aecda1a13b7bbc47",
+      "from": "81da25c965bae81a13997a64c",
+      "to": "attr:81da25c965bae81a13997a64c:5584dcc3dc5be1a13b7bbc47",
+      "label": ""
+    },
+    {
+      "id": "0691456e16c11a13b85367f",
+      "from": "81da25c965bae81a13997a64c",
+      "to": "attr:81da25c965bae81a13997a64c:3f4a0044627031a13b85367e",
+      "label": ""
+    },
+    {
+      "id": "c6f0937fe408b1a13b918ec5",
+      "from": "a1a2393c5f6921a13b917676",
+      "to": "attr:a1a2393c5f6921a13b917676:0a41faef5289f1a13b918ec4",
+      "label": ""
+    },
+    {
+      "id": "2c08f5f3bb3141a13b91a44c",
+      "from": "a1a2393c5f6921a13b917676",
+      "to": "attr:a1a2393c5f6921a13b917676:32e391a62e6a81a13b91a44b",
+      "label": ""
+    },
+    {
+      "id": "8c352982fe04781a13b91b6fb",
+      "from": "a1a2393c5f6921a13b917676",
+      "to": "attr:a1a2393c5f6921a13b917676:be1c208bc97ce1a13b91b6fa",
+      "label": ""
+    },
+    {
+      "id": "1a5e30fc9be8781a13b91d573",
+      "from": "a1a2393c5f6921a13b917676",
+      "to": "attr:a1a2393c5f6921a13b917676:68122ce0a5c0c81a13b91d572",
+      "label": ""
+    },
+    {
+      "id": "8e14f985d944381a13b928848",
+      "from": "21c128647f4fe1a13b926b21",
+      "to": "a1a2393c5f6921a13b917676",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "0",
+      "cardAMax": "N"
+    },
+    {
+      "id": "1e1460fc517d41a13b92934d",
+      "from": "21c128647f4fe1a13b926b21",
+      "to": "91791fc770b2181a115e4aab7",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "0",
+      "cardAMax": "1"
+    },
+    {
+      "id": "3950df6f69e41a13b92ff04",
+      "from": "d139ab1649c3381a13b92dd45",
+      "to": "81da25c965bae81a13997a64c",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "1",
+      "cardAMax": "1"
+    },
+    {
+      "id": "3b10911d53a5081a13b9315fa",
+      "from": "d139ab1649c3381a13b92dd45",
+      "to": "a1a2393c5f6921a13b917676",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "0",
+      "cardAMax": "N"
+    },
+    {
+      "id": "0c4418958938081a13b9361d5",
+      "from": "ba09fe2cea97a1a13b933325",
+      "to": "a1a2393c5f6921a13b917676",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "1",
+      "cardAMax": "N"
+    },
+    {
+      "id": "43cd12b4460cb1a13b937498",
+      "from": "ba09fe2cea97a1a13b933325",
+      "to": "3bdfa3001178781a115e76a40",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "0",
+      "cardAMax": "1"
+    },
+    {
+      "id": "3837296069e5c81a13b944379",
+      "from": "6e4cb701564d1a13b93ef58",
+      "to": "attr:6e4cb701564d1a13b93ef58:e6b0fb6cdf9c71a13b944378",
+      "label": ""
+    },
+    {
+      "id": "a171ffa645c6281a13b9458f0",
+      "from": "6e4cb701564d1a13b93ef58",
+      "to": "attr:6e4cb701564d1a13b93ef58:8996884cf48c481a13b9458ef",
+      "label": ""
+    },
+    {
+      "id": "b8f5d23f25fed1a13b946b22",
+      "from": "6e4cb701564d1a13b93ef58",
+      "to": "attr:6e4cb701564d1a13b93ef58:6d84d39baae71a13b946b22",
+      "label": ""
+    },
+    {
+      "id": "1dc31ef6b284b81a13b94e09d",
+      "from": "3bdfa3001178781a115e76a40",
+      "to": "d462e24c719121a13b941d2b",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "0",
+      "cardAMax": "1"
+    },
+    {
+      "id": "44425db31d29081a13b94f931",
+      "from": "d462e24c719121a13b941d2b",
+      "to": "6e4cb701564d1a13b93ef58",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "0",
+      "cardAMax": "N"
+    },
+    {
+      "id": "96d736268cdd381a13b956d58",
+      "from": "b3a8491082b9f81a13b954d57",
+      "to": "6e4cb701564d1a13b93ef58",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "0",
+      "cardAMax": "N"
+    },
+    {
+      "id": "eaef3e1a9370781a13b958ce3",
+      "from": "b3a8491082b9f81a13b954d57",
+      "to": "91791fc770b2181a115e4aab7",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "0",
+      "cardAMax": "1"
+    },
+    {
+      "id": "41291ddc350b181a13b960097",
+      "from": "26d2971743a7b81a13b95b73a",
+      "to": "81da25c965bae81a13997a64c",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "1",
+      "cardAMax": "1"
+    },
+    {
+      "id": "90f872ceab0121a13b962c00",
+      "from": "26d2971743a7b81a13b95b73a",
+      "to": "6e4cb701564d1a13b93ef58",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "0",
+      "cardAMax": "N"
+    },
+    {
+      "id": "ae1f00e0a5ebb1a13ba09879",
+      "from": "79d52b7bb33771a13ba032d1",
+      "to": "attr:79d52b7bb33771a13ba032d1:2b4ade89cae1a1a13ba09878",
+      "label": ""
+    },
+    {
+      "id": "a7e081332374f81a13ba0aba3",
+      "from": "79d52b7bb33771a13ba032d1",
+      "to": "attr:79d52b7bb33771a13ba032d1:c5aaa71938ee81a13ba0aba3",
+      "label": ""
+    },
+    {
+      "id": "8e235c854091081a13ba0f869",
+      "from": "a1a2393c5f6921a13b917676",
+      "to": "62fe79c322c5b81a13ba0721a",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "1",
+      "cardAMax": "1"
+    },
+    {
+      "id": "18704faf4a0481a13ba13a7f",
+      "from": "62fe79c322c5b81a13ba0721a",
+      "to": "79d52b7bb33771a13ba032d1",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "0",
+      "cardAMax": "1"
+    },
+    {
+      "id": "171d9b0481dcc1a13ba1f576",
+      "from": "576d4b124196c1a13ba1c8c5",
+      "to": "81da25c965bae81a13997a64c",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "1",
+      "cardAMax": "1"
+    },
+    {
+      "id": "41d3c21f878ac1a13ba219cc",
+      "from": "576d4b124196c1a13ba1c8c5",
+      "to": "79d52b7bb33771a13ba032d1",
+      "label": "",
+      "cardA": "1",
+      "cardAMin": "0",
+      "cardAMax": "N"
+    },
+    {
+      "id": "7ee4f0390a8691a13bac0e5d",
+      "from": "b8dbd345f04f21a139926769",
+      "to": "attr:b8dbd345f04f21a139926769:b07588e9aa6e381a13bac0e5d",
+      "label": ""
+    },
+    {
+      "id": "07c43faf2d9aa81a13bb29e64",
+      "from": "79d52b7bb33771a13ba032d1",
+      "to": "attr:79d52b7bb33771a13ba032d1:612425dffa9de1a13bb29e63",
+      "label": ""
+    },
+    {
+      "id": "857a22fbb2fab1a13bc75ff4",
+      "from": "6e4cb701564d1a13b93ef58",
+      "to": "attr:6e4cb701564d1a13b93ef58:b69d2814065771a13bc75ff3",
+      "label": ""
+    }
+  ]
+}
