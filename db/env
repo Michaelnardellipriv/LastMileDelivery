@@ -1,0 +1,4 @@
+POSTGRES_USER=spedizioni
+POSTGRES_PASSWORD=spedizioni
+POSTGRES_DB=spedizioni
+DB_PORT=5432
