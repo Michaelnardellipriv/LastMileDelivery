@@ -1,9 +1,9 @@
-# Domande al cliente — \[Nome progetto\] / \[Cliente\]
+# Domande al cliente — Lastmile Delibery / Veloce24 s.r.l.
 
 |  |  |
 | :---- | :---- |
-| **Team** | *(nome team, componenti)* |
-| **Cliente** | *(es. NordFacility S.r.l.)* |
+| **Team** | *(GLS, Dennis Pasquali,Micheal Nardelli,Gianluca, Vivaldi,Mohammed Amine Reddad,Francesco Plateroti,Cristian Pellegrini)* |
+| **Cliente** | *Veloce24 S.r.l.* |
 | **Data** | 23/09/2026 |
 
 *Ogni punto della richiesta cliente rimasto ambiguo va scritto qui come domanda, non deciso a intuito. Ciò che resta ambiguo non è un requisito: è una domanda da porre al cliente.*
@@ -28,8 +28,12 @@
 | 12 | la spedizione viene creata dal cliente mittente? | nella traccia viene comunicato che è l’operatore logistico che crea la spedizione però nella maggior parte dei servizi di logistica è il cliente mittente che crea la spedizione dal portale  | se la spedizione viene creata dall’operatore non bisogna creare un pagina apposta sul portale per chi vuole spedire dove crea la spedizione ma lasciare soltanto i recapiti telefonici o email per richiedere la spedizione |
 | 13 | le note operative interne da chi vengono inserite ? | nella traccia si parla di note operative ad uso interno ma nessuno dice chi le puo inserire | se le possono inserire solo certi tipi di utenti bisogna configurare degli appositi permessi |
 | 14 | Che fine fanno i pacchi non consegnati? | nella traccia si cita lo stato nel quale il pacco possa ritrovarsi in non consegnato ma non si dice se ci sono tentativi di riconsegna e che fine debba fare il pacco non consegnato | se la risposta cambia cambiano anche le funzionalità che avrà l’operatore logistico e quando il pacco potrà dirsi non consegnato |
-| 15 | Quando il corriere rende disponibile la propria posizione? | la traccia non specifica quando dice che deve rendere nota la sua ultima posizione però di solito nei servizi di logistica i corrieri comunicano la propria posizione solamente quando il pacco è in consegna |  |
+| 15 | Quando il corriere rende disponibile la propria posizione? | la traccia non specifica quando dice che deve rendere nota la sua ultima posizione però di solito nei servizi di logistica i corrieri comunicano la propria posizione solamente quando il pacco è in consegna | in base a come cambia la risposta bisogna prevedere in automatico di attivare la localizzazione del dispositivo sin dal momento in cui è in consegna |
 | 16 | Che cosa deve poter fare l’amministratore | nella traccia si parla di gestione utenti e permessi però non è chiaro nello specifico quali sono le funzionalità che l’amministratore deve avere |  |
+| 17 | Le spedizioni vengono archiviate nello storico automaticamente dopo tot giorni o immediatamente? o le archivia l’operatore logistico? | nella traccia è specificato solo che le spedizioni concluse debbano essere nello storico  |  |
+| 18 | se chi spedisce non da la spedizione al corriere o il corriere non riesce a ritirare cosa succede ? | nella traccia ciò non viene specificato |  |
+| 19 | cosa succede se il corriere perde la spedizione? | nella traccia ciò non viene specificato |  |
+| 20 | cosa succede se il cliente vuole il reso di una spedizione che l’operatore logistico ha già creato oppure vuole modificarla? | nella traccia ciò non viene specificato |  |
 
 *Aggiungete righe quante servono: tre sono il minimo per considerare la richiesta letta con attenzione, non un limite.*
 
@@ -43,5 +47,5 @@
 
 | \# | Decisione presa (se non ancora chiarita dal cliente) | Perché |
 | :---- | :---- | :---- |
-|  |  |  |
+| fino a che stato l’operatore può modificare la spedizione assegnata? | finché non è in ritirata | perché altrimenti il corriere deve continuamente cambiare strada perdendo tempo |
 
