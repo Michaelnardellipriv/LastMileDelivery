@@ -1,0 +1,78 @@
+openapi: 3.0.3
+
+info:
+  title: LastMileDelivery API
+  version: "0.1.0"
+  description: API per la gestione delle spedizioni.
+
+servers:
+  - url: http://localhost:8080
+    description: Server locale di sviluppo
+
+paths:
+  /api/spedizioni:
+    post:
+      summary: Crea una spedizione
+
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+
+              required:
+                - cod_ordine
+                - id_cliente_mittente
+                - id_cliente_destinatario
+                - dataora_richiesta_spedizione
+                - id_indirizzo_ritiro
+                - id_indirizzo_spedizione
+
+              properties:
+                cod_ordine:
+                  type: string
+                  minLength: 1
+                  maxLength: 50
+                  pattern: '\S'
+                  example: "ORD-API-003"
+
+                is_reso:
+                  type: boolean
+                  default: false
+
+                id_cliente_mittente:
+                  type: integer
+                  format: int32
+                  minimum: 1
+
+                id_cliente_destinatario:
+                  type: integer
+                  format: int32
+                  minimum: 1
+
+                dataora_richiesta_spedizione:
+                  type: string
+                  format: date-time
+                  example: "2026-10-21T10:30:00+02:00"
+
+                id_indirizzo_ritiro:
+                  type: integer
+                  format: int32
+                  minimum: 1
+
+                id_indirizzo_spedizione:
+                  type: integer
+                  format: int32
+                  minimum: 1
+
+      responses:
+        "201":
+          description: Spedizione creata
+        "400":
+          description: Dati della richiesta non validi
+        "409":
+          description: Codice ordine già utilizzato
+        "500":
+          description: Errore interno del server
