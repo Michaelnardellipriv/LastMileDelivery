@@ -65,7 +65,7 @@ func main() {
 	})
 	
 	//passo al server il router 
-	err = http.ListenAndServe("127.0.0.1:8080", router)
+	err = http.ListenAndServe(":8080", router)
 
 	if err != nil {
 		log.Fatal(err)
