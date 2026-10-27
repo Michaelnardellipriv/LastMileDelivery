@@ -65,7 +65,12 @@ func main() {
 	})
 	
 	//passo al server il router 
-	err = http.ListenAndServe("127.0.0.1:8080", router)
+	addr := os.Getenv("LISTEN_ADDR")
+	if addr == "" {
+		addr = "127.0.0.1:8080"
+	}
+
+	err = http.ListenAndServe(addr, router)
 
 	if err != nil {
 		log.Fatal(err)
