@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend-config
+data:
+  LISTEN_ADDR: "0.0.0.0:8080"
+  LOG_LEVEL: "info"

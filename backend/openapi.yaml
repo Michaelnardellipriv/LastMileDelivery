@@ -2,17 +2,215 @@ openapi: 3.0.3
 
 info:
   title: LastMileDelivery API
-  version: "0.1.0"
-  description: API per la gestione delle spedizioni.
+  version: "0.2.0"
+  description: |
+    API per la gestione delle spedizioni.
+
+    **Autenticazione (temporanea).** Finché non c'è il login vero (lezione 10),
+    gli endpoint protetti identificano l'utente dall'header `X-Utente-Email`.
+    Il ruolo (cliente, corriere, operatore, amministratore) è ricavato dal database.
+    Questo meccanismo verrà sostituito da token/sessione senza cambiare i contratti sotto.
+
+    **Errori.** Gli errori tornano come testo semplice (`text/plain`), con lo status code
+    che indica l'esito.
 
 servers:
   - url: http://localhost:8080
     description: Server locale di sviluppo
 
+tags:
+  - name: Spedizioni
+
+components:
+  securitySchemes:
+    UtenteEmail:
+      type: apiKey
+      in: header
+      name: X-Utente-Email
+      description: Email dell'utente (temporaneo, in attesa dell'autenticazione vera).
+
+  schemas:
+    Indirizzo:
+      type: object
+      properties:
+        via:
+          type: string
+          example: "Via Roma"
+        civico:
+          type: string
+          example: "1"
+
+    Nota:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 7
+        nota:
+          type: string
+          example: "Cliente non risponde al citofono"
+        is_interna:
+          type: boolean
+          description: Le note interne non sono mai visibili al cliente destinatario.
+        motivo:
+          type: string
+          nullable: true
+        creata_il:
+          type: string
+          format: date-time
+
+    StatoSpedizione:
+      type: string
+      enum:
+        - creata
+        - assegnata
+        - ritirata
+        - in consegna
+        - consegnata
+        - non consegnata
+        - persa
+        - annullata
+
+    Spedizione:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 42
+        cod_ordine:
+          type: string
+          example: "ORD-2026-0042"
+        stato:
+          $ref: "#/components/schemas/StatoSpedizione"
+        is_reso:
+          type: boolean
+        creata_il:
+          type: string
+          format: date-time
+        dataora_richiesta_spedizione:
+          type: string
+          format: date-time
+        indirizzo_ritiro:
+          $ref: "#/components/schemas/Indirizzo"
+        indirizzo_spedizione:
+          $ref: "#/components/schemas/Indirizzo"
+        id_corriere:
+          type: integer
+          description: >
+            Corriere assegnato. Presente solo per operatore e amministratore;
+            omesso per corriere e cliente. Assente se la spedizione non è assegnata.
+        note:
+          type: array
+          description: >
+            Cliente destinatario: solo note non interne.
+            Corriere, operatore, amministratore: tutte le note.
+          items:
+            $ref: "#/components/schemas/Nota"
+
+    ListaSpedizioni:
+      type: object
+      properties:
+        dati:
+          type: array
+          items:
+            $ref: "#/components/schemas/Spedizione"
+
+    ErroreTesto:
+      type: string
+      example: "stato non valido"
+
 paths:
   /api/spedizioni:
+    get:
+      tags: [Spedizioni]
+      summary: Elenca le spedizioni visibili all'utente
+      description: |
+        Il contenuto dipende dal ruolo dell'utente che chiama:
+
+        | Ruolo | Spedizioni restituite | Note |
+        |---|---|---|
+        | Corriere | solo le sue (assegnate a lui) negli stati `ritirata` e `in consegna` | tutte |
+        | Operatore | tutte, in tutti gli stati | tutte |
+        | Amministratore | tutte, in tutti gli stati | tutte |
+        | Cliente destinatario | solo quelle di cui è destinatario | solo non interne |
+
+        Risultati ordinati dalla più recente. Il filtro `stato` si applica
+        **dentro** quello che il ruolo può già vedere (es. un corriere che
+        chiede `stato=consegnata` riceve una lista vuota).
+      security:
+        - UtenteEmail: []
+      parameters:
+        - name: stato
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/StatoSpedizione"
+        - name: page
+          in: query
+          required: false
+          description: Numero di pagina, a partire da 1.
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: pageSize
+          in: query
+          required: false
+          description: Elementi per pagina.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: Elenco delle spedizioni (può essere vuoto).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListaSpedizioni"
+              example:
+                dati:
+                  - id: 2
+                    cod_ordine: "ORD-2"
+                    stato: "ritirata"
+                    is_reso: false
+                    creata_il: "2026-10-27T21:00:00Z"
+                    dataora_richiesta_spedizione: "2026-10-27T21:00:00Z"
+                    indirizzo_ritiro: { via: "Via Roma", civico: "1" }
+                    indirizzo_spedizione: { via: "Via Verdi", civico: "10" }
+                    id_corriere: 1
+                    note:
+                      - id: 1
+                        nota: "nota INTERNA"
+                        is_interna: true
+                        motivo: null
+                        creata_il: "2026-10-27T21:01:00Z"
+        "400":
+          description: Parametro non valido (`stato`, `page` o `pageSize`).
+          content:
+            text/plain:
+              schema:
+                $ref: "#/components/schemas/ErroreTesto"
+        "401":
+          description: Header `X-Utente-Email` assente o utente sconosciuto.
+          content:
+            text/plain:
+              schema:
+                $ref: "#/components/schemas/ErroreTesto"
+        "500":
+          description: Errore interno del server.
+          content:
+            text/plain:
+              schema:
+                $ref: "#/components/schemas/ErroreTesto"
+
     post:
+      tags: [Spedizioni]
       summary: Crea una spedizione
+      description: >
+        La spedizione nasce nello stato `creata`. Per ora l'operatore che la crea
+        è un operatore di test fisso (l'autenticazione arriverà più avanti).
 
       requestBody:
         required: true
@@ -70,9 +268,29 @@ paths:
       responses:
         "201":
           description: Spedizione creata
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                    example: 5
         "400":
-          description: Dati della richiesta non validi
+          description: Dati non validi, oppure cliente o indirizzo inesistente
+          content:
+            text/plain:
+              schema:
+                $ref: "#/components/schemas/ErroreTesto"
         "409":
           description: Codice ordine già utilizzato
+          content:
+            text/plain:
+              schema:
+                $ref: "#/components/schemas/ErroreTesto"
         "500":
           description: Errore interno del server
+          content:
+            text/plain:
+              schema:
+                $ref: "#/components/schemas/ErroreTesto"
