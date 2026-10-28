@@ -4,7 +4,7 @@ metadata:
   name: lastmile-ingress
 spec:
   rules:
-    - host: lastmile.local
+    - host: lastmile.test
       http:
         paths:
           - path: /api
