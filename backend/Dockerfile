@@ -4,7 +4,7 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -o /server .
+RUN CGO_ENABLED=0 go build -o /server ./cmd/server
 
 # fase 2: esegue (immagine minima, utente non root)
 FROM gcr.io/distroless/static-debian12:nonroot
