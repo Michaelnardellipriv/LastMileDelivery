@@ -90,17 +90,12 @@ func (r *Repository) Aggiorna(ctx context.Context, id int32, autore identita.Ric
 
 	var idNota *int32
 	if m.Nota != nil {
-		var idOperatore, idCorriere *int32
-		if autore.Ruolo == identita.Corriere {
-			idCorriere = &autore.ID
-		} else {
-			idOperatore = &autore.ID
-		}
+		idOperatore, idCorriere := autoreNota(autore)
 		if err := tx.QueryRow(ctx, `
 			INSERT INTO note (nota, is_interna, motivo, id_operatore_logistico_creata, id_corriere_creata, id_spedizione)
-			VALUES ($1, true, $2, $3, $4, $5)
+			VALUES ($1, $2, $3, $4, $5, $6)
 			RETURNING id`,
-			m.Nota.Testo, m.Nota.Motivo, idOperatore, idCorriere, id,
+			m.Nota.Testo, !m.Nota.Pubblica, m.Nota.Motivo, idOperatore, idCorriere, id,
 		).Scan(&idNota); err != nil {
 			return Spedizione{}, false, err
 		}
@@ -157,6 +152,55 @@ func (r *Repository) Aggiorna(ctx context.Context, id int32, autore identita.Ric
 		return Spedizione{}, false, err
 	}
 	return aggiornata, true, nil
+}
+
+func autoreNota(autore identita.Richiedente) (idOperatore, idCorriere *int32) {
+	id := autore.ID
+	if autore.Ruolo == identita.Corriere {
+		return nil, &id
+	}
+	return &id, nil
+}
+
+func (r *Repository) AggiungiNota(ctx context.Context, id int32, autore identita.Richiedente, testo string,
+	verifica func(attuale Spedizione) error) (Nota, error) {
+
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return Nota{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	var bloccata int32
+	err = tx.QueryRow(ctx, `SELECT id FROM spedizioni WHERE id = $1 FOR SHARE`, id).Scan(&bloccata)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Nota{}, errNonTrovata
+	}
+	if err != nil {
+		return Nota{}, err
+	}
+	attuale, err := perID(ctx, tx, id)
+	if err != nil {
+		return Nota{}, err
+	}
+	if err := verifica(attuale); err != nil {
+		return Nota{}, err
+	}
+
+	n := Nota{Testo: testo, IsInterna: true}
+	n.IDOperatore, n.IDCorriere = autoreNota(autore)
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO note (nota, is_interna, id_operatore_logistico_creata, id_corriere_creata, id_spedizione)
+		VALUES ($1, true, $2, $3, $4)
+		RETURNING id, creata_il`,
+		testo, n.IDOperatore, n.IDCorriere, id,
+	).Scan(&n.ID, &n.CreataIl); err != nil {
+		return Nota{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Nota{}, err
+	}
+	return n, nil
 }
 
 func perID(ctx context.Context, q interrogabile, id int32) (Spedizione, error) {
@@ -219,6 +263,30 @@ func traduciErrore(err error) error {
 }
 
 func (r *Repository) Elenca(ctx context.Context, v Visibilita, f FiltroElenco) ([]VoceElenco, error) {
+	return r.elenca(ctx, v, f, nil)
+}
+
+func (r *Repository) Dettaglio(ctx context.Context, v Visibilita, id int32) (DettaglioSpedizione, error) {
+	voci, err := r.elenca(ctx, v, FiltroElenco{Pagina: 1, PerPagina: 1}, &id)
+	if err != nil {
+		return DettaglioSpedizione{}, err
+	}
+	if len(voci) == 0 {
+		return DettaglioSpedizione{}, errNonTrovata
+	}
+	s, err := perID(ctx, r.db, id)
+	if err != nil {
+		return DettaglioSpedizione{}, err
+	}
+	return DettaglioSpedizione{
+		VoceElenco:               voci[0],
+		AnnullataIl:              s.AnnullataIl,
+		TentativiRitiroFalliti:   s.TentativiRitiroFalliti,
+		TentativiConsegnaFalliti: s.TentativiConsegnaFalliti,
+	}, nil
+}
+
+func (r *Repository) elenca(ctx context.Context, v Visibilita, f FiltroElenco, id *int32) ([]VoceElenco, error) {
 	var args []any
 	arg := func(x any) string {
 		args = append(args, x)
@@ -226,6 +294,9 @@ func (r *Repository) Elenca(ctx context.Context, v Visibilita, f FiltroElenco) (
 	}
 
 	condizioni := []string{"TRUE"}
+	if id != nil {
+		condizioni = append(condizioni, "s.id = "+arg(*id))
+	}
 	if v.IDCorriere != nil {
 		condizioni = append(condizioni, "a.id_corriere = "+arg(*v.IDCorriere))
 	}
@@ -271,7 +342,8 @@ func (r *Repository) Elenca(ctx context.Context, v Visibilita, f FiltroElenco) (
 		       COALESCE((
 		           SELECT json_agg(json_build_object(
 		                      'id', n.id, 'nota', n.nota, 'is_interna', n.is_interna,
-		                      'motivo', n.motivo, 'creata_il', n.creata_il
+		                      'motivo', n.motivo, 'creata_il', n.creata_il,
+		                      'id_operatore', n.id_operatore_logistico_creata, 'id_corriere', n.id_corriere_creata
 		                  ) ORDER BY n.creata_il, n.id)
 		           FROM note n
 		           WHERE n.id_spedizione = s.id %s
@@ -318,20 +390,23 @@ func (r *Repository) Elenca(ctx context.Context, v Visibilita, f FiltroElenco) (
 	return voci, righe.Err()
 }
 
-func leggiNote(dati []byte) ([]NotaElenco, error) {
+func leggiNote(dati []byte) ([]Nota, error) {
 	var grezze []struct {
-		ID        int32     `json:"id"`
-		Nota      string    `json:"nota"`
-		IsInterna bool      `json:"is_interna"`
-		Motivo    *string   `json:"motivo"`
-		CreataIl  time.Time `json:"creata_il"`
+		ID          int32     `json:"id"`
+		Nota        string    `json:"nota"`
+		IsInterna   bool      `json:"is_interna"`
+		Motivo      *string   `json:"motivo"`
+		CreataIl    time.Time `json:"creata_il"`
+		IDOperatore *int32    `json:"id_operatore"`
+		IDCorriere  *int32    `json:"id_corriere"`
 	}
 	if err := json.Unmarshal(dati, &grezze); err != nil {
 		return nil, err
 	}
-	note := make([]NotaElenco, len(grezze))
+	note := make([]Nota, len(grezze))
 	for i, g := range grezze {
-		note[i] = NotaElenco{ID: g.ID, Testo: g.Nota, IsInterna: g.IsInterna, Motivo: g.Motivo, CreataIl: g.CreataIl}
+		note[i] = Nota{ID: g.ID, Testo: g.Nota, IsInterna: g.IsInterna, Motivo: g.Motivo, CreataIl: g.CreataIl,
+			IDOperatore: g.IDOperatore, IDCorriere: g.IDCorriere}
 	}
 	return note, nil
 }
