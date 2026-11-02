@@ -1,0 +1,868 @@
+openapi: 3.0.3
+
+info:
+  title: LastMileDelivery API
+  version: "0.11.0"
+  description: |
+    API per la gestione delle spedizioni di Veloce24.
+
+    Se il contratto e il codice divergono, il contratto ha vinto: va aggiornato
+    nello stesso commit del codice.
+
+    **Identificazione provvisoria.** Finché il login non è integrato, chi chiama si
+    indica con uno solo degli header `X-Id-Operatore`, `X-Id-Corriere`, `X-Id-Cliente`,
+    `X-Id-Amministratore` (id nella tabella del ruolo). Non è autenticazione: vale solo
+    per lo sviluppo. Sarà sostituito dal token JWT senza cambiare il resto del contratto.
+    Clienti e amministratori possono solo leggere: il cliente l'elenco delle sue
+    spedizioni, l'amministratore tutte le spedizioni e il loro storico. Tutte le altre
+    operazioni rispondono 403.
+
+    **Configurazione del server** (variabili d'ambiente): `DATABASE_URL` (obbligatoria),
+    `LISTEN_ADDR` (predefinito `127.0.0.1:8080`), `MAX_TENTATIVI` (predefinito 3),
+    `GIORNI_VISIBILITA_CLIENTE` (predefinito 30).
+
+    **Ciclo di vita** (stati del tipo `stato_spedizione` del database):
+
+    | Da | A | Chi | Endpoint |
+    | :-- | :-- | :-- | :-- |
+    | creata | assegnata | operatore | `POST /assegnazioni` |
+    | assegnata, ritirata | stesso stato, altro corriere | operatore | `POST /assegnazioni` |
+    | assegnata | assegnata (ritiro fallito) | corriere assegnato | `POST /tentativi` con `tipo: ritiro` |
+    | assegnata | ritirata | corriere assegnato | `PATCH /stato` |
+    | creata, assegnata | annullata (`motivo` e `nota` obbligatori) | operatore | `PATCH /stato` |
+    | ritirata | in consegna | corriere assegnato | `PATCH /stato` |
+    | in consegna | consegnata | corriere assegnato | `PATCH /stato` |
+    | in consegna | in consegna (consegna fallita, tentativi 1 e 2) | corriere assegnato | `POST /tentativi` con `tipo: consegna` |
+    | in consegna | non consegnata (consegna fallita, 3° tentativo) | corriere assegnato | `POST /tentativi` con `tipo: consegna` |
+    | in consegna | ritirata | solo operatore | `PATCH /stato` |
+    | ritirata, in consegna | persa (`motivo` e `nota` obbligatori) | operatore | `PATCH /stato` |
+
+    Tentativi (`MAX_TENTATIVI`, predefinito 3):
+    - ritiro: la spedizione resta `assegnata`; dopo il terzo il corriere non può più
+      registrare tentativi né ritirarla, non si può riassegnare e la annulla l'operatore;
+    - consegna: ogni uscita in consegna ammette un solo tentativo. Ai tentativi 1 e 2 la
+      spedizione resta `in consegna`; per riprovare l'operatore la riporta in `ritirata`
+      (ed eventualmente la riassegna) e il corriere la rimette `in consegna`. Al terzo
+      passa da sola a `non consegnata`.
+
+    Ogni tentativo (ritiro e consegna) richiede la `nota` (testo libero). Il `motivo` è
+    un valore fisso (vedi gli schemi `MotivoRitiro`, `MotivoConsegna`, `MotivoAnnullamento`,
+    `MotivoPerdita`) ed è obbligatorio, insieme alla nota, per `annullata`, `persa` e
+    `non consegnata` (per quest'ultima va nel terzo tentativo di consegna); negli altri
+    tentativi è facoltativo.
+
+    Metodi: `POST` per gli endpoint che creano qualcosa (spedizione, assegnazione,
+    tentativo), `PATCH` per quelli che modificano la spedizione (dati e stato).
+
+    I dati si modificano con `PATCH /api/spedizioni/{id}` solo finché la spedizione non
+    è ritirata. Stati finali: consegnata, non consegnata, persa, annullata.
+
+    `is_reso` lo imposta l'operatore con `PATCH /api/spedizioni/{id}`, solo quando la
+    spedizione è `annullata`, `persa` o `non consegnata`. Alla creazione vale sempre `false`.
+
+    Ogni cambio della spedizione è registrato nello storico (`cambiamenti_spedizioni`) con
+    autore, data, valore precedente e nuovo. Ogni tentativo fallito è salvato in
+    `tentativi` con la sua nota interna, che riporta il corriere che l'ha scritta.
+
+servers:
+  - url: http://localhost:8080
+    description: Server locale di sviluppo
+
+tags:
+  - name: spedizioni
+
+paths:
+  /api/spedizioni:
+    get:
+      tags: [spedizioni]
+      summary: Elenca le spedizioni visibili a chi chiama
+      description: |
+        Il contenuto dipende dal ruolo:
+
+        | Ruolo | Spedizioni restituite | Note | `id_corriere` |
+        | :-- | :-- | :-- | :-- |
+        | operatore, amministratore | tutte, in tutti gli stati | tutte | sì |
+        | corriere | solo quelle assegnate a lui, finché non sono concluse (`assegnata`, `ritirata`, `in consegna`) | tutte | no |
+        | cliente | solo quelle di cui è destinatario: quelle in corso sempre, quelle chiuse (consegnata, non consegnata, persa, annullata) fino a `GIORNI_VISIBILITA_CLIENTE` giorni dalla chiusura (predefinito 30) | solo quelle non interne | no |
+
+        La data di chiusura (`conclusa_il`) è quella in cui la spedizione è entrata nello
+        stato finale, presa dallo storico.
+
+        Ordinate dalla più recente. I filtri si applicano dentro ciò che il ruolo può già
+        vedere (un corriere che chiede `stato=consegnata` riceve una lista vuota) e si
+        possono combinare.
+      operationId: elencaSpedizioni
+      security:
+        - operatore: []
+        - corriere: []
+        - cliente: []
+        - amministratore: []
+      parameters:
+        - name: stato
+          in: query
+          required: false
+          schema: { $ref: '#/components/schemas/Stato' }
+        - name: id_corriere
+          in: query
+          required: false
+          description: Solo le spedizioni assegnate a questo corriere. Solo per operatore e amministratore (altrimenti 403).
+          schema: { type: integer, format: int32, minimum: 1 }
+        - name: dal
+          in: query
+          required: false
+          description: Data di creazione minima, inclusa (AAAA-MM-GG, ora italiana)
+          schema: { type: string, format: date, example: '2026-11-01' }
+        - name: al
+          in: query
+          required: false
+          description: Data di creazione massima, inclusa (AAAA-MM-GG, ora italiana); non prima di `dal`
+          schema: { type: string, format: date, example: '2026-11-30' }
+        - name: cod_ordine
+          in: query
+          required: false
+          description: Riferimento della spedizione; trova i codici che lo contengono, senza distinguere maiuscole e minuscole
+          schema: { type: string, minLength: 1, maxLength: 50, example: ORD-2026 }
+        - name: pagina
+          in: query
+          required: false
+          description: Numero di pagina, da 1
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: per_pagina
+          in: query
+          required: false
+          description: Elementi per pagina
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: Elenco (può essere vuoto)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ListaSpedizioni' }
+              example:
+                dati:
+                  - id: 2
+                    cod_ordine: ORD-2
+                    stato: ritirata
+                    is_reso: false
+                    creata_il: '2026-10-27T21:00:00Z'
+                    dataora_richiesta_spedizione: '2026-10-28T09:00:00Z'
+                    id_cliente_mittente: 1
+                    id_cliente_destinatario: 2
+                    indirizzo_ritiro: { via: Via Roma, civico: '1' }
+                    indirizzo_spedizione: { via: Via Verdi, civico: '10' }
+                    id_corriere: 1
+                    conclusa_il: null
+                    note:
+                      - { id: 1, nota: nota pubblica, is_interna: false, motivo: null, creata_il: '2026-10-27T21:01:00Z' }
+                pagina: 1
+                per_pagina: 20
+        '400':
+          description: Parametro non valido (`stato`, `id_corriere`, `dal`, `al`, `cod_ordine`, `pagina` o `per_pagina`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+        '401': { $ref: '#/components/responses/NonIdentificato' }
+        '403':
+          description: Filtro `id_corriere` usato da un corriere o da un cliente
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+        '500': { $ref: '#/components/responses/ErroreInterno' }
+        '503': { $ref: '#/components/responses/NonDisponibile' }
+
+    post:
+      tags: [spedizioni]
+      summary: Crea una spedizione
+      description: |
+        L'operatore logistico crea una spedizione. Nasce sempre nello stato `creata`,
+        senza corriere. `cod_ordine` è il riferimento esterno (es. l'ordine dell'e-commerce)
+        ed è unico.
+      operationId: creaSpedizione
+      security:
+        - operatore: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NuovaSpedizione' }
+            example:
+              cod_ordine: ORD-2026-0001
+              id_cliente_mittente: 1
+              id_cliente_destinatario: 2
+              dataora_richiesta_spedizione: '2026-11-02T09:00:00+01:00'
+              id_indirizzo_ritiro: 1
+              id_indirizzo_spedizione: 2
+      responses:
+        '201': { $ref: '#/components/responses/SpedizioneCreata' }
+        '400':
+          description: |
+            Dati non validi: JSON malformato, campo mancante o non previsto, tipo errato,
+            data non ISO 8601 o nel passato, cliente o indirizzo inesistente, indirizzi uguali.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+              example:
+                errore: dati non validi
+                dettagli:
+                  - { campo: id_cliente_destinatario, messaggio: obbligatorio }
+                  - { campo: cod_ordine, messaggio: 'solo lettere, cifre e . _ / - senza spazi' }
+        '401': { $ref: '#/components/responses/NonIdentificato' }
+        '403': { $ref: '#/components/responses/NonAutorizzato' }
+        '409':
+          description: Codice ordine già usato, oppure Idempotency-Key già usata con dati diversi
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+        '415': { $ref: '#/components/responses/NonJSON' }
+        '500': { $ref: '#/components/responses/ErroreInterno' }
+        '503': { $ref: '#/components/responses/NonDisponibile' }
+
+  /api/spedizioni/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdSpedizione'
+    patch:
+      tags: [spedizioni]
+      summary: Modifica i dati di una spedizione
+      description: |
+        L'operatore modifica la spedizione mandando solo i campi da cambiare.
+        - `is_reso`: solo se la spedizione è `annullata`, `persa` o `non consegnata`;
+        - tutti gli altri campi: solo finché non è ritirata (stati `creata` e `assegnata`).
+
+        `cod_ordine`, lo stato e il corriere non si cambiano qui. Inviare gli stessi
+        valori non scrive nello storico.
+      operationId: modificaSpedizione
+      security:
+        - operatore: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ModificaSpedizione' }
+            examples:
+              dati:
+                summary: Cambia indirizzo e data (spedizione creata o assegnata)
+                value:
+                  id_indirizzo_spedizione: 3
+                  dataora_richiesta_spedizione: '2026-11-03T14:00:00+01:00'
+              reso:
+                summary: Segna come reso (spedizione annullata, persa o non consegnata)
+                value:
+                  is_reso: true
+      responses:
+        '200': { $ref: '#/components/responses/SpedizioneAggiornata' }
+        '400':
+          description: |
+            Dati non validi: nessun campo, campo non previsto, data nel passato,
+            riferimento inesistente, indirizzo di spedizione uguale a quello di ritiro.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+        '401': { $ref: '#/components/responses/NonIdentificato' }
+        '403': { $ref: '#/components/responses/NonAutorizzato' }
+        '404': { $ref: '#/components/responses/NonTrovata' }
+        '409':
+          description: |
+            Campi non modificabili nello stato attuale: dati dopo il ritiro, oppure
+            `is_reso` su una spedizione non annullata, persa o non consegnata
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+        '415': { $ref: '#/components/responses/NonJSON' }
+        '500': { $ref: '#/components/responses/ErroreInterno' }
+        '503': { $ref: '#/components/responses/NonDisponibile' }
+
+  /api/spedizioni/{id}/assegnazioni:
+    parameters:
+      - $ref: '#/components/parameters/IdSpedizione'
+    post:
+      tags: [spedizioni]
+      summary: Assegna o riassegna la spedizione a un corriere
+      description: |
+        L'operatore crea una nuova assegnazione, che diventa quella corrente.
+        - `creata`: la spedizione passa ad `assegnata`;
+        - `assegnata` o `ritirata`: lo stato non cambia, cambia solo il corriere.
+
+        Rispondere 201 vuol dire che è stata creata un'assegnazione; se il corriere è già
+        quello assegnato non succede niente e risponde 200. In entrambi i casi il corpo è
+        la spedizione aggiornata.
+      operationId: assegnaSpedizione
+      security:
+        - operatore: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Assegnazione' }
+            example: { id_corriere: 1 }
+      responses:
+        '200': { $ref: '#/components/responses/SpedizioneAggiornata' }
+        '201': { $ref: '#/components/responses/SpedizioneCreata' }
+        '400':
+          description: '`id_corriere` mancante, non valido o inesistente'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+        '401': { $ref: '#/components/responses/NonIdentificato' }
+        '403': { $ref: '#/components/responses/NonAutorizzato' }
+        '404': { $ref: '#/components/responses/NonTrovata' }
+        '409':
+          description: Spedizione in consegna o chiusa, oppure tentativi di ritiro esauriti
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+        '415': { $ref: '#/components/responses/NonJSON' }
+        '500': { $ref: '#/components/responses/ErroreInterno' }
+        '503': { $ref: '#/components/responses/NonDisponibile' }
+
+  /api/spedizioni/{id}/tentativi:
+    parameters:
+      - $ref: '#/components/parameters/IdSpedizione'
+    post:
+      tags: [spedizioni]
+      summary: Registra un tentativo di ritiro o di consegna non riuscito
+      description: |
+        Il corriere assegnato registra un tentativo fallito; lo stato lo decide il server.
+        - `ritiro` (spedizione `assegnata`): resta `assegnata`; al massimo 3 tentativi;
+        - `consegna` (spedizione `in consegna`): un solo tentativo per uscita; resta
+          `in consegna` ai tentativi 1 e 2, passa a `non consegnata` al terzo, che
+          richiede anche il `motivo`.
+
+        La `nota` è sempre obbligatoria, il `motivo` solo nel terzo tentativo di consegna.
+
+        Ogni richiesta registra un nuovo tentativo: per ripeterla senza danni usare
+        `Idempotency-Key`. Il corpo della risposta è la spedizione aggiornata.
+      operationId: registraTentativo
+      security:
+        - corriere: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TentativoFallito' }
+            examples:
+              ritiro:
+                summary: Ritiro non riuscito
+                value: { tipo: ritiro, nota: Magazzino del mittente chiuso }
+              consegna:
+                summary: Consegna non riuscita
+                value: { tipo: consegna, nota: Citofono rotto, nessuno risponde }
+              ultimaConsegna:
+                summary: Terzo tentativo di consegna (la spedizione diventa non consegnata)
+                value: { tipo: consegna, motivo: destinatario assente, nota: Terzo passaggio, nessuno in casa }
+      responses:
+        '201': { $ref: '#/components/responses/SpedizioneCreata' }
+        '400':
+          description: '`tipo` mancante o sconosciuto, `nota` mancante o vuota, `motivo` non previsto per quel tipo di tentativo, `motivo` mancante nel terzo tentativo di consegna'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+              example:
+                errore: dati non validi
+                dettagli:
+                  - { campo: nota, messaggio: obbligatoria per ogni tentativo non riuscito }
+        '401': { $ref: '#/components/responses/NonIdentificato' }
+        '403': { $ref: '#/components/responses/NonAutorizzato' }
+        '404': { $ref: '#/components/responses/NonTrovata' }
+        '409':
+          description: Spedizione nello stato sbagliato per quel tipo di tentativo, tentativi di ritiro esauriti, oppure tentativo di consegna già registrato in questa uscita (va prima riportata in ritirata dall'operatore)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+        '415': { $ref: '#/components/responses/NonJSON' }
+        '500': { $ref: '#/components/responses/ErroreInterno' }
+        '503': { $ref: '#/components/responses/NonDisponibile' }
+
+  /api/spedizioni/{id}/stato:
+    parameters:
+      - $ref: '#/components/parameters/IdSpedizione'
+    patch:
+      tags: [spedizioni]
+      summary: Cambia lo stato di una spedizione
+      description: |
+        Solo i cambi di stato veri e propri:
+        - corriere assegnato: `ritirata` (da assegnata), `in consegna`, `consegnata`;
+        - operatore: `ritirata` (da in consegna, per riportarla indietro), `annullata`, `persa`.
+
+        `annullata` e `persa` richiedono `motivo` e `nota`. `assegnata` si
+        ottiene con `/assegnazioni`, `non consegnata` con `/tentativi`, `creata` mai.
+
+        Chiedere di nuovo lo stato in cui la spedizione è già non cambia niente, non scrive
+        nello storico e risponde 200.
+      operationId: cambiaStatoSpedizione
+      security:
+        - operatore: []
+        - corriere: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CambioStato' }
+            examples:
+              ritiro:
+                summary: Il corriere ha ritirato il pacco
+                value: { stato: ritirata }
+              annullamento:
+                summary: L'operatore annulla
+                value: { stato: annullata, motivo: richiesta del mittente, nota: Il negozio ha chiamato alle 10 }
+              persa:
+                summary: L'operatore registra lo smarrimento
+                value: { stato: persa, motivo: smarrita durante il trasporto, nota: Il corriere segnala che il pacco non è nel furgone }
+              riportaInRitirata:
+                summary: L'operatore riporta in ritirata dopo una consegna fallita
+                value: { stato: ritirata }
+      responses:
+        '200': { $ref: '#/components/responses/SpedizioneAggiornata' }
+        '400':
+          description: Stato mancante, sconosciuto o che si imposta con un altro endpoint; `motivo` o `nota` mancanti per `annullata` o `persa`; `motivo` fuori elenco o presente con altri stati
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+        '401': { $ref: '#/components/responses/NonIdentificato' }
+        '403': { $ref: '#/components/responses/NonAutorizzato' }
+        '404': { $ref: '#/components/responses/NonTrovata' }
+        '409':
+          description: Transizione non ammessa dallo stato attuale, spedizione chiusa o tentativi di ritiro esauriti
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+              example: { errore: 'da "assegnata" non si può passare a "consegnata"' }
+        '415': { $ref: '#/components/responses/NonJSON' }
+        '500': { $ref: '#/components/responses/ErroreInterno' }
+        '503': { $ref: '#/components/responses/NonDisponibile' }
+
+  /api/spedizioni/{id}/storico:
+    parameters:
+      - $ref: '#/components/parameters/IdSpedizione'
+    get:
+      tags: [spedizioni]
+      summary: Storico delle modifiche di una spedizione
+      description: |
+        Tutte le righe di `cambiamenti_spedizioni` della spedizione, dalla più vecchia:
+        creazione, modifiche (dati, assegnazioni, cambi di stato, reso) e annullamento,
+        con autore, data e valori prima e dopo. Visibile ad amministratori e operatori
+        logistici.
+      operationId: storicoSpedizione
+      security:
+        - amministratore: []
+        - operatore: []
+      responses:
+        '200':
+          description: Storico della spedizione
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Storico' }
+              example:
+                dati:
+                  - id: 1
+                    operazione: creazione
+                    valore_vecchio: null
+                    valore_nuovo: { id: 42, stato: creata, cod_ordine: ORD-2026-0001 }
+                    modificato_il: '2026-11-01T09:00:00Z'
+                    autore: { ruolo: operatore, id: 1 }
+                  - id: 2
+                    operazione: modifica
+                    valore_vecchio: { stato: assegnata }
+                    valore_nuovo: { stato: ritirata }
+                    modificato_il: '2026-11-01T10:30:00Z'
+                    autore: { ruolo: corriere, id: 1 }
+        '400':
+          description: Id non valido
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+        '401': { $ref: '#/components/responses/NonIdentificato' }
+        '403': { $ref: '#/components/responses/NonAutorizzato' }
+        '404': { $ref: '#/components/responses/NonTrovata' }
+        '500': { $ref: '#/components/responses/ErroreInterno' }
+        '503': { $ref: '#/components/responses/NonDisponibile' }
+
+components:
+  securitySchemes:
+    operatore:
+      type: apiKey
+      in: header
+      name: X-Id-Operatore
+      description: PROVVISORIO, solo sviluppo — id in operatori_logistici
+    corriere:
+      type: apiKey
+      in: header
+      name: X-Id-Corriere
+      description: PROVVISORIO, solo sviluppo — id in corrieri
+    cliente:
+      type: apiKey
+      in: header
+      name: X-Id-Cliente
+      description: PROVVISORIO, solo sviluppo — id in clienti
+    amministratore:
+      type: apiKey
+      in: header
+      name: X-Id-Amministratore
+      description: PROVVISORIO, solo sviluppo — id in amministratori
+
+  parameters:
+    IdSpedizione:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, format: int32, minimum: 1 }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: |
+        Chiave unica generata dal client (es. un UUID) per ogni operazione. Se la stessa
+        richiesta arriva di nuovo con la stessa chiave (doppio clic, nuovo tentativo dopo
+        un timeout) il server non la esegue una seconda volta e restituisce la risposta
+        della prima, con l'header `Idempotent-Replayed: true`. Vale 24 ore, per utente e
+        per percorso. La stessa chiave con dati diversi dà 409.
+      schema: { type: string, minLength: 1, maxLength: 255 }
+
+  responses:
+    SpedizioneCreata:
+      description: Operazione eseguita; il corpo è la spedizione aggiornata
+      headers:
+        Idempotent-Replayed:
+          description: '`true` se è la ripetizione di una richiesta già eseguita con la stessa Idempotency-Key'
+          schema: { type: string, enum: ['true'] }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Spedizione' }
+    SpedizioneAggiornata:
+      description: Spedizione aggiornata (oppure già nella situazione richiesta)
+      headers:
+        Idempotent-Replayed:
+          description: '`true` se è la ripetizione di una richiesta già eseguita con la stessa Idempotency-Key'
+          schema: { type: string, enum: ['true'] }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Spedizione' }
+    NonIdentificato:
+      description: Manca l'header con l'utente, oppure l'utente non esiste
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Errore' }
+    NonAutorizzato:
+      description: Il ruolo non può fare questa operazione, oppure la spedizione non è assegnata al corriere che chiama
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Errore' }
+          example: { errore: la spedizione non è assegnata a te }
+    NonTrovata:
+      description: Spedizione inesistente
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Errore' }
+          example: { errore: spedizione non trovata }
+    NonJSON:
+      description: Il corpo non è JSON (Content-Type diverso da application/json)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Errore' }
+    ErroreInterno:
+      description: Errore del server; il dettaglio è solo nel log
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Errore' }
+          example: { errore: errore interno }
+    NonDisponibile:
+      description: 'Il database non risponde: si può riprovare dopo Retry-After secondi'
+      headers:
+        Retry-After:
+          schema: { type: integer, example: 5 }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Errore' }
+          example: { errore: 'servizio non disponibile, riprova' }
+
+  schemas:
+    Stato:
+      type: string
+      enum:
+        - creata
+        - assegnata
+        - ritirata
+        - persa
+        - in consegna
+        - consegnata
+        - non consegnata
+        - annullata
+
+    NuovaSpedizione:
+      type: object
+      additionalProperties: false
+      required:
+        - cod_ordine
+        - id_cliente_mittente
+        - id_cliente_destinatario
+        - dataora_richiesta_spedizione
+        - id_indirizzo_ritiro
+        - id_indirizzo_spedizione
+      properties:
+        cod_ordine:
+          type: string
+          minLength: 1
+          maxLength: 50
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._/-]*$'
+          description: Riferimento esterno dell'ordine, unico
+        id_cliente_mittente: { type: integer, format: int32, minimum: 1 }
+        id_cliente_destinatario: { type: integer, format: int32, minimum: 1 }
+        dataora_richiesta_spedizione:
+          type: string
+          format: date-time
+          description: ISO 8601 con fuso orario, non nel passato
+        id_indirizzo_ritiro: { type: integer, format: int32, minimum: 1 }
+        id_indirizzo_spedizione:
+          type: integer
+          format: int32
+          minimum: 1
+          description: Diverso dall'indirizzo di ritiro
+
+    ModificaSpedizione:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      description: Solo i campi da cambiare
+      properties:
+        is_reso:
+          type: boolean
+          description: Solo su una spedizione annullata, persa o non consegnata
+        id_cliente_mittente: { type: integer, format: int32, minimum: 1 }
+        id_cliente_destinatario: { type: integer, format: int32, minimum: 1 }
+        dataora_richiesta_spedizione:
+          type: string
+          format: date-time
+          description: ISO 8601 con fuso orario, non nel passato
+        id_indirizzo_ritiro: { type: integer, format: int32, minimum: 1 }
+        id_indirizzo_spedizione: { type: integer, format: int32, minimum: 1 }
+
+    Assegnazione:
+      type: object
+      additionalProperties: false
+      required: [id_corriere]
+      properties:
+        id_corriere: { type: integer, format: int32, minimum: 1 }
+
+    TentativoFallito:
+      type: object
+      additionalProperties: false
+      required: [tipo, nota]
+      properties:
+        tipo:
+          type: string
+          enum: [ritiro, consegna]
+        nota:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: Nota interna (mai visibile al destinatario)
+        motivo:
+          description: |
+            Con `tipo: ritiro` un valore di `MotivoRitiro`, con `tipo: consegna` un valore di
+            `MotivoConsegna`. Obbligatorio nel terzo tentativo di consegna, facoltativo negli altri.
+          anyOf:
+            - $ref: '#/components/schemas/MotivoRitiro'
+            - $ref: '#/components/schemas/MotivoConsegna'
+
+    CambioStato:
+      type: object
+      additionalProperties: false
+      required: [stato]
+      properties:
+        stato:
+          type: string
+          enum: [ritirata, in consegna, consegnata, annullata, persa]
+        nota:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: Nota interna. Obbligatoria per `annullata` e `persa`, facoltativa altrove.
+        motivo:
+          description: |
+            Obbligatorio per `annullata` (un valore di `MotivoAnnullamento`) e `persa` (un valore
+            di `MotivoPerdita`); non ammesso con gli altri stati.
+          anyOf:
+            - $ref: '#/components/schemas/MotivoAnnullamento'
+            - $ref: '#/components/schemas/MotivoPerdita'
+
+    MotivoRitiro:
+      type: string
+      enum: [mittente assente, pacco non pronto, indirizzo di ritiro errato, accesso impossibile, altro]
+
+    MotivoConsegna:
+      type: string
+      enum: [destinatario assente, indirizzo errato, rifiutata dal destinatario, accesso impossibile, altro]
+
+    MotivoAnnullamento:
+      type: string
+      enum: [richiesta del mittente, richiesta del destinatario, dati della spedizione errati, ritiro non riuscito, altro]
+
+    MotivoPerdita:
+      type: string
+      enum: [smarrita in deposito, smarrita durante il trasporto, furto, altro]
+
+    Spedizione:
+      type: object
+      required:
+        - id
+        - cod_ordine
+        - stato
+        - is_reso
+        - creata_il
+        - dataora_richiesta_spedizione
+        - id_cliente_mittente
+        - id_cliente_destinatario
+        - id_indirizzo_ritiro
+        - id_indirizzo_spedizione
+        - id_corriere
+        - annullata_il
+        - tentativi_ritiro_falliti
+        - tentativi_consegna_falliti
+      properties:
+        id: { type: integer, format: int32, example: 42 }
+        cod_ordine: { type: string, example: ORD-2026-0001 }
+        stato: { $ref: '#/components/schemas/Stato' }
+        is_reso: { type: boolean }
+        creata_il: { type: string, format: date-time }
+        dataora_richiesta_spedizione: { type: string, format: date-time }
+        id_cliente_mittente: { type: integer, format: int32 }
+        id_cliente_destinatario: { type: integer, format: int32 }
+        id_indirizzo_ritiro: { type: integer, format: int32 }
+        id_indirizzo_spedizione: { type: integer, format: int32 }
+        id_corriere:
+          type: integer
+          format: int32
+          nullable: true
+          description: Corriere dell'assegnazione attuale, null se non assegnata
+        annullata_il:
+          type: string
+          format: date-time
+          nullable: true
+        tentativi_ritiro_falliti: { type: integer, minimum: 0 }
+        tentativi_consegna_falliti: { type: integer, minimum: 0 }
+
+    Indirizzo:
+      type: object
+      required: [via, civico]
+      properties:
+        via: { type: string }
+        civico: { type: string }
+
+    Nota:
+      type: object
+      required: [id, nota, is_interna, motivo, creata_il]
+      properties:
+        id: { type: integer, format: int32 }
+        nota: { type: string }
+        is_interna: { type: boolean }
+        motivo: { type: string, nullable: true }
+        creata_il: { type: string, format: date-time }
+
+    VoceElenco:
+      type: object
+      required:
+        - id
+        - cod_ordine
+        - stato
+        - is_reso
+        - creata_il
+        - dataora_richiesta_spedizione
+        - id_cliente_mittente
+        - id_cliente_destinatario
+        - indirizzo_ritiro
+        - indirizzo_spedizione
+        - conclusa_il
+        - note
+      properties:
+        id: { type: integer, format: int32 }
+        cod_ordine: { type: string }
+        stato: { $ref: '#/components/schemas/Stato' }
+        is_reso: { type: boolean }
+        creata_il: { type: string, format: date-time }
+        dataora_richiesta_spedizione: { type: string, format: date-time }
+        id_cliente_mittente: { type: integer, format: int32 }
+        id_cliente_destinatario: { type: integer, format: int32 }
+        indirizzo_ritiro: { $ref: '#/components/schemas/Indirizzo' }
+        indirizzo_spedizione: { $ref: '#/components/schemas/Indirizzo' }
+        id_corriere:
+          type: integer
+          format: int32
+          nullable: true
+          description: Presente solo per operatore e amministratore
+        conclusa_il:
+          type: string
+          format: date-time
+          nullable: true
+          description: Quando la spedizione è entrata nello stato finale; null se è ancora in corso
+        note:
+          type: array
+          items: { $ref: '#/components/schemas/Nota' }
+
+    ListaSpedizioni:
+      type: object
+      required: [dati, pagina, per_pagina]
+      properties:
+        dati:
+          type: array
+          items: { $ref: '#/components/schemas/VoceElenco' }
+        pagina: { type: integer, minimum: 1 }
+        per_pagina: { type: integer, minimum: 1, maximum: 100 }
+
+    VoceStorico:
+      type: object
+      required: [id, operazione, valore_vecchio, valore_nuovo, modificato_il, autore]
+      properties:
+        id: { type: integer, format: int32 }
+        operazione:
+          type: string
+          enum: [creazione, modifica, annullamento]
+        valore_vecchio:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: Solo i campi cambiati, col valore precedente; null per la creazione
+        valore_nuovo:
+          type: object
+          additionalProperties: true
+          description: Solo i campi cambiati, col nuovo valore; la riga intera per la creazione
+        modificato_il: { type: string, format: date-time }
+        autore:
+          type: object
+          required: [ruolo, id]
+          properties:
+            ruolo: { type: string, enum: [operatore, corriere] }
+            id: { type: integer, format: int32 }
+
+    Storico:
+      type: object
+      required: [dati]
+      properties:
+        dati:
+          type: array
+          items: { $ref: '#/components/schemas/VoceStorico' }
+
+    Errore:
+      type: object
+      required: [errore]
+      properties:
+        errore:
+          type: string
+          description: Cosa è successo, senza dettagli interni
+        dettagli:
+          type: array
+          description: Per gli errori sui dati, un elemento per ogni campo da correggere
+          items:
+            type: object
+            required: [campo, messaggio]
+            properties:
+              campo: { type: string, example: nota }
+              messaggio: { type: string, example: obbligatoria per un tentativo non riuscito }
