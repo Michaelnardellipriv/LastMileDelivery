@@ -80,7 +80,8 @@ func TestPercorsiNonPrevisti(t *testing.T) {
 		t.Fatalf("atteso 404, ottenuto %d", stato)
 	}
 	for _, c := range []struct{ metodo, percorso, ammessi string }{
-		{http.MethodDelete, "/api/spedizioni/1", "PATCH"},
+		{http.MethodDelete, "/api/spedizioni/1", "GET, PATCH"},
+		{http.MethodGet, "/api/spedizioni/1/note", "POST"},
 		{http.MethodDelete, "/api/spedizioni", "GET, POST"},
 		{http.MethodPost, "/api/spedizioni/1/stato", "PATCH"},
 	} {
