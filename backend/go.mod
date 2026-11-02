@@ -1,4 +1,4 @@
-module main
+module lastmiledelivery/backend
 
 go 1.26.4
 
