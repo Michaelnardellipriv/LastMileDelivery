@@ -1,7 +1,11 @@
+# Stessi valori di config/test.env (ambiente TEST su MicroK8s).
+# Se cambiate uno dei due, cambiate anche l'altro nello stesso commit.
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: backend-config
 data:
   LISTEN_ADDR: "0.0.0.0:8080"
-  LOG_LEVEL: "info"
+  CORS_ORIGIN: "http://lastmile.test"
+  MAX_TENTATIVI: "3"
+  GIORNI_VISIBILITA_CLIENTE: "30"

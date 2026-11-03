@@ -14,41 +14,46 @@
 
 ## Stack
 
-*Dichiarate qui, in una riga per componente, cosa avete scelto — non è
-imposto dal corso, ma va detto esplicitamente perché chi clona il repository
-sappia cosa aspettarsi.*
-
 ```
-Stack: <linguaggio/framework backend>
-Frontend: <framework o "nessuno, per ora">
-Database: <tecnologia scelta>
+Stack: Go (net/http) + pgx
+Frontend: Flutter (web e mobile)
+Database: PostgreSQL 16
+Deploy: Docker, MicroK8s
 ```
-
-> Esempio: `Stack: Node.js + Express` · `Frontend: React` · `Database: PostgreSQL`
 
 ## Come si esegue
 
-*Anche solo pochi comandi indicativi, aggiornateli quando l'applicazione
-esiste davvero — oggi può bastare "non ancora eseguibile, in costruzione".*
+Ambiente DEV, database + backend in container (dettagli e altri ambienti in
+`docs/configuration.md`):
 
 ```
-<comando o comandi per avviare il progetto in locale, quando esisteranno>
+docker compose --env-file config/dev.env up --build
+curl -H "X-Id-Operatore: 1" http://localhost:8080/api/spedizioni
+```
+
+Frontend collegato al backend:
+
+```
+cd flutter_app
+flutter run -d chrome --web-port 5173 --dart-define=API_BASE=http://localhost:8080
 ```
 
 ## Struttura del repository
 
 ```
 .
-├── README.md            questo file
+├── README.md             questo file
 ├── CONTRIBUTING.md       come contribuire: branch, commit, Definition of Done
-└── docs/
-    ├── requirements.md   requisiti (lezione 1)
-    ├── use-cases.md      casi d'uso (lezione 1)
-    └── architecture-v1.md architettura (lezione 1)
+├── .env.example          tutte le variabili, senza valori veri
+├── docker-compose.yml    ambiente DEV: database + backend
+├── config/               dev.env, test.env (configurazione per ambiente)
+├── backend/              API in Go (cmd/, internal/, api/openapi.yaml, tests/)
+├── db/                   schema SQL, seed, Dockerfile del database
+├── flutter_app/          frontend Flutter
+├── k8s/                  manifest per MicroK8s (ambiente TEST)
+└── docs/                 requisiti, casi d'uso, architettura, modello dati,
+                          API, configurazione
 ```
-
-*Aggiornate l'albero quando aggiungete cartelle vere (es. `src/`, `tests/`):
-questo file deve restare uno specchio fedele di cosa c'è nel repository.*
 
 ## Stato del progetto
 
