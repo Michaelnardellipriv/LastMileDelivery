@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'backend_page.dart';
 import 'store.dart';
 
 void main() => runApp(const App());
@@ -52,6 +53,19 @@ class LoginPage extends StatelessWidget {
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(title: const Text('Veloce24')),
         body: ListView(padding: const EdgeInsets.all(16), children: [
+          if (apiBase.isNotEmpty)
+            Card(
+              color: Theme.of(context).colorScheme.primaryContainer,
+              child: ListTile(
+                leading: const Icon(Icons.cloud_done_outlined),
+                title: const Text('Dati reali dal backend'),
+                subtitle: Text('GET /api/spedizioni su $apiBase'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const BackendAccessoPage(apiBase: apiBase)),
+                ),
+              ),
+            ),
           Text('Accedi', style: Theme.of(context).textTheme.headlineSmall),
           const Text('Il backend non ha ancora un endpoint di login: scegli un utente di prova.'),
           for (final r in Ruolo.values) ...[
