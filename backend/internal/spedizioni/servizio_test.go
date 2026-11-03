@@ -157,7 +157,7 @@ func TestAssegnazione(t *testing.T) {
 
 func TestTentativiDiRitiro(t *testing.T) {
 	s := servizioTest()
-	tentativo := TentativoFallito{Tipo: TentativoRitiro, Nota: p("cancello chiuso")}
+	tentativo := TentativoFallito{Tipo: TentativoRitiro, Nota: p("cancello chiuso"), Motivo: p("accesso impossibile")}
 	attuale := inStato(Assegnata)
 
 	for falliti := 0; falliti < 3; falliti++ {
@@ -207,15 +207,6 @@ func TestTentativiDiConsegna(t *testing.T) {
 		t.Fatalf("un secondo tentativo nella stessa uscita va rifiutato: %v", err)
 	}
 
-	senzaMotivo := TentativoFallito{Tipo: TentativoConsegna, Nota: p("nessuno in casa")}
-	if m, err := s.decidiTentativo(corriere1, inStato(InConsegna), senzaMotivo); err != nil || m.NuovoStato != InConsegna {
-		t.Fatalf("al primo tentativo il motivo è facoltativo: %+v %v", m, err)
-	}
-	ultimo := inStato(InConsegna)
-	ultimo.TentativiConsegnaFalliti, ultimo.UsciteInConsegna = 2, 3
-	if _, err := s.decidiTentativo(corriere1, ultimo, senzaMotivo); tipoErrore(err) != "400" {
-		t.Fatalf("all'ultimo tentativo il motivo è obbligatorio: %v", err)
-	}
 	if _, err := s.decidiTentativo(corriere1, inStato(Ritirata), tentativo); tipoErrore(err) != "409" {
 		t.Fatalf("consegna fallita su una spedizione non in consegna: %v", err)
 	}
@@ -230,6 +221,8 @@ func TestValidaTentativo(t *testing.T) {
 		"motivo fuori elenco":          {Tipo: TentativoConsegna, Nota: p("x"), Motivo: p("pioveva")},
 		"motivo di ritiro su consegna": {Tipo: TentativoConsegna, Nota: p("x"), Motivo: p("mittente assente")},
 		"motivo di consegna su ritiro": {Tipo: TentativoRitiro, Nota: p("x"), Motivo: p("destinatario assente")},
+		"ritiro senza motivo":          {Tipo: TentativoRitiro, Nota: p("x")},
+		"consegna senza motivo":        {Tipo: TentativoConsegna, Nota: p("x")},
 	}
 	for nome, c := range casi {
 		t.Run(nome, func(t *testing.T) {
@@ -239,10 +232,9 @@ func TestValidaTentativo(t *testing.T) {
 		})
 	}
 	for nome, c := range map[string]TentativoFallito{
-		"ritiro con motivo":     {Tipo: TentativoRitiro, Nota: p("x"), Motivo: p("pacco non pronto")},
-		"consegna con motivo":   {Tipo: TentativoConsegna, Nota: p("x"), Motivo: p("indirizzo errato")},
-		"altro":                 {Tipo: TentativoConsegna, Nota: p("x"), Motivo: p("altro")},
-		"consegna senza motivo": {Tipo: TentativoConsegna, Nota: p("x")},
+		"ritiro con motivo":   {Tipo: TentativoRitiro, Nota: p("x"), Motivo: p("pacco non pronto")},
+		"consegna con motivo": {Tipo: TentativoConsegna, Nota: p("x"), Motivo: p("indirizzo errato")},
+		"altro":               {Tipo: TentativoConsegna, Nota: p("x"), Motivo: p("altro")},
 	} {
 		if err := validaTentativo(c); err != nil {
 			t.Errorf("%s: deve essere valido, ottenuto %v", nome, err)

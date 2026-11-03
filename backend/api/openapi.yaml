@@ -2,7 +2,7 @@ openapi: 3.0.3
 
 info:
   title: LastMileDelivery API
-  version: "0.11.0"
+  version: "0.16.0"
   description: |
     API per la gestione delle spedizioni di Veloce24.
 
@@ -13,9 +13,10 @@ info:
     indica con uno solo degli header `X-Id-Operatore`, `X-Id-Corriere`, `X-Id-Cliente`,
     `X-Id-Amministratore` (id nella tabella del ruolo). Non è autenticazione: vale solo
     per lo sviluppo. Sarà sostituito dal token JWT senza cambiare il resto del contratto.
-    Clienti e amministratori possono solo leggere: il cliente l'elenco delle sue
-    spedizioni, l'amministratore tutte le spedizioni e il loro storico. Tutte le altre
-    operazioni rispondono 403.
+    Clienti e amministratori possono solo leggere: il cliente l'elenco e il dettaglio
+    delle sue spedizioni, l'amministratore tutte le spedizioni e il loro storico.
+    L'amministratore non crea, modifica né elimina spedizioni, note o storico: tutte le
+    altre operazioni rispondono 403, e non esistono endpoint di eliminazione.
 
     **Configurazione del server** (variabili d'ambiente): `DATABASE_URL` (obbligatoria),
     `LISTEN_ADDR` (predefinito `127.0.0.1:8080`), `MAX_TENTATIVI` (predefinito 3),
@@ -45,14 +46,22 @@ info:
       (ed eventualmente la riassegna) e il corriere la rimette `in consegna`. Al terzo
       passa da sola a `non consegnata`.
 
-    Ogni tentativo (ritiro e consegna) richiede la `nota` (testo libero). Il `motivo` è
-    un valore fisso (vedi gli schemi `MotivoRitiro`, `MotivoConsegna`, `MotivoAnnullamento`,
-    `MotivoPerdita`) ed è obbligatorio, insieme alla nota, per `annullata`, `persa` e
-    `non consegnata` (per quest'ultima va nel terzo tentativo di consegna); negli altri
-    tentativi è facoltativo.
+    Ogni tentativo (ritiro e consegna) richiede `motivo` e `nota`, e così i cambi di stato
+    in `annullata` e `persa`. La `nota` è testo libero; il `motivo` è un valore fisso (vedi
+    gli schemi `MotivoRitiro`, `MotivoConsegna`, `MotivoAnnullamento`, `MotivoPerdita`).
 
     Metodi: `POST` per gli endpoint che creano qualcosa (spedizione, assegnazione,
-    tentativo), `PATCH` per quelli che modificano la spedizione (dati e stato).
+    tentativo, nota), `PATCH` per quelli che modificano la spedizione (dati e stato).
+
+    **Note.** Tutte le note stanno nella stessa tabella:
+    - note pubbliche (`is_interna: false`): nascono solo con ogni tentativo di ritiro o
+      di consegna (`POST /tentativi`) e con i cambi di stato in `annullata` o `persa`
+      (`PATCH /stato`). Sono composte da un `motivo` pubblico e da una `nota` interna: al
+      cliente arriva solo il `motivo`;
+    - note interne (`is_interna: true`): si creano solo con `POST /api/spedizioni/{id}/note`.
+      Gli altri cambi di stato non accettano la `nota`.
+
+    Il cliente non vede mai le note interne né il testo o l'autore delle note pubbliche.
 
     I dati si modificano con `PATCH /api/spedizioni/{id}` solo finché la spedizione non
     è ritirata. Stati finali: consegnata, non consegnata, persa, annullata.
@@ -62,7 +71,7 @@ info:
 
     Ogni cambio della spedizione è registrato nello storico (`cambiamenti_spedizioni`) con
     autore, data, valore precedente e nuovo. Ogni tentativo fallito è salvato in
-    `tentativi` con la sua nota interna, che riporta il corriere che l'ha scritta.
+    `tentativi` con la sua nota, che riporta il corriere che l'ha scritta.
 
 servers:
   - url: http://localhost:8080
@@ -83,7 +92,7 @@ paths:
         | :-- | :-- | :-- | :-- |
         | operatore, amministratore | tutte, in tutti gli stati | tutte | sì |
         | corriere | solo quelle assegnate a lui, finché non sono concluse (`assegnata`, `ritirata`, `in consegna`) | tutte | no |
-        | cliente | solo quelle di cui è destinatario: quelle in corso sempre, quelle chiuse (consegnata, non consegnata, persa, annullata) fino a `GIORNI_VISIBILITA_CLIENTE` giorni dalla chiusura (predefinito 30) | solo quelle non interne | no |
+        | cliente | solo quelle di cui è destinatario: quelle in corso sempre, quelle chiuse (consegnata, non consegnata, persa, annullata) fino a `GIORNI_VISIBILITA_CLIENTE` giorni dalla chiusura (predefinito 30) | solo il `motivo` (e la data) delle note pubbliche | no |
 
         La data di chiusura (`conclusa_il`) è quella in cui la spedizione è entrata nello
         stato finale, presa dallo storico.
@@ -153,7 +162,7 @@ paths:
                     id_corriere: 1
                     conclusa_il: null
                     note:
-                      - { id: 1, nota: nota pubblica, is_interna: false, motivo: null, creata_il: '2026-10-27T21:01:00Z' }
+                      - { id: 1, nota: Il mittente ha annullato l'ordine, is_interna: false, motivo: richiesta del mittente, creata_il: '2026-10-27T21:01:00Z' }
                 pagina: 1
                 per_pagina: 20
         '400':
@@ -222,6 +231,65 @@ paths:
   /api/spedizioni/{id}:
     parameters:
       - $ref: '#/components/parameters/IdSpedizione'
+    get:
+      tags: [spedizioni]
+      summary: Dettaglio di una spedizione
+      description: |
+        Una spedizione con indirizzi, corriere, tentativi falliti, date e note.
+        Le regole di visibilità sono quelle dell'elenco:
+
+        | Chi | Vede |
+        | :-- | :-- |
+        | operatore, amministratore | qualsiasi spedizione, con corriere, note interne e autori delle note |
+        | corriere | solo le spedizioni assegnate a lui in `assegnata`, `ritirata`, `in consegna`, con note interne |
+        | cliente | solo quelle di cui è destinatario, fino a `GIORNI_VISIBILITA_CLIENTE` giorni dalla chiusura; senza corriere; delle note vede solo il `motivo` di quelle pubbliche (tentativi, annullata, persa) |
+
+        Una spedizione che il richiedente non può vedere risponde 404, come se non esistesse.
+      operationId: dettaglioSpedizione
+      security:
+        - operatore: []
+        - corriere: []
+        - cliente: []
+        - amministratore: []
+      responses:
+        '200':
+          description: Dettaglio della spedizione
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DettaglioSpedizione' }
+              example:
+                id: 42
+                cod_ordine: ORD-2026-0001
+                stato: ritirata
+                is_reso: false
+                creata_il: '2026-11-01T09:00:00Z'
+                dataora_richiesta_spedizione: '2026-11-02T09:00:00Z'
+                id_cliente_mittente: 3
+                id_cliente_destinatario: 5
+                indirizzo_ritiro: { via: Via Roma, civico: '10' }
+                indirizzo_spedizione: { via: Corso Italia, civico: 5B }
+                id_corriere: 1
+                conclusa_il: null
+                annullata_il: null
+                tentativi_ritiro_falliti: 1
+                tentativi_consegna_falliti: 0
+                note:
+                  - id: 7
+                    nota: Magazzino del mittente chiuso
+                    is_interna: true
+                    motivo: mittente assente
+                    creata_il: '2026-11-01T10:00:00Z'
+                    autore: { ruolo: corriere, id: 1 }
+        '400':
+          description: Id non valido
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+        '401': { $ref: '#/components/responses/NonIdentificato' }
+        '404': { $ref: '#/components/responses/NonTrovata' }
+        '500': { $ref: '#/components/responses/ErroreInterno' }
+        '503': { $ref: '#/components/responses/NonDisponibile' }
+
     patch:
       tags: [spedizioni]
       summary: Modifica i dati di una spedizione
@@ -330,10 +398,10 @@ paths:
         Il corriere assegnato registra un tentativo fallito; lo stato lo decide il server.
         - `ritiro` (spedizione `assegnata`): resta `assegnata`; al massimo 3 tentativi;
         - `consegna` (spedizione `in consegna`): un solo tentativo per uscita; resta
-          `in consegna` ai tentativi 1 e 2, passa a `non consegnata` al terzo, che
-          richiede anche il `motivo`.
+          `in consegna` ai tentativi 1 e 2, passa a `non consegnata` al terzo.
 
-        La `nota` è sempre obbligatoria, il `motivo` solo nel terzo tentativo di consegna.
+        `motivo` e `nota` sono sempre obbligatori e formano una nota pubblica: il cliente
+        vede solo il `motivo`, la `nota` resta interna.
 
         Ogni richiesta registra un nuovo tentativo: per ripeterla senza danni usare
         `Idempotency-Key`. Il corpo della risposta è la spedizione aggiornata.
@@ -350,17 +418,17 @@ paths:
             examples:
               ritiro:
                 summary: Ritiro non riuscito
-                value: { tipo: ritiro, nota: Magazzino del mittente chiuso }
+                value: { tipo: ritiro, motivo: mittente assente, nota: Magazzino del mittente chiuso }
               consegna:
                 summary: Consegna non riuscita
-                value: { tipo: consegna, nota: Citofono rotto, nessuno risponde }
+                value: { tipo: consegna, motivo: destinatario assente, nota: Citofono rotto, nessuno risponde }
               ultimaConsegna:
                 summary: Terzo tentativo di consegna (la spedizione diventa non consegnata)
                 value: { tipo: consegna, motivo: destinatario assente, nota: Terzo passaggio, nessuno in casa }
       responses:
         '201': { $ref: '#/components/responses/SpedizioneCreata' }
         '400':
-          description: '`tipo` mancante o sconosciuto, `nota` mancante o vuota, `motivo` non previsto per quel tipo di tentativo, `motivo` mancante nel terzo tentativo di consegna'
+          description: '`tipo` mancante o sconosciuto, `nota` mancante o vuota, `motivo` mancante o non previsto per quel tipo di tentativo'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Errore' }
@@ -380,6 +448,72 @@ paths:
         '500': { $ref: '#/components/responses/ErroreInterno' }
         '503': { $ref: '#/components/responses/NonDisponibile' }
 
+  /api/spedizioni/{id}/note:
+    parameters:
+      - $ref: '#/components/parameters/IdSpedizione'
+    post:
+      tags: [spedizioni]
+      summary: Aggiunge una nota operativa libera
+      description: |
+        Operatori e corrieri scrivono una nota interna sulla spedizione, in qualsiasi
+        momento, senza cambiarne lo stato e senza righe nello storico. Le note libere
+        sono sempre interne: le note pubbliche nascono solo con i tentativi e con i cambi
+        di stato in annullata o persa.
+        - operatore: su qualsiasi spedizione, in qualsiasi stato;
+        - corriere: solo sulle spedizioni assegnate a lui in `ritirata` o `in consegna`
+          (403 se non è sua, 409 negli altri stati, compresa `consegnata`).
+
+        Ogni richiesta aggiunge una nota: per ripeterla senza duplicati usare
+        `Idempotency-Key`.
+      operationId: aggiungiNota
+      security:
+        - operatore: []
+        - corriere: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NuovaNota' }
+            examples:
+              interna:
+                summary: Nota interna
+                value: { nota: Pacco fragile, maneggiare con cura }
+      responses:
+        '201':
+          description: Nota salvata
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Nota' }
+              example:
+                id: 8
+                nota: Pacco fragile, maneggiare con cura
+                is_interna: true
+                motivo: null
+                creata_il: '2026-11-01T11:00:00Z'
+                autore: { ruolo: operatore, id: 1 }
+        '400':
+          description: '`nota` mancante, vuota o oltre 2000 caratteri; campi diversi da `nota` (per esempio `is_interna`); id non valido'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+              example:
+                errore: dati non validi
+                dettagli:
+                  - { campo: nota, messaggio: obbligatoria }
+        '401': { $ref: '#/components/responses/NonIdentificato' }
+        '403': { $ref: '#/components/responses/NonAutorizzato' }
+        '404': { $ref: '#/components/responses/NonTrovata' }
+        '409':
+          description: Il corriere scrive su una spedizione che non è ritirata o in consegna
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+        '415': { $ref: '#/components/responses/NonJSON' }
+        '500': { $ref: '#/components/responses/ErroreInterno' }
+        '503': { $ref: '#/components/responses/NonDisponibile' }
+
   /api/spedizioni/{id}/stato:
     parameters:
       - $ref: '#/components/parameters/IdSpedizione'
@@ -391,7 +525,9 @@ paths:
         - corriere assegnato: `ritirata` (da assegnata), `in consegna`, `consegnata`;
         - operatore: `ritirata` (da in consegna, per riportarla indietro), `annullata`, `persa`.
 
-        `annullata` e `persa` richiedono `motivo` e `nota`. `assegnata` si
+        `annullata` e `persa` richiedono `motivo` (pubblico) e `nota` (interna); gli altri
+        stati non accettano né `motivo` né `nota`: le note interne si scrivono con
+        `POST /api/spedizioni/{id}/note`. `assegnata` si
         ottiene con `/assegnazioni`, `non consegnata` con `/tentativi`, `creata` mai.
 
         Chiedere di nuovo lo stato in cui la spedizione è già non cambia niente, non scrive
@@ -423,7 +559,7 @@ paths:
       responses:
         '200': { $ref: '#/components/responses/SpedizioneAggiornata' }
         '400':
-          description: Stato mancante, sconosciuto o che si imposta con un altro endpoint; `motivo` o `nota` mancanti per `annullata` o `persa`; `motivo` fuori elenco o presente con altri stati
+          description: Stato mancante, sconosciuto o che si imposta con un altro endpoint; `motivo` o `nota` mancanti per `annullata` o `persa`; `motivo` fuori elenco; `motivo` o `nota` presenti con altri stati
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Errore' }
@@ -655,7 +791,7 @@ components:
     TentativoFallito:
       type: object
       additionalProperties: false
-      required: [tipo, nota]
+      required: [tipo, nota, motivo]
       properties:
         tipo:
           type: string
@@ -668,7 +804,7 @@ components:
         motivo:
           description: |
             Con `tipo: ritiro` un valore di `MotivoRitiro`, con `tipo: consegna` un valore di
-            `MotivoConsegna`. Obbligatorio nel terzo tentativo di consegna, facoltativo negli altri.
+            `MotivoConsegna`. Sempre obbligatorio; è l'unica parte della nota visibile al cliente.
           anyOf:
             - $ref: '#/components/schemas/MotivoRitiro'
             - $ref: '#/components/schemas/MotivoConsegna'
@@ -685,7 +821,7 @@ components:
           type: string
           minLength: 1
           maxLength: 2000
-          description: Nota interna. Obbligatoria per `annullata` e `persa`, facoltativa altrove.
+          description: Nota interna. Obbligatoria per `annullata` e `persa`, non ammessa con gli altri stati.
         motivo:
           description: |
             Obbligatorio per `annullata` (un valore di `MotivoAnnullamento`) e `persa` (un valore
@@ -757,15 +893,37 @@ components:
         via: { type: string }
         civico: { type: string }
 
+    Autore:
+      type: object
+      required: [ruolo, id]
+      properties:
+        ruolo: { type: string, enum: [operatore, corriere] }
+        id: { type: integer, format: int32 }
+
+    NuovaNota:
+      type: object
+      required: [nota]
+      properties:
+        nota: { type: string, minLength: 1, maxLength: 2000 }
+      additionalProperties: false
+
     Nota:
       type: object
-      required: [id, nota, is_interna, motivo, creata_il]
+      required: [id, is_interna, motivo, creata_il]
       properties:
         id: { type: integer, format: int32 }
-        nota: { type: string }
-        is_interna: { type: boolean }
+        nota:
+          type: string
+          description: Testo della nota; assente per il cliente, che vede solo il `motivo`
+        is_interna:
+          type: boolean
+          description: '`false` per le note dei tentativi e dei cambi di stato in annullata o persa'
+
         motivo: { type: string, nullable: true }
         creata_il: { type: string, format: date-time }
+        autore:
+          allOf: [{ $ref: '#/components/schemas/Autore' }]
+          description: Chi ha scritto la nota; assente per il cliente
 
     VoceElenco:
       type: object
@@ -807,6 +965,16 @@ components:
           type: array
           items: { $ref: '#/components/schemas/Nota' }
 
+    DettaglioSpedizione:
+      allOf:
+        - $ref: '#/components/schemas/VoceElenco'
+        - type: object
+          required: [annullata_il, tentativi_ritiro_falliti, tentativi_consegna_falliti]
+          properties:
+            annullata_il: { type: string, format: date-time, nullable: true }
+            tentativi_ritiro_falliti: { type: integer, minimum: 0 }
+            tentativi_consegna_falliti: { type: integer, minimum: 0 }
+
     ListaSpedizioni:
       type: object
       required: [dati, pagina, per_pagina]
@@ -835,12 +1003,7 @@ components:
           additionalProperties: true
           description: Solo i campi cambiati, col nuovo valore; la riga intera per la creazione
         modificato_il: { type: string, format: date-time }
-        autore:
-          type: object
-          required: [ruolo, id]
-          properties:
-            ruolo: { type: string, enum: [operatore, corriere] }
-            id: { type: integer, format: int32 }
+        autore: { $ref: '#/components/schemas/Autore' }
 
     Storico:
       type: object

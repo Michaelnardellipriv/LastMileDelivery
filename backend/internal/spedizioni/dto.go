@@ -35,6 +35,10 @@ type richiestaTentativo struct {
 	Motivo *string `json:"motivo"`
 }
 
+type richiestaNota struct {
+	Nota *string `json:"nota"`
+}
+
 type richiestaStato struct {
 	Stato  *string `json:"stato"`
 	Nota   *string `json:"nota"`
@@ -69,10 +73,7 @@ func versoDTO(s Spedizione) spedizioneDTO {
 		IDCorriere:             s.IDCorriere,
 		TentativiRitiroFalliti: s.TentativiRitiroFalliti, TentativiConsegnaFalliti: s.TentativiConsegnaFalliti,
 	}
-	if s.AnnullataIl != nil {
-		t := s.AnnullataIl.UTC()
-		d.AnnullataIl = &t
-	}
+	d.AnnullataIl = inUTC(s.AnnullataIl)
 	return d
 }
 
@@ -133,11 +134,17 @@ type indirizzoDTO struct {
 }
 
 type notaDTO struct {
-	ID        int32     `json:"id"`
-	Nota      string    `json:"nota"`
-	IsInterna bool      `json:"is_interna"`
-	Motivo    *string   `json:"motivo"`
-	CreataIl  time.Time `json:"creata_il"`
+	ID        int32      `json:"id"`
+	Nota      string     `json:"nota,omitempty"`
+	IsInterna bool       `json:"is_interna"`
+	Motivo    *string    `json:"motivo"`
+	CreataIl  time.Time  `json:"creata_il"`
+	Autore    *autoreDTO `json:"autore,omitempty"`
+}
+
+func versoNotaDTO(n Nota) notaDTO {
+	return notaDTO{ID: n.ID, Nota: n.Testo, IsInterna: n.IsInterna, Motivo: n.Motivo, CreataIl: n.CreataIl.UTC(),
+		Autore: autoreDa(n.IDOperatore, n.IDCorriere)}
 }
 
 type voceElencoDTO struct {
@@ -165,27 +172,50 @@ type rispostaElenco struct {
 func versoElencoDTO(voci []VoceElenco, f FiltroElenco) rispostaElenco {
 	r := rispostaElenco{Dati: make([]voceElencoDTO, len(voci)), Pagina: f.Pagina, PerPagina: f.PerPagina}
 	for i, v := range voci {
-		var conclusa *time.Time
-		if v.ConclusaIl != nil {
-			t := v.ConclusaIl.UTC()
-			conclusa = &t
-		}
-		note := make([]notaDTO, len(v.Note))
-		for j, n := range v.Note {
-			note[j] = notaDTO{ID: n.ID, Nota: n.Testo, IsInterna: n.IsInterna, Motivo: n.Motivo, CreataIl: n.CreataIl.UTC()}
-		}
-		r.Dati[i] = voceElencoDTO{
-			ID: v.ID, CodOrdine: v.CodOrdine, Stato: v.Stato.String(), IsReso: v.IsReso,
-			CreataIl: v.CreataIl.UTC(), DataoraRichiesta: v.DataoraRichiesta.UTC(),
-			IDClienteMittente: v.IDClienteMittente, IDClienteDestinatario: v.IDClienteDestinatario,
-			IndirizzoRitiro:     indirizzoDTO{v.IndirizzoRitiro.Via, v.IndirizzoRitiro.Civico},
-			IndirizzoSpedizione: indirizzoDTO{v.IndirizzoSpedizione.Via, v.IndirizzoSpedizione.Civico},
-			IDCorriere:          v.IDCorriere,
-			ConclusaIl:          conclusa,
-			Note:                note,
-		}
+		r.Dati[i] = versoVoceDTO(v)
 	}
 	return r
+}
+
+func versoVoceDTO(v VoceElenco) voceElencoDTO {
+	note := make([]notaDTO, len(v.Note))
+	for j, n := range v.Note {
+		note[j] = versoNotaDTO(n)
+	}
+	return voceElencoDTO{
+		ID: v.ID, CodOrdine: v.CodOrdine, Stato: v.Stato.String(), IsReso: v.IsReso,
+		CreataIl: v.CreataIl.UTC(), DataoraRichiesta: v.DataoraRichiesta.UTC(),
+		IDClienteMittente: v.IDClienteMittente, IDClienteDestinatario: v.IDClienteDestinatario,
+		IndirizzoRitiro:     indirizzoDTO{v.IndirizzoRitiro.Via, v.IndirizzoRitiro.Civico},
+		IndirizzoSpedizione: indirizzoDTO{v.IndirizzoSpedizione.Via, v.IndirizzoSpedizione.Civico},
+		IDCorriere:          v.IDCorriere,
+		ConclusaIl:          inUTC(v.ConclusaIl),
+		Note:                note,
+	}
+}
+
+type dettaglioDTO struct {
+	voceElencoDTO
+	AnnullataIl              *time.Time `json:"annullata_il"`
+	TentativiRitiroFalliti   int        `json:"tentativi_ritiro_falliti"`
+	TentativiConsegnaFalliti int        `json:"tentativi_consegna_falliti"`
+}
+
+func versoDettaglioDTO(d DettaglioSpedizione) dettaglioDTO {
+	return dettaglioDTO{
+		voceElencoDTO:            versoVoceDTO(d.VoceElenco),
+		AnnullataIl:              inUTC(d.AnnullataIl),
+		TentativiRitiroFalliti:   d.TentativiRitiroFalliti,
+		TentativiConsegnaFalliti: d.TentativiConsegnaFalliti,
+	}
+}
+
+func inUTC(t *time.Time) *time.Time {
+	if t == nil {
+		return nil
+	}
+	u := t.UTC()
+	return &u
 }
 
 type autoreDTO struct {
@@ -206,15 +236,22 @@ type rispostaStorico struct {
 	Dati []voceStoricoDTO `json:"dati"`
 }
 
+func autoreDa(idOperatore, idCorriere *int32) *autoreDTO {
+	switch {
+	case idOperatore != nil:
+		return &autoreDTO{Ruolo: string(identita.Operatore), ID: *idOperatore}
+	case idCorriere != nil:
+		return &autoreDTO{Ruolo: string(identita.Corriere), ID: *idCorriere}
+	}
+	return nil
+}
+
 func versoStoricoDTO(voci []VoceStorico) rispostaStorico {
 	r := rispostaStorico{Dati: make([]voceStoricoDTO, len(voci))}
 	for i, v := range voci {
 		autore := autoreDTO{}
-		switch {
-		case v.IDOperatore != nil:
-			autore = autoreDTO{Ruolo: string(identita.Operatore), ID: *v.IDOperatore}
-		case v.IDCorriere != nil:
-			autore = autoreDTO{Ruolo: string(identita.Corriere), ID: *v.IDCorriere}
+		if a := autoreDa(v.IDOperatore, v.IDCorriere); a != nil {
+			autore = *a
 		}
 		r.Dati[i] = voceStoricoDTO{
 			ID: v.ID, Operazione: v.Operazione,

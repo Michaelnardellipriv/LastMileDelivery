@@ -404,8 +404,9 @@ func TestCreaSpedizione(t *testing.T) {
 	t.Run("idempotency_key_una_sola_spedizione", func(t *testing.T) {
 		h := comeOperatore(f)
 		h["Idempotency-Key"] = "chiave-" + f.suffisso
-		prima := f.chiama(t, http.MethodPost, "/api/spedizioni", f.corpoValido("IDEM"), h)
-		seconda := f.chiama(t, http.MethodPost, "/api/spedizioni", f.corpoValido("IDEM"), h)
+		corpo := f.corpoValido("IDEM")
+		prima := f.chiama(t, http.MethodPost, "/api/spedizioni", corpo, h)
+		seconda := f.chiama(t, http.MethodPost, "/api/spedizioni", corpo, h)
 		if prima.stato != 201 || seconda.stato != 201 || prima.corpo["id"] != seconda.corpo["id"] ||
 			seconda.header.Get("Idempotent-Replayed") != "true" {
 			t.Fatalf("la ripetizione deve restituire la stessa spedizione: %d %s / %d %s",
@@ -549,7 +550,7 @@ func TestAssegnazioni(t *testing.T) {
 func TestTentativi(t *testing.T) {
 	f := preparaFixture(t)
 	op, c1, c2 := comeOperatore(f), comeCorriere(f.idCorriere1), comeCorriere(f.idCorriere2)
-	ritiroFallito := map[string]any{"tipo": "ritiro", "nota": "mittente assente"}
+	ritiroFallito := map[string]any{"tipo": "ritiro", "nota": "mittente assente", "motivo": "mittente assente"}
 	consegnaFallita := map[string]any{"tipo": "consegna", "nota": "citofono rotto", "motivo": "destinatario assente"}
 	consegnaSenzaMotivo := map[string]any{"tipo": "consegna", "nota": "traffico, ripasso domani"}
 
@@ -572,8 +573,8 @@ func TestTentativi(t *testing.T) {
 
 		if n := f.conta(t, `SELECT count(*) FROM tentativi t JOIN note n ON n.id = t.id_nota
 			WHERE t.id_spedizione = $1 AND t.tipo = 'ritiro' AND n.id_corriere_creata = $2
-			  AND n.nota = 'mittente assente' AND n.is_interna`, id, f.idCorriere1); n != 3 {
-			t.Fatalf("attesi 3 tentativi di ritiro con nota del corriere, trovati %d", n)
+			  AND n.nota = 'mittente assente' AND n.motivo = 'mittente assente' AND NOT n.is_interna`, id, f.idCorriere1); n != 3 {
+			t.Fatalf("attesi 3 tentativi di ritiro con nota del corriere e motivo pubblico, trovati %d", n)
 		}
 	})
 
@@ -585,28 +586,26 @@ func TestTentativi(t *testing.T) {
 		attesi := []string{"in consegna", "in consegna", "non consegnata"}
 		for i, atteso := range attesi {
 			f.stato(t, id, c1, map[string]any{"stato": "in consegna"}, 200)
-			corpo := consegnaSenzaMotivo
-			if atteso == "non consegnata" {
-				f.tentativo(t, id, c1, consegnaSenzaMotivo, 400)
-				corpo = consegnaFallita
+			if r := f.tentativo(t, id, c1, consegnaSenzaMotivo, 400); !contiene(campiInErrore(r), "motivo") {
+				t.Fatalf("il motivo è obbligatorio a ogni tentativo: %s", r.grezzo)
 			}
-			r := f.tentativo(t, id, c1, corpo, 201)
+			r := f.tentativo(t, id, c1, consegnaFallita, 201)
 			if r.corpo["stato"] != atteso || int(r.corpo["tentativi_consegna_falliti"].(float64)) != i+1 || r.corpo["is_reso"] != false {
 				t.Fatalf("tentativo %d: atteso %q, ottenuto %s", i+1, atteso, r.grezzo)
 			}
 			if atteso == "in consegna" {
-				f.tentativo(t, id, c1, consegnaSenzaMotivo, 409)
+				f.tentativo(t, id, c1, consegnaFallita, 409)
 				f.stato(t, id, c1, map[string]any{"stato": "ritirata"}, 403)
 				f.stato(t, id, op, map[string]any{"stato": "ritirata"}, 200)
 			}
 		}
 		if n := f.conta(t, `SELECT count(*) FROM tentativi t JOIN note n ON n.id = t.id_nota
-			WHERE t.id_spedizione = $1 AND t.tipo = 'consegna' AND n.id_corriere_creata = $2 AND n.is_interna`, id, f.idCorriere1); n != 3 {
+			WHERE t.id_spedizione = $1 AND t.tipo = 'consegna' AND n.id_corriere_creata = $2`, id, f.idCorriere1); n != 3 {
 			t.Fatalf("attesi 3 tentativi di consegna con la nota del corriere, trovati %d", n)
 		}
 		if n := f.conta(t, `SELECT count(*) FROM tentativi t JOIN note n ON n.id = t.id_nota
-			WHERE t.id_spedizione = $1 AND n.motivo = 'destinatario assente'`, id); n != 1 {
-			t.Fatalf("atteso il motivo sul tentativo finale, trovati %d", n)
+			WHERE t.id_spedizione = $1 AND n.motivo = 'destinatario assente' AND NOT n.is_interna`, id); n != 3 {
+			t.Fatalf("attesi 3 tentativi con motivo pubblico, trovati %d", n)
 		}
 		f.stato(t, id, c1, map[string]any{"stato": "in consegna"}, 409)
 		if r := f.modifica(t, id, comeOperatore(f), map[string]any{"is_reso": true}, 200); r.corpo["is_reso"] != true {
@@ -623,14 +622,14 @@ func TestTentativi(t *testing.T) {
 		f.tentativo(t, id, c1, consegnaFallita, 409)
 
 		r := f.tentativo(t, id, c1, map[string]any{"tipo": "ritiro"}, 400)
-		if campi := campiInErrore(r); !contiene(campi, "nota") || contiene(campi, "motivo") {
-			t.Fatalf("atteso solo l'errore sulla nota: %v", campi)
+		if campi := campiInErrore(r); !contiene(campi, "nota") || !contiene(campi, "motivo") {
+			t.Fatalf("attesi gli errori su nota e motivo: %v", campi)
 		}
 		f.tentativo(t, id, c1, map[string]any{"nota": "x"}, 400)
 		f.tentativo(t, id, c1, map[string]any{"tipo": "ritiro", "nota": "x", "motivo": "destinatario assente"}, 400)
 		r = f.tentativo(t, id, c1, map[string]any{"tipo": "ritiro", "nota": "x", "motivo": "pacco non pronto"}, 201)
 		if int(r.corpo["tentativi_ritiro_falliti"].(float64)) != 1 {
-			t.Fatalf("ritiro con motivo libero: %s", r.grezzo)
+			t.Fatalf("ritiro con motivo: %s", r.grezzo)
 		}
 	})
 
@@ -787,7 +786,7 @@ func TestElencoSpedizioni(t *testing.T) {
 	f.retrodata(t, inCorsoDa40, 40)
 	f.retrodataStorico(t, inCorsoDa40, 40)
 	if _, err := f.db.Exec(context.Background(), `INSERT INTO note (nota, is_interna, id_operatore_logistico_creata, id_spedizione)
-		VALUES ('nota interna', true, $1, $2), ('nota per il cliente', false, $1, $2)`, f.idOperatore, assegnata); err != nil {
+		VALUES ('nota interna', true, $1, $2), ('nota con motivo per il cliente', false, $1, $2)`, f.idOperatore, assegnata); err != nil {
 		t.Fatal(err)
 	}
 
@@ -843,8 +842,10 @@ func TestElencoSpedizioni(t *testing.T) {
 			t.Errorf("conclusa_il valorizzata solo per le spedizioni chiuse: %v / %v", voci[consegnata]["conclusa_il"], voci[assegnata]["conclusa_il"])
 		}
 		note := voci[assegnata]["note"].([]any)
-		if len(note) != 1 || note[0].(map[string]any)["nota"] != "nota per il cliente" {
-			t.Errorf("il cliente vede solo le note non interne: %v", note)
+		if len(note) != 1 || note[0].(map[string]any)["is_interna"] != false {
+			t.Errorf("il cliente vede solo le note pubbliche: %v", note)
+		} else if _, ok := note[0].(map[string]any)["nota"]; ok {
+			t.Errorf("il cliente vede solo il motivo, non il testo della nota: %v", note)
 		}
 		if _, c := voci[assegnata]["id_corriere"]; c {
 			t.Errorf("il cliente non riceve id_corriere")

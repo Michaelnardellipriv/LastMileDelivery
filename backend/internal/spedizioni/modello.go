@@ -79,6 +79,7 @@ type Modifica struct {
 }
 
 type NotaDaSalvare struct {
-	Testo  string
-	Motivo *string
+	Testo    string
+	Motivo   *string
+	Pubblica bool
 }
