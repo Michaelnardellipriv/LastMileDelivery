@@ -16,6 +16,9 @@ type archivio interface {
 		decidi func(attuale Spedizione) (Modifica, error)) (Spedizione, bool, error)
 	Elenca(ctx context.Context, v Visibilita, f FiltroElenco) ([]VoceElenco, error)
 	Storico(ctx context.Context, id int32) ([]VoceStorico, error)
+	Dettaglio(ctx context.Context, v Visibilita, id int32) (DettaglioSpedizione, error)
+	AggiungiNota(ctx context.Context, id int32, autore identita.Richiedente, testo string,
+		verifica func(attuale Spedizione) error) (Nota, error)
 }
 
 type Servizio struct {
@@ -185,7 +188,7 @@ func validaTentativo(t TentativoFallito) error {
 	}
 	controllaNota(e, t.Nota, "obbligatoria per ogni tentativo non riuscito")
 	if t.Tipo.Valido() {
-		controllaMotivo(e, t.Motivo, motiviTentativo(t.Tipo), "")
+		controllaMotivo(e, t.Motivo, motiviTentativo(t.Tipo), "obbligatorio per ogni tentativo non riuscito")
 	}
 	return e.Err()
 }
@@ -195,6 +198,7 @@ func (s *Servizio) decidiTentativo(r identita.Richiedente, attuale Spedizione, t
 		return Modifica{}, &errori.NonAutorizzato{Messaggio: "la spedizione non è assegnata a te"}
 	}
 	m := Modifica{Tentativo: t.Tipo, Nota: notaDaSalvare(t.Nota, t.Motivo)}
+	m.Nota.Pubblica = true
 
 	if t.Tipo == TentativoRitiro {
 		if attuale.Stato != Assegnata {
@@ -220,12 +224,6 @@ func (s *Servizio) decidiTentativo(r identita.Richiedente, attuale Spedizione, t
 	}
 	m.NuovoStato = InConsegna
 	if attuale.TentativiConsegnaFalliti+1 >= s.maxTentativi {
-		if t.Motivo == nil {
-			e := &errori.Validazione{}
-			e.Aggiungi("motivo", fmt.Sprintf(
-				"obbligatorio: è il tentativo %d su %d e la spedizione diventa non consegnata", attuale.TentativiConsegnaFalliti+1, s.maxTentativi))
-			return Modifica{}, e
-		}
 		m.NuovoStato = NonConsegnata
 	}
 	return m, nil
@@ -256,7 +254,9 @@ func validaCambio(c CambioStato) error {
 		controllaMotivo(e, c.Motivo, regola.ammessi, "obbligatorio per "+regola.azione)
 		controllaNota(e, c.Nota, "obbligatoria per "+regola.azione)
 	} else {
-		controllaNota(e, c.Nota, "")
+		if c.Nota != nil {
+			e.Aggiungi("nota", "ammessa solo con gli stati annullata e persa: per una nota interna usare POST /api/spedizioni/{id}/note")
+		}
 		if c.Motivo != nil {
 			e.Aggiungi("motivo", "ammesso solo con gli stati annullata e persa")
 		}
@@ -283,7 +283,11 @@ func (s *Servizio) decidiStato(r identita.Richiedente, attuale Spedizione, c Cam
 			"falliti %d tentativi di ritiro su %d: la spedizione deve essere annullata dall'operatore",
 			attuale.TentativiRitiroFalliti, s.maxTentativi)}
 	}
-	return Modifica{NuovoStato: c.Stato, Annulla: c.Stato == Annullata, Nota: notaDaSalvare(c.Nota, c.Motivo)}, nil
+	nota := notaDaSalvare(c.Nota, c.Motivo)
+	if nota != nil {
+		nota.Pubblica = true
+	}
+	return Modifica{NuovoStato: c.Stato, Annulla: c.Stato == Annullata, Nota: nota}, nil
 }
 
 func rifiuta(r identita.Richiedente, attuale Spedizione, stato Stato) error {

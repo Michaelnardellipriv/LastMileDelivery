@@ -22,11 +22,43 @@ func NuovoHandler(s *Servizio) *Handler {
 func (h *Handler) Registra(rotte *httpx.Rotte, identifica, idempotente httpx.Middleware) {
 	rotte.Gestisci(http.MethodGet, "/api/spedizioni", http.HandlerFunc(h.elenca), identifica)
 	rotte.Gestisci(http.MethodPost, "/api/spedizioni", http.HandlerFunc(h.crea), identifica, idempotente)
+	rotte.Gestisci(http.MethodGet, "/api/spedizioni/{id}", http.HandlerFunc(h.dettaglio), identifica)
 	rotte.Gestisci(http.MethodPatch, "/api/spedizioni/{id}", http.HandlerFunc(h.modificaDati), identifica, idempotente)
 	rotte.Gestisci(http.MethodPost, "/api/spedizioni/{id}/assegnazioni", http.HandlerFunc(h.assegna), identifica, idempotente)
 	rotte.Gestisci(http.MethodPost, "/api/spedizioni/{id}/tentativi", http.HandlerFunc(h.registraTentativo), identifica, idempotente)
 	rotte.Gestisci(http.MethodPatch, "/api/spedizioni/{id}/stato", http.HandlerFunc(h.cambiaStato), identifica, idempotente)
+	rotte.Gestisci(http.MethodPost, "/api/spedizioni/{id}/note", http.HandlerFunc(h.aggiungiNota), identifica, idempotente)
 	rotte.Gestisci(http.MethodGet, "/api/spedizioni/{id}/storico", http.HandlerFunc(h.storico), identifica)
+}
+
+func (h *Handler) dettaglio(w http.ResponseWriter, r *http.Request) {
+	id, ok := httpx.IDDalPercorso(w, r)
+	if !ok {
+		return
+	}
+	d, err := h.servizio.Dettaglio(r.Context(), identita.DalContesto(r.Context()), id)
+	if err != nil {
+		httpx.RispondiErrore(w, r, err)
+		return
+	}
+	httpx.ScriviJSON(w, http.StatusOK, versoDettaglioDTO(d))
+}
+
+func (h *Handler) aggiungiNota(w http.ResponseWriter, r *http.Request) {
+	id, ok := httpx.IDDalPercorso(w, r)
+	if !ok {
+		return
+	}
+	var req richiestaNota
+	if !httpx.LeggiCorpo(w, r, &req) {
+		return
+	}
+	n, err := h.servizio.AggiungiNota(r.Context(), identita.DalContesto(r.Context()), id, req.Nota)
+	if err != nil {
+		httpx.RispondiErrore(w, r, err)
+		return
+	}
+	httpx.ScriviJSON(w, http.StatusCreated, versoNotaDTO(n))
 }
 
 func (h *Handler) storico(w http.ResponseWriter, r *http.Request) {

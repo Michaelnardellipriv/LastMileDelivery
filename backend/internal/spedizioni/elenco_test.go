@@ -9,9 +9,27 @@ import (
 )
 
 type archivioElenco struct {
-	vis    Visibilita
-	filtro FiltroElenco
-	voci   []VoceElenco
+	vis       Visibilita
+	filtro    FiltroElenco
+	voci      []VoceElenco
+	dettaglio DettaglioSpedizione
+	attuale   Spedizione
+	nota      Nota
+}
+
+func (a *archivioElenco) Dettaglio(_ context.Context, v Visibilita, _ int32) (DettaglioSpedizione, error) {
+	a.vis = v
+	return a.dettaglio, nil
+}
+
+func (a *archivioElenco) AggiungiNota(_ context.Context, _ int32, autore identita.Richiedente, testo string,
+	verifica func(Spedizione) error) (Nota, error) {
+	if err := verifica(a.attuale); err != nil {
+		return Nota{}, err
+	}
+	a.nota = Nota{Testo: testo, IsInterna: true}
+	a.nota.IDOperatore, a.nota.IDCorriere = autoreNota(autore)
+	return a.nota, nil
 }
 
 func (a *archivioElenco) Crea(context.Context, int32, NuovaSpedizione) (Spedizione, error) {

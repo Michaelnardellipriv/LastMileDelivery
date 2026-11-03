@@ -28,14 +28,6 @@ type Indirizzo struct {
 	Civico string
 }
 
-type NotaElenco struct {
-	ID        int32
-	Testo     string
-	IsInterna bool
-	Motivo    *string
-	CreataIl  time.Time
-}
-
 type VoceElenco struct {
 	ID                    int32
 	CodOrdine             string
@@ -49,7 +41,7 @@ type VoceElenco struct {
 	IndirizzoSpedizione   Indirizzo
 	IDCorriere            *int32
 	ConclusaIl            *time.Time
-	Note                  []NotaElenco
+	Note                  []Nota
 }
 
 type Visibilita struct {
@@ -116,10 +108,8 @@ func (s *Servizio) Elenca(ctx context.Context, r identita.Richiedente, f FiltroE
 	if err != nil {
 		return nil, err
 	}
-	if !vis.MostraCorriere {
-		for i := range voci {
-			voci[i].IDCorriere = nil
-		}
+	for i := range voci {
+		nascondi(vis, &voci[i])
 	}
 	return voci, nil
 }
