@@ -56,3 +56,10 @@ type Conflitto struct {
 }
 
 func (e *Conflitto) Error() string { return e.Messaggio }
+
+type TroppoPresto struct {
+	Messaggio         string
+	RiprovaTraSecondi int
+}
+
+func (e *TroppoPresto) Error() string { return e.Messaggio }
