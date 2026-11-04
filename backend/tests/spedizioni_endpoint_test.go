@@ -521,9 +521,16 @@ func TestAssegnazioni(t *testing.T) {
 		f.stato(t, id, c1, map[string]any{"stato": "ritirata"}, 403)
 		f.stato(t, id, c2, map[string]any{"stato": "ritirata"}, 200)
 
+		if r := f.assegna(t, id, f.idCorriere1, 409); !strings.Contains(string(r.grezzo), "tentativo di consegna") {
+			t.Fatalf("ritirata senza tentativi di consegna: non si riassegna: %s", r.grezzo)
+		}
+		f.stato(t, id, c2, map[string]any{"stato": "in consegna"}, 200)
+		f.tentativo(t, id, c2, map[string]any{"tipo": "consegna", "motivo": "destinatario assente", "nota": "nessuno in casa"}, 201)
+		f.stato(t, id, op, map[string]any{"stato": "ritirata"}, 200)
+
 		r = f.assegna(t, id, f.idCorriere1, 201)
 		if r.corpo["stato"] != "ritirata" || int32(r.corpo["id_corriere"].(float64)) != f.idCorriere1 {
-			t.Fatalf("riassegnazione dopo il ritiro: %s", r.grezzo)
+			t.Fatalf("riassegnazione dopo un tentativo di consegna fallito: %s", r.grezzo)
 		}
 		f.stato(t, id, c2, map[string]any{"stato": "in consegna"}, 403)
 		f.stato(t, id, c1, map[string]any{"stato": "in consegna"}, 200)
@@ -568,8 +575,20 @@ func TestTentativi(t *testing.T) {
 		f.stato(t, id, c1, map[string]any{"stato": "ritirata"}, 409)
 		f.assegna(t, id, f.idCorriere2, 409)
 		f.stato(t, id, c1, map[string]any{"stato": "annullata", "motivo": "altro", "nota": "x"}, 403)
-		f.stato(t, id, op, map[string]any{"stato": "annullata"}, 400)
-		f.stato(t, id, op, map[string]any{"stato": "annullata", "motivo": "ritiro non riuscito", "nota": "3 ritiri falliti"}, 200)
+		f.stato(t, id, op, map[string]any{"stato": "annullata", "motivo": "ritiro non riuscito"}, 400)
+		note := f.conta(t, `SELECT count(*) FROM note WHERE id_spedizione = $1`, id)
+		if r := f.stato(t, id, op, map[string]any{"stato": "annullata"}, 200); r.corpo["stato"] != "annullata" {
+			t.Fatalf("dopo 3 ritiri falliti si annulla senza motivo né nota: %s", r.grezzo)
+		}
+		if n := f.conta(t, `SELECT count(*) FROM note WHERE id_spedizione = $1`, id); n != note {
+			t.Fatalf("annullare dopo 3 ritiri falliti non aggiunge una quarta nota: da %d a %d", note, n)
+		}
+
+		meno := f.nuovaSpedizione(t, "RITIRO2")
+		f.assegna(t, meno, f.idCorriere1, 201)
+		f.tentativo(t, meno, c1, ritiroFallito, 201)
+		f.stato(t, meno, op, map[string]any{"stato": "annullata"}, 400)
+		f.stato(t, meno, op, map[string]any{"stato": "annullata", "motivo": "ritiro non riuscito", "nota": "il negozio ha chiuso"}, 200)
 
 		if n := f.conta(t, `SELECT count(*) FROM tentativi t JOIN note n ON n.id = t.id_nota
 			WHERE t.id_spedizione = $1 AND t.tipo = 'ritiro' AND n.id_corriere_creata = $2
