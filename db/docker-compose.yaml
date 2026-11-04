@@ -1,0 +1,14 @@
+services:
+  db:
+    build: .
+    image: spedizioni-db
+    container_name: spedizioni-db
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
