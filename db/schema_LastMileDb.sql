@@ -2,6 +2,8 @@ BEGIN;
 
 
 
+DROP TABLE IF EXISTS posizioni_corrieri     CASCADE;
+DROP TABLE IF EXISTS impostazioni           CASCADE;
 DROP TABLE IF EXISTS cambiamenti_spedizioni CASCADE;
 DROP TABLE IF EXISTS tentativi              CASCADE;
 DROP TABLE IF EXISTS note                   CASCADE;
@@ -374,6 +376,43 @@ BEFORE UPDATE OR DELETE ON cambiamenti_spedizioni
 FOR EACH ROW
 EXECUTE FUNCTION fn_blocca_modifica_storico();
 
+
+
+
+-- ===== Posizione dei corrieri (RF16) =====
+
+-- Impostazioni globali dell'applicazione, modificabili dall'amministratore.
+-- La tabella ha sempre UNA sola riga: la chiave è un booleano che può
+-- valere solo TRUE, quindi una seconda riga violerebbe la PRIMARY KEY.
+CREATE TABLE impostazioni (
+    id                          BOOLEAN PRIMARY KEY DEFAULT TRUE,
+    intervallo_posizione_sec    INTEGER NOT NULL DEFAULT 30,
+    modificate_il               TIMESTAMPTZ NOT NULL DEFAULT now(),
+    id_amministratore_modifica  INTEGER NULL
+                                REFERENCES amministratori (id) ON UPDATE CASCADE ON DELETE SET NULL,
+    CONSTRAINT ck_impostazioni_riga_unica CHECK (id),
+    -- sotto i 5 secondi il database si riempie, sopra l'ora la posizione non serve più
+    CONSTRAINT ck_impostazioni_intervallo CHECK (intervallo_posizione_sec BETWEEN 5 AND 3600)
+);
+
+INSERT INTO impostazioni DEFAULT VALUES;
+
+-- Storico delle posizioni (simulate) inviate dai corrieri.
+-- L'ultima posizione di un corriere è la riga con rilevata_il più recente.
+CREATE TABLE posizioni_corrieri (
+    id           INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id_corriere  INTEGER NOT NULL
+                 REFERENCES corrieri (id) ON UPDATE CASCADE ON DELETE RESTRICT,
+    latitudine   DOUBLE PRECISION NOT NULL,
+    longitudine  DOUBLE PRECISION NOT NULL,
+    rilevata_il  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT ck_posizioni_latitudine  CHECK (latitudine  BETWEEN -90  AND 90),
+    CONSTRAINT ck_posizioni_longitudine CHECK (longitudine BETWEEN -180 AND 180)
+);
+
+-- Rende veloce "ultima posizione di ogni corriere".
+CREATE INDEX ix_posizioni_corrieri_ultima
+    ON posizioni_corrieri (id_corriere, rilevata_il DESC);
 
 
 COMMIT;

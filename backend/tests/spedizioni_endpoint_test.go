@@ -35,6 +35,8 @@ type fixture struct {
 	idRitiro         int32
 	idConsegna       int32
 	idAmministratore int32
+	idCorrierePos    int32
+	idCorriereFermo  int32
 }
 
 var (
@@ -94,6 +96,8 @@ func creaFixture(t *testing.T) *fixture {
 	f.idMittente = inserisci(`INSERT INTO clienti (id_utente) VALUES ($1) RETURNING id`, utente("mittente"))
 	f.idDestinatario = inserisci(`INSERT INTO clienti (id_utente) VALUES ($1) RETURNING id`, utente("destinatario"))
 	f.idAmministratore = inserisci(`INSERT INTO amministratori (pwd_hash, id_utente) VALUES ('x', $1) RETURNING id`, utente("amministratore"))
+	f.idCorrierePos = inserisci(`INSERT INTO corrieri (pwd_hash, id_utente) VALUES ('x', $1) RETURNING id`, utente("corrierepos"))
+	f.idCorriereFermo = inserisci(`INSERT INTO corrieri (pwd_hash, id_utente) VALUES ('x', $1) RETURNING id`, utente("corrierefermo"))
 
 	nazione := inserisci(`INSERT INTO nazioni (nome) VALUES ($1) RETURNING id`, "Nazione "+f.suffisso)
 	regione := inserisci(`INSERT INTO regioni (nome, id_nazione) VALUES ('Regione', $1) RETURNING id`, nazione)

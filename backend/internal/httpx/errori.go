@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strconv"
 
 	"lastmiledelivery/backend/internal/database"
 	"lastmiledelivery/backend/internal/errori"
@@ -15,6 +16,7 @@ func RispondiErrore(w http.ResponseWriter, r *http.Request, err error) {
 	var nonAutorizzato *errori.NonAutorizzato
 	var nonTrovato *errori.NonTrovato
 	var conflitto *errori.Conflitto
+	var troppoPresto *errori.TroppoPresto
 
 	switch {
 	case errors.As(err, &validazione):
@@ -28,6 +30,9 @@ func RispondiErrore(w http.ResponseWriter, r *http.Request, err error) {
 		ScriviErrore(w, http.StatusNotFound, nonTrovato.Messaggio)
 	case errors.As(err, &conflitto):
 		ScriviErrore(w, http.StatusConflict, conflitto.Messaggio, conflitto.Dettagli...)
+	case errors.As(err, &troppoPresto):
+		w.Header().Set("Retry-After", strconv.Itoa(troppoPresto.RiprovaTraSecondi))
+		ScriviErrore(w, http.StatusTooManyRequests, troppoPresto.Messaggio)
 	case database.NonDisponibile(err):
 		log.Printf("database non disponibile: %s %s: %v", r.Method, r.URL.Path, err)
 		w.Header().Set("Retry-After", "5")

@@ -8,6 +8,7 @@ import (
 	"lastmiledelivery/backend/internal/httpx"
 	"lastmiledelivery/backend/internal/idempotenza"
 	"lastmiledelivery/backend/internal/identita"
+	"lastmiledelivery/backend/internal/posizioni"
 	"lastmiledelivery/backend/internal/spedizioni"
 )
 
@@ -24,6 +25,9 @@ func Nuovo(db *pgxpool.Pool, cfg Config) http.Handler {
 
 	servizioSpedizioni := spedizioni.NuovoServizio(spedizioni.NuovoRepository(db), cfg.MaxTentativi, cfg.GiorniVisibilitaCliente)
 	spedizioni.NuovoHandler(servizioSpedizioni).Registra(rotte, richiediUtente, idempotente)
+
+	servizioPosizioni := posizioni.NuovoServizio(posizioni.NuovoRepository(db))
+	posizioni.NuovoHandler(servizioPosizioni).Registra(rotte, richiediUtente)
 
 	return rotte.Handler()
 }
