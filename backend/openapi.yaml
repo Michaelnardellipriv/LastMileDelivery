@@ -76,3 +76,158 @@ paths:
           description: Codice ordine già utilizzato
         "500":
           description: Errore interno del server
+
+  # ---------- Posizione dei corrieri (RF16) ----------
+  # Identificazione TEMPORANEA con header finché non c'è il login.
+
+  /api/corrieri/posizione:
+    post:
+      summary: Il corriere invia la propria posizione (simulata)
+      description: >
+        Solo corrieri. Viene salvata solo se il corriere ha almeno una
+        spedizione "in consegna", e non più spesso
+        dell'intervallo impostato dall'amministratore.
+      parameters:
+        - $ref: "#/components/parameters/IdCorriere"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [latitudine, longitudine]
+              properties:
+                latitudine:
+                  type: number
+                  minimum: -90
+                  maximum: 90
+                  example: 46.0679
+                longitudine:
+                  type: number
+                  minimum: -180
+                  maximum: 180
+                  example: 11.1211
+      responses:
+        "201":
+          description: Posizione salvata; indica dopo quanti secondi inviare la prossima
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Intervallo"
+        "400":
+          description: Coordinate mancanti o fuori range
+        "401":
+          description: Header X-Id-Corriere mancante o non valido
+        "403":
+          description: Nessun corriere con questo id
+        "409":
+          description: Il corriere non ha spedizioni in consegna
+        "429":
+          description: Inviata prima che sia passato l'intervallo (header Retry-After)
+        "500":
+          description: Errore interno del server
+
+  /api/corrieri/posizioni:
+    get:
+      summary: Ultima posizione dei corrieri con spedizioni in consegna
+      description: Solo operatori logistici.
+      parameters:
+        - in: header
+          name: X-Id-Operatore
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        "200":
+          description: Posizioni dei corrieri attivi
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  intervallo_secondi:
+                    type: integer
+                  corrieri:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id_corriere: { type: integer }
+                        nome: { type: string }
+                        cognome: { type: string }
+                        latitudine: { type: number }
+                        longitudine: { type: number }
+                        rilevata_il: { type: string, format: date-time }
+                        spedizioni_attive:
+                          type: array
+                          items: { type: integer }
+        "401":
+          description: Header X-Id-Operatore mancante o non valido
+        "403":
+          description: Nessun operatore con questo id
+        "500":
+          description: Errore interno del server
+
+  /api/impostazioni/intervallo-posizione:
+    get:
+      summary: Ogni quanti secondi il corriere invia la posizione
+      description: Corrieri, operatori e amministratori (basta uno dei tre header).
+      responses:
+        "200":
+          description: Intervallo attuale
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Intervallo"
+        "401":
+          description: Nessun header di ruolo valido
+        "403":
+          description: Id non trovato per quel ruolo
+    put:
+      summary: Modifica l'intervallo di invio della posizione
+      description: Solo amministratori.
+      parameters:
+        - in: header
+          name: X-Id-Amministratore
+          required: true
+          schema: { type: integer, minimum: 1 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Intervallo"
+      responses:
+        "200":
+          description: Intervallo aggiornato
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Intervallo"
+        "400":
+          description: Intervallo mancante o fuori dal range 5–3600
+        "401":
+          description: Header X-Id-Amministratore mancante o non valido
+        "403":
+          description: Nessun amministratore con questo id
+        "500":
+          description: Errore interno del server
+
+components:
+  parameters:
+    IdCorriere:
+      in: header
+      name: X-Id-Corriere
+      required: true
+      schema: { type: integer, minimum: 1 }
+  schemas:
+    Intervallo:
+      type: object
+      additionalProperties: false
+      required: [intervallo_secondi]
+      properties:
+        intervallo_secondi:
+          type: integer
+          minimum: 5
+          maximum: 3600
+          example: 30

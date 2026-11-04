@@ -63,7 +63,24 @@ func main() {
 	router.HandleFunc("POST /api/spedizioni", func(w http.ResponseWriter, r *http.Request) {
 		creaSpedizione(w, r, db, idOperatoreTest)
 	})
-	
+
+	// Posizione dei corrieri (RF16): la inviano solo i corrieri con spedizioni
+	// in consegna, la leggono solo gli operatori logistici.
+	router.HandleFunc("POST /api/corrieri/posizione", func(w http.ResponseWriter, r *http.Request) {
+		inviaPosizioneCorriere(w, r, db)
+	})
+	router.HandleFunc("GET /api/corrieri/posizioni", func(w http.ResponseWriter, r *http.Request) {
+		elencaPosizioniCorrieri(w, r, db)
+	})
+
+	// Ogni quanti secondi il corriere invia la posizione: lo decide l'amministratore.
+	router.HandleFunc("GET /api/impostazioni/intervallo-posizione", func(w http.ResponseWriter, r *http.Request) {
+		leggiIntervalloHandler(w, r, db)
+	})
+	router.HandleFunc("PUT /api/impostazioni/intervallo-posizione", func(w http.ResponseWriter, r *http.Request) {
+		modificaIntervalloHandler(w, r, db)
+	})
+
 	//passo al server il router 
 	err = http.ListenAndServe(":8080", router)
 
