@@ -79,6 +79,8 @@ servers:
 
 tags:
   - name: spedizioni
+  - name: posizioni
+    description: Posizione simulata dei corrieri (RF16) e intervallo di invio
 
 paths:
   /api/spedizioni:
@@ -622,6 +624,137 @@ paths:
         '500': { $ref: '#/components/responses/ErroreInterno' }
         '503': { $ref: '#/components/responses/NonDisponibile' }
 
+  /api/corrieri/posizione:
+    post:
+      tags: [posizioni]
+      summary: Il corriere invia la propria posizione (simulata)
+      description: |
+        Solo corrieri. La posizione viene salvata solo se il corriere ha almeno una
+        spedizione `in consegna` e non più spesso dell'intervallo impostato
+        dall'amministratore (con 2 secondi di tolleranza). La risposta dice ogni quanti
+        secondi inviare la prossima. Il simulatore `go run ./cmd/simulatore-corriere`
+        usa questo endpoint.
+      operationId: inviaPosizione
+      security:
+        - corriere: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NuovaPosizione' }
+            example: { latitudine: 46.0679, longitudine: 11.1211 }
+      responses:
+        '201':
+          description: Posizione salvata
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Intervallo' }
+        '400':
+          description: Coordinate mancanti o fuori range
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+        '401': { $ref: '#/components/responses/NonIdentificato' }
+        '403': { $ref: '#/components/responses/NonAutorizzato' }
+        '409':
+          description: Il corriere non ha spedizioni in consegna
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+        '415': { $ref: '#/components/responses/NonJSON' }
+        '429':
+          description: Inviata prima che sia passato l'intervallo; `Retry-After` indica i secondi da attendere
+          headers:
+            Retry-After:
+              schema: { type: integer }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+        '500': { $ref: '#/components/responses/ErroreInterno' }
+        '503': { $ref: '#/components/responses/NonDisponibile' }
+
+  /api/corrieri/posizioni:
+    get:
+      tags: [posizioni]
+      summary: Ultima posizione dei corrieri con spedizioni in consegna
+      description: |
+        Solo operatori logistici. Per ogni corriere che ha ora spedizioni `in consegna`
+        e ha inviato almeno una posizione: l'ultima posizione e le spedizioni in consegna.
+        Chi ha finito le consegne non compare, anche se le sue posizioni restano salvate.
+      operationId: elencaPosizioni
+      security:
+        - operatore: []
+      responses:
+        '200':
+          description: Posizioni dei corrieri attivi
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PosizioniCorrieri' }
+              example:
+                intervallo_secondi: 30
+                corrieri:
+                  - id_corriere: 1
+                    nome: Carlo
+                    cognome: Corriere
+                    latitudine: 46.0679
+                    longitudine: 11.1211
+                    rilevata_il: '2026-11-04T10:00:00Z'
+                    spedizioni_attive: [42, 43]
+        '401': { $ref: '#/components/responses/NonIdentificato' }
+        '403': { $ref: '#/components/responses/NonAutorizzato' }
+        '500': { $ref: '#/components/responses/ErroreInterno' }
+        '503': { $ref: '#/components/responses/NonDisponibile' }
+
+  /api/impostazioni/intervallo-posizione:
+    get:
+      tags: [posizioni]
+      summary: Ogni quanti secondi il corriere invia la posizione
+      description: Corrieri, operatori e amministratori; il cliente riceve 403.
+      operationId: leggiIntervalloPosizione
+      security:
+        - corriere: []
+        - operatore: []
+        - amministratore: []
+      responses:
+        '200':
+          description: Intervallo attuale
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Intervallo' }
+        '401': { $ref: '#/components/responses/NonIdentificato' }
+        '403': { $ref: '#/components/responses/NonAutorizzato' }
+        '500': { $ref: '#/components/responses/ErroreInterno' }
+        '503': { $ref: '#/components/responses/NonDisponibile' }
+    put:
+      tags: [posizioni]
+      summary: Modifica l'intervallo di invio della posizione
+      description: Solo amministratori. L'intervallo va da 5 a 3600 secondi; la modifica registra l'amministratore e l'ora.
+      operationId: modificaIntervalloPosizione
+      security:
+        - amministratore: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Intervallo' }
+            example: { intervallo_secondi: 30 }
+      responses:
+        '200':
+          description: Intervallo aggiornato
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Intervallo' }
+        '400':
+          description: Intervallo mancante o fuori dal range 5–3600
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+        '401': { $ref: '#/components/responses/NonIdentificato' }
+        '403': { $ref: '#/components/responses/NonAutorizzato' }
+        '415': { $ref: '#/components/responses/NonJSON' }
+        '500': { $ref: '#/components/responses/ErroreInterno' }
+        '503': { $ref: '#/components/responses/NonDisponibile' }
+
 components:
   securitySchemes:
     operatore:
@@ -1012,6 +1145,44 @@ components:
         dati:
           type: array
           items: { $ref: '#/components/schemas/VoceStorico' }
+
+    NuovaPosizione:
+      type: object
+      additionalProperties: false
+      required: [latitudine, longitudine]
+      properties:
+        latitudine: { type: number, minimum: -90, maximum: 90 }
+        longitudine: { type: number, minimum: -180, maximum: 180 }
+
+    Intervallo:
+      type: object
+      additionalProperties: false
+      required: [intervallo_secondi]
+      properties:
+        intervallo_secondi: { type: integer, minimum: 5, maximum: 3600, example: 30 }
+
+    PosizioneCorriere:
+      type: object
+      required: [id_corriere, nome, cognome, latitudine, longitudine, rilevata_il, spedizioni_attive]
+      properties:
+        id_corriere: { type: integer, format: int32 }
+        nome: { type: string }
+        cognome: { type: string }
+        latitudine: { type: number }
+        longitudine: { type: number }
+        rilevata_il: { type: string, format: date-time }
+        spedizioni_attive:
+          type: array
+          items: { type: integer, format: int32 }
+
+    PosizioniCorrieri:
+      type: object
+      required: [intervallo_secondi, corrieri]
+      properties:
+        intervallo_secondi: { type: integer }
+        corrieri:
+          type: array
+          items: { $ref: '#/components/schemas/PosizioneCorriere' }
 
     Errore:
       type: object
