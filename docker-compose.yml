@@ -1,0 +1,31 @@
+# Ambiente DEV completo sul portatile: database + backend.
+#   docker compose --env-file config/dev.env up --build
+# Il backend parte solo quando il database è pronto (healthcheck in db/Dockerfile):
+# senza, la prima connessione fallisce con "connection refused" (lezione 6).
+services:
+  db:
+    build: ./db
+    image: lastmile/db:dev
+    env_file: config/dev.env
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  backend:
+    build: ./backend
+    image: lastmile/backend:dev
+    env_file: config/dev.env
+    environment:
+      # dentro la rete dei container il database si chiama "db", non "localhost"
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=disable
+      # dentro il container 127.0.0.1 non è raggiungibile dal PC
+      LISTEN_ADDR: 0.0.0.0:8080
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
