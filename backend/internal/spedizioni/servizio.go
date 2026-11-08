@@ -158,6 +158,9 @@ func (s *Servizio) decidiAssegnazione(attuale Spedizione, idCorriere *int32) (Mo
 				"falliti %d tentativi di ritiro su %d: la spedizione va annullata", attuale.TentativiRitiroFalliti, s.maxTentativi)}
 		}
 	case Ritirata:
+		if attuale.TentativiConsegnaFalliti == 0 {
+			return Modifica{}, &errori.Conflitto{Messaggio: "una spedizione ritirata si può riassegnare solo dopo almeno un tentativo di consegna fallito"}
+		}
 	default:
 		return Modifica{}, &errori.Conflitto{Messaggio: fmt.Sprintf(
 			"si può assegnare un corriere solo a una spedizione creata, assegnata o ritirata (stato attuale: %q)", attuale.Stato)}
@@ -251,8 +254,8 @@ func validaCambio(c CambioStato) error {
 		e.Aggiungi("stato", "\""+c.Stato.String()+"\" "+altroEndpoint[c.Stato])
 	}
 	if regola, chiusa := motiviStato[c.Stato]; chiusa {
-		controllaMotivo(e, c.Motivo, regola.ammessi, "obbligatorio per "+regola.azione)
-		controllaNota(e, c.Nota, "obbligatoria per "+regola.azione)
+		controllaMotivo(e, c.Motivo, regola.ammessi, "")
+		controllaNota(e, c.Nota, "")
 	} else {
 		if c.Nota != nil {
 			e.Aggiungi("nota", "ammessa solo con gli stati annullata e persa: per una nota interna usare POST /api/spedizioni/{id}/note")
@@ -283,11 +286,36 @@ func (s *Servizio) decidiStato(r identita.Richiedente, attuale Spedizione, c Cam
 			"falliti %d tentativi di ritiro su %d: la spedizione deve essere annullata dall'operatore",
 			attuale.TentativiRitiroFalliti, s.maxTentativi)}
 	}
+	if err := s.richiediMotivoENota(attuale, c); err != nil {
+		return Modifica{}, err
+	}
 	nota := notaDaSalvare(c.Nota, c.Motivo)
 	if nota != nil {
 		nota.Pubblica = true
 	}
 	return Modifica{NuovoStato: c.Stato, Annulla: c.Stato == Annullata, Nota: nota}, nil
+}
+
+func (s *Servizio) richiediMotivoENota(attuale Spedizione, c CambioStato) error {
+	regola, chiusa := motiviStato[c.Stato]
+	if !chiusa {
+		return nil
+	}
+	e := &errori.Validazione{}
+	ritiriEsauriti := c.Stato == Annullata && attuale.TentativiRitiroFalliti >= s.maxTentativi
+	if ritiriEsauriti {
+		if (c.Motivo == nil) != (c.Nota == nil) {
+			e.Aggiungi("motivo", "motivo e nota vanno indicati insieme oppure omessi: i tentativi di ritiro falliti hanno già i loro motivi")
+		}
+		return e.Err()
+	}
+	if c.Motivo == nil {
+		e.Aggiungi("motivo", "obbligatorio per "+regola.azione)
+	}
+	if c.Nota == nil {
+		e.Aggiungi("nota", "obbligatoria per "+regola.azione)
+	}
+	return e.Err()
 }
 
 func rifiuta(r identita.Richiedente, attuale Spedizione, stato Stato) error {

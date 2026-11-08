@@ -2,7 +2,7 @@ openapi: 3.0.3
 
 info:
   title: LastMileDelivery API
-  version: "0.16.0"
+  version: "0.17.0"
   description: |
     API per la gestione delle spedizioni di Veloce24.
 
@@ -27,10 +27,10 @@ info:
     | Da | A | Chi | Endpoint |
     | :-- | :-- | :-- | :-- |
     | creata | assegnata | operatore | `POST /assegnazioni` |
-    | assegnata, ritirata | stesso stato, altro corriere | operatore | `POST /assegnazioni` |
+    | assegnata, ritirata (questa solo dopo almeno un tentativo di consegna fallito) | stesso stato, altro corriere | operatore | `POST /assegnazioni` |
     | assegnata | assegnata (ritiro fallito) | corriere assegnato | `POST /tentativi` con `tipo: ritiro` |
     | assegnata | ritirata | corriere assegnato | `PATCH /stato` |
-    | creata, assegnata | annullata (`motivo` e `nota` obbligatori) | operatore | `PATCH /stato` |
+    | creata, assegnata | annullata (`motivo` e `nota` obbligatori, facoltativi dopo 3 ritiri falliti) | operatore | `PATCH /stato` |
     | ritirata | in consegna | corriere assegnato | `PATCH /stato` |
     | in consegna | consegnata | corriere assegnato | `PATCH /stato` |
     | in consegna | in consegna (consegna fallita, tentativi 1 e 2) | corriere assegnato | `POST /tentativi` con `tipo: consegna` |
@@ -40,7 +40,8 @@ info:
 
     Tentativi (`MAX_TENTATIVI`, predefinito 3):
     - ritiro: la spedizione resta `assegnata`; dopo il terzo il corriere non può più
-      registrare tentativi né ritirarla, non si può riassegnare e la annulla l'operatore;
+      registrare tentativi né ritirarla, non si può riassegnare e la annulla l'operatore,
+      senza dover ripetere `motivo` e `nota` (ci sono già quelli dei 3 tentativi);
     - consegna: ogni uscita in consegna ammette un solo tentativo. Ai tentativi 1 e 2 la
       spedizione resta `in consegna`; per riprovare l'operatore la riporta in `ritirata`
       (ed eventualmente la riassegna) e il corriere la rimette `in consegna`. Al terzo
@@ -354,7 +355,9 @@ paths:
       description: |
         L'operatore crea una nuova assegnazione, che diventa quella corrente.
         - `creata`: la spedizione passa ad `assegnata`;
-        - `assegnata` o `ritirata`: lo stato non cambia, cambia solo il corriere.
+        - `assegnata` o `ritirata`: lo stato non cambia, cambia solo il corriere. Una
+          spedizione `ritirata` si riassegna solo se ha avuto almeno un tentativo di
+          consegna fallito (l'operatore l'ha riportata in `ritirata` per riprovare).
 
         Rispondere 201 vuol dire che è stata creata un'assegnazione; se il corriere è già
         quello assegnato non succede niente e risponde 200. In entrambi i casi il corpo è
@@ -382,7 +385,7 @@ paths:
         '403': { $ref: '#/components/responses/NonAutorizzato' }
         '404': { $ref: '#/components/responses/NonTrovata' }
         '409':
-          description: Spedizione in consegna o chiusa, oppure tentativi di ritiro esauriti
+          description: Spedizione in consegna o chiusa, tentativi di ritiro esauriti, oppure spedizione ritirata senza tentativi di consegna falliti
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Errore' }
@@ -527,7 +530,9 @@ paths:
         - corriere assegnato: `ritirata` (da assegnata), `in consegna`, `consegnata`;
         - operatore: `ritirata` (da in consegna, per riportarla indietro), `annullata`, `persa`.
 
-        `annullata` e `persa` richiedono `motivo` (pubblico) e `nota` (interna); gli altri
+        `annullata` e `persa` richiedono `motivo` (pubblico) e `nota` (interna). Fa eccezione
+        l'annullamento dopo 3 ritiri falliti: `motivo` e `nota` sono facoltativi, ma se si
+        indicano vanno indicati entrambi. Gli altri
         stati non accettano né `motivo` né `nota`: le note interne si scrivono con
         `POST /api/spedizioni/{id}/note`. `assegnata` si
         ottiene con `/assegnazioni`, `non consegnata` con `/tentativi`, `creata` mai.
@@ -561,7 +566,7 @@ paths:
       responses:
         '200': { $ref: '#/components/responses/SpedizioneAggiornata' }
         '400':
-          description: Stato mancante, sconosciuto o che si imposta con un altro endpoint; `motivo` o `nota` mancanti per `annullata` o `persa`; `motivo` fuori elenco; `motivo` o `nota` presenti con altri stati
+          description: Stato mancante, sconosciuto o che si imposta con un altro endpoint; `motivo` o `nota` mancanti per `annullata` o `persa` (dopo 3 ritiri falliti, uno solo dei due); `motivo` fuori elenco; `motivo` o `nota` presenti con altri stati
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Errore' }
@@ -954,11 +959,12 @@ components:
           type: string
           minLength: 1
           maxLength: 2000
-          description: Nota interna. Obbligatoria per `annullata` e `persa`, non ammessa con gli altri stati.
+          description: Nota interna. Obbligatoria per `annullata` e `persa` (facoltativa annullando dopo 3 ritiri falliti), non ammessa con gli altri stati.
         motivo:
           description: |
             Obbligatorio per `annullata` (un valore di `MotivoAnnullamento`) e `persa` (un valore
-            di `MotivoPerdita`); non ammesso con gli altri stati.
+            di `MotivoPerdita`); facoltativo annullando dopo 3 ritiri falliti; non ammesso con
+            gli altri stati.
           anyOf:
             - $ref: '#/components/schemas/MotivoAnnullamento'
             - $ref: '#/components/schemas/MotivoPerdita'
