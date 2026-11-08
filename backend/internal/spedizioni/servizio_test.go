@@ -54,6 +54,8 @@ func tipoErrore(err error) string {
 
 func TestCambioStato(t *testing.T) {
 	nota := p("pacco non trovato")
+	annulla := CambioStato{Stato: Annullata, Motivo: p("richiesta del mittente"), Nota: nota}
+	perdi := CambioStato{Stato: Persa, Motivo: p("furto"), Nota: nota}
 	casi := []struct {
 		nome   string
 		chi    identita.Richiedente
@@ -61,23 +63,25 @@ func TestCambioStato(t *testing.T) {
 		cambio CambioStato
 		esito  string
 	}{
-		{"annulla da creata", operatore, Creata, CambioStato{Stato: Annullata}, "nessuno"},
-		{"annulla da assegnata", operatore, Assegnata, CambioStato{Stato: Annullata}, "nessuno"},
+		{"annulla da creata", operatore, Creata, annulla, "nessuno"},
+		{"annulla da assegnata", operatore, Assegnata, annulla, "nessuno"},
 		{"ritira", corriere1, Assegnata, CambioStato{Stato: Ritirata}, "nessuno"},
 		{"in consegna", corriere1, Ritirata, CambioStato{Stato: InConsegna}, "nessuno"},
 		{"consegna", corriere1, InConsegna, CambioStato{Stato: Consegnata}, "nessuno"},
-		{"persa dopo il ritiro", operatore, Ritirata, CambioStato{Stato: Persa, Nota: nota}, "nessuno"},
-		{"persa in consegna", operatore, InConsegna, CambioStato{Stato: Persa, Nota: nota}, "nessuno"},
+		{"persa dopo il ritiro", operatore, Ritirata, perdi, "nessuno"},
+		{"persa in consegna", operatore, InConsegna, perdi, "nessuno"},
+		{"annulla senza motivo né nota", operatore, Assegnata, CambioStato{Stato: Annullata}, "400"},
+		{"persa senza motivo", operatore, Ritirata, CambioStato{Stato: Persa, Nota: nota}, "400"},
 
 		{"salta stati", corriere1, Assegnata, CambioStato{Stato: Consegnata}, "409"},
-		{"annulla dopo il ritiro", operatore, Ritirata, CambioStato{Stato: Annullata}, "409"},
-		{"persa prima del ritiro", operatore, Assegnata, CambioStato{Stato: Persa, Nota: nota}, "409"},
+		{"annulla dopo il ritiro", operatore, Ritirata, annulla, "409"},
+		{"persa prima del ritiro", operatore, Assegnata, perdi, "409"},
 		{"stato finale", corriere1, Consegnata, CambioStato{Stato: InConsegna}, "409"},
 
 		{"operatore ritira", operatore, Assegnata, CambioStato{Stato: Ritirata}, "403"},
 		{"operatore consegna", operatore, InConsegna, CambioStato{Stato: Consegnata}, "403"},
-		{"corriere segna persa", corriere1, InConsegna, CambioStato{Stato: Persa, Nota: nota}, "403"},
-		{"corriere annulla", corriere1, Assegnata, CambioStato{Stato: Annullata}, "403"},
+		{"corriere segna persa", corriere1, InConsegna, perdi, "403"},
+		{"corriere annulla", corriere1, Assegnata, annulla, "403"},
 		{"corriere non assegnato", corriere2, Assegnata, CambioStato{Stato: Ritirata}, "403"},
 
 		{"operatore riporta in ritirata", operatore, InConsegna, CambioStato{Stato: Ritirata}, "nessuno"},
@@ -129,7 +133,11 @@ func TestAssegnazione(t *testing.T) {
 		atteso Stato
 	}{{Creata, Assegnata}, {Assegnata, Assegnata}, {Ritirata, Ritirata}}
 	for _, c := range casi {
-		m, err := s.decidiAssegnazione(inStato(c.da), p(int32(2)))
+		attuale := inStato(c.da)
+		if c.da == Ritirata {
+			attuale.TentativiConsegnaFalliti, attuale.UsciteInConsegna = 1, 1
+		}
+		m, err := s.decidiAssegnazione(attuale, p(int32(2)))
 		if err != nil || m.NuovoStato != c.atteso || *m.NuovoCorriere != 2 {
 			t.Fatalf("assegnazione da %q: %+v %v", c.da, m, err)
 		}
@@ -146,6 +154,9 @@ func TestAssegnazione(t *testing.T) {
 	esauriti.TentativiRitiroFalliti = 3
 	if _, err := s.decidiAssegnazione(esauriti, p(int32(2))); tipoErrore(err) != "409" {
 		t.Fatalf("dopo 3 ritiri falliti non si riassegna: %v", err)
+	}
+	if _, err := s.decidiAssegnazione(inStato(Ritirata), p(int32(2))); tipoErrore(err) != "409" {
+		t.Fatalf("ritirata senza tentativi di consegna falliti: non si riassegna: %v", err)
 	}
 	if _, _, err := s.Assegna(context.Background(), corriere1, 10, p(int32(2))); tipoErrore(err) != "403" {
 		t.Fatalf("un corriere non può assegnare: %v", err)
@@ -175,8 +186,24 @@ func TestTentativiDiRitiro(t *testing.T) {
 	if _, err := s.decidiStato(corriere1, attuale, CambioStato{Stato: Ritirata}); tipoErrore(err) != "409" {
 		t.Fatalf("dopo 3 ritiri falliti il corriere non può più ritirare: %v", err)
 	}
-	if m, err := s.decidiStato(operatore, attuale, CambioStato{Stato: Annullata}); err != nil || !m.Annulla {
-		t.Fatalf("dopo 3 ritiri falliti l'operatore annulla: %+v %v", m, err)
+	if m, err := s.decidiStato(operatore, attuale, CambioStato{Stato: Annullata}); err != nil || !m.Annulla || m.Nota != nil {
+		t.Fatalf("dopo 3 ritiri falliti l'operatore annulla senza motivo né nota: %+v %v", m, err)
+	}
+	conMotivo := CambioStato{Stato: Annullata, Motivo: p("ritiro non riuscito"), Nota: p("negozio chiuso")}
+	if m, err := s.decidiStato(operatore, attuale, conMotivo); err != nil || m.Nota == nil || !m.Nota.Pubblica {
+		t.Fatalf("dopo 3 ritiri falliti motivo e nota restano facoltativi: %+v %v", m, err)
+	}
+	for _, c := range []CambioStato{
+		{Stato: Annullata, Motivo: p("ritiro non riuscito")},
+		{Stato: Annullata, Nota: p("negozio chiuso")},
+	} {
+		if _, err := s.decidiStato(operatore, attuale, c); tipoErrore(err) != "400" {
+			t.Errorf("motivo e nota vanno insieme: %+v %v", c, err)
+		}
+	}
+	attuale.TentativiRitiroFalliti = 2
+	if _, err := s.decidiStato(operatore, attuale, CambioStato{Stato: Annullata}); tipoErrore(err) != "400" {
+		t.Fatalf("prima del 3° ritiro fallito motivo e nota sono obbligatori: %v", err)
 	}
 	if _, err := s.decidiTentativo(corriere1, inStato(Ritirata), tentativo); tipoErrore(err) != "409" {
 		t.Fatalf("ritiro fallito su una spedizione già ritirata: %v", err)
@@ -334,8 +361,8 @@ func TestResoSoloNegliStatiAmmessi(t *testing.T) {
 
 	s := servizioTest()
 	for _, m := range []Modifica{
-		must(s.decidiStato(operatore, inStato(Assegnata), CambioStato{Stato: Annullata})),
-		must(s.decidiStato(operatore, inStato(InConsegna), CambioStato{Stato: Persa, Nota: p("x")})),
+		must(s.decidiStato(operatore, inStato(Assegnata), CambioStato{Stato: Annullata, Motivo: p("altro"), Nota: p("x")})),
+		must(s.decidiStato(operatore, inStato(InConsegna), CambioStato{Stato: Persa, Motivo: p("furto"), Nota: p("x")})),
 	} {
 		if m.Dati != nil {
 			t.Fatal("il cambio di stato non deve toccare is_reso")
@@ -356,10 +383,7 @@ func TestMotivoObbligatorio(t *testing.T) {
 		cambio CambioStato
 		esito  string
 	}{
-		{"annullata senza motivo", CambioStato{Stato: Annullata, Nota: p("x")}, "400"},
-		{"annullata senza nota", CambioStato{Stato: Annullata, Motivo: p("richiesta del mittente")}, "400"},
-		{"persa senza motivo", CambioStato{Stato: Persa, Nota: p("x")}, "400"},
-		{"persa senza nota", CambioStato{Stato: Persa, Motivo: p("furto")}, "400"},
+		{"annullata nota vuota", CambioStato{Stato: Annullata, Motivo: p("richiesta del mittente"), Nota: p("  ")}, "400"},
 		{"annullata con motivo e nota", CambioStato{Stato: Annullata, Motivo: p("richiesta del destinatario"), Nota: p("x")}, "nessuno"},
 		{"persa con motivo e nota", CambioStato{Stato: Persa, Motivo: p("smarrita in deposito"), Nota: p("x")}, "nessuno"},
 		{"motivo fuori elenco", CambioStato{Stato: Annullata, Motivo: p("ci ho ripensato"), Nota: p("x")}, "400"},
