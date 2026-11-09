@@ -43,7 +43,7 @@ Rischio: Alto
 **Fatto quando:** l’utente vede solo le sue spedizioni e le può filtrare e ricercare  
 Rischio: Alto
 
-6\. Come operatore voglio poter eliminare/modificare una spedizione appena creata che non é stata ritirata **Fatto quando:** l’operatore la può modificare e mettere come disdetta se non già ritirata  
+6\. Come operatore voglio poter annullare/modificare una spedizione appena creata che non é stata ritirata **Fatto quando:** l’operatore la può modificare e mettere come disdetta se non già ritirata  
 >   
 Rischio: Basso
 
@@ -57,9 +57,9 @@ Rischio: alto
 
 Rischio: medio
 
-### 9\. Come corriere voglio poter contrassegnare le spedizioni in ritirate, in consegna, e consegnate oppure non consegnate e mettere anche il numero di tentativi di consegna
+### 9\. Come corriere voglio poter contrassegnare le spedizioni in ritirate, in consegna, e consegnate oppure non consegnate e mettere anche il numero di tentativi di consegna e di ritiro nel caso in cui non riesco a ritirarle 
 
-**Fatto quando:** Il corriere può modificare gli stati e l'operatore può vederli  
+**Fatto quando:** Il corriere può modificare gli stati e l'operatore può vederli insieme ai tentativi  
 >   
 >   
 Rischio alto
