@@ -13,6 +13,7 @@ import (
 func RispondiErrore(w http.ResponseWriter, r *http.Request, err error) {
 	var validazione *errori.Validazione
 	var riferimento *errori.RiferimentoNonTrovato
+	var nonAutenticato *errori.NonAutenticato
 	var nonAutorizzato *errori.NonAutorizzato
 	var nonTrovato *errori.NonTrovato
 	var conflitto *errori.Conflitto
@@ -24,6 +25,9 @@ func RispondiErrore(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.As(err, &riferimento):
 		ScriviErrore(w, http.StatusBadRequest, "dati non validi",
 			errori.ErroreCampo{Campo: riferimento.Campo, Messaggio: riferimento.Messaggio})
+	case errors.As(err, &nonAutenticato):
+		w.Header().Set("WWW-Authenticate", "Bearer")
+		ScriviErrore(w, http.StatusUnauthorized, nonAutenticato.Messaggio)
 	case errors.As(err, &nonAutorizzato):
 		ScriviErrore(w, http.StatusForbidden, nonAutorizzato.Messaggio)
 	case errors.As(err, &nonTrovato):
