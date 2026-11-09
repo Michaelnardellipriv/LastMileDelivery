@@ -86,18 +86,18 @@ func creaFixture(t *testing.T) *fixture {
 			}
 			return r
 		}, telefono)
-		return inserisci(`INSERT INTO utenti (nome, cognome, prefisso, nr_telefono, email)
-			VALUES ($1, 'Test', '+39', $2, $3) RETURNING id`, nome, telefono, nome+"."+f.suffisso+"@test.it")
+		return inserisci(`INSERT INTO utenti (nome, cognome, prefisso, nr_telefono, email, pwd_hash)
+			VALUES ($1, 'Test', '+39', $2, $3, '!') RETURNING id`, nome, telefono, nome+"."+f.suffisso+"@test.it")
 	}
 
-	f.idOperatore = inserisci(`INSERT INTO operatori_logistici (pwd_hash, id_utente) VALUES ('x', $1) RETURNING id`, utente("operatore"))
-	f.idCorriere1 = inserisci(`INSERT INTO corrieri (pwd_hash, id_utente) VALUES ('x', $1) RETURNING id`, utente("corriere1"))
-	f.idCorriere2 = inserisci(`INSERT INTO corrieri (pwd_hash, id_utente) VALUES ('x', $1) RETURNING id`, utente("corriere2"))
+	f.idOperatore = inserisci(`INSERT INTO operatori_logistici (id_utente) VALUES ($1) RETURNING id`, utente("operatore"))
+	f.idCorriere1 = inserisci(`INSERT INTO corrieri (id_utente) VALUES ($1) RETURNING id`, utente("corriere1"))
+	f.idCorriere2 = inserisci(`INSERT INTO corrieri (id_utente) VALUES ($1) RETURNING id`, utente("corriere2"))
 	f.idMittente = inserisci(`INSERT INTO clienti (id_utente) VALUES ($1) RETURNING id`, utente("mittente"))
 	f.idDestinatario = inserisci(`INSERT INTO clienti (id_utente) VALUES ($1) RETURNING id`, utente("destinatario"))
-	f.idAmministratore = inserisci(`INSERT INTO amministratori (pwd_hash, id_utente) VALUES ('x', $1) RETURNING id`, utente("amministratore"))
-	f.idCorrierePos = inserisci(`INSERT INTO corrieri (pwd_hash, id_utente) VALUES ('x', $1) RETURNING id`, utente("corrierepos"))
-	f.idCorriereFermo = inserisci(`INSERT INTO corrieri (pwd_hash, id_utente) VALUES ('x', $1) RETURNING id`, utente("corrierefermo"))
+	f.idAmministratore = inserisci(`INSERT INTO amministratori (id_utente) VALUES ($1) RETURNING id`, utente("amministratore"))
+	f.idCorrierePos = inserisci(`INSERT INTO corrieri (id_utente) VALUES ($1) RETURNING id`, utente("corrierepos"))
+	f.idCorriereFermo = inserisci(`INSERT INTO corrieri (id_utente) VALUES ($1) RETURNING id`, utente("corrierefermo"))
 
 	nazione := inserisci(`INSERT INTO nazioni (nome) VALUES ($1) RETURNING id`, "Nazione "+f.suffisso)
 	regione := inserisci(`INSERT INTO regioni (nome, id_nazione) VALUES ('Regione', $1) RETURNING id`, nazione)

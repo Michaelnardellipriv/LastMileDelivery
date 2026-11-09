@@ -1,3 +1,4 @@
+-- Tutti gli utenti di prova hanno la password PasswordProva1 (solo sviluppo).
 -- Dati di prova per la posizione dei corrieri (solo sviluppo).
 -- Da eseguire DOPO schema_LastMileDb.sql e seed_dev.sql.
 --
@@ -13,15 +14,15 @@
 
 BEGIN;
 
-INSERT INTO utenti (nome, cognome, prefisso, nr_telefono, email) VALUES
-  ('Anna',  'Admin',     '+39', '3330000001', 'admin@veloce24.test'),
-  ('Paolo', 'Corriere2', '+39', '3330000004', 'corriere2@veloce24.test');
+INSERT INTO utenti (nome, cognome, prefisso, nr_telefono, email, pwd_hash) VALUES
+  ('Anna',  'Admin',     '+39', '3330000001', 'admin@veloce24.test', '$2a$10$SNjhWOVP8LM0v7WcZuAjROVxOjm3QadNZirnsdusfZvt3FjLAl7vG'),
+  ('Paolo', 'Corriere2', '+39', '3330000004', 'corriere2@veloce24.test', '$2a$10$SNjhWOVP8LM0v7WcZuAjROVxOjm3QadNZirnsdusfZvt3FjLAl7vG');
 
-INSERT INTO amministratori (pwd_hash, id_utente)
-SELECT 'da-sostituire', id FROM utenti WHERE email = 'admin@veloce24.test';
+INSERT INTO amministratori (id_utente)
+SELECT id FROM utenti WHERE email = 'admin@veloce24.test';
 
-INSERT INTO corrieri (pwd_hash, id_utente)
-SELECT 'da-sostituire', id FROM utenti WHERE email = 'corriere2@veloce24.test';
+INSERT INTO corrieri (id_utente)
+SELECT id FROM utenti WHERE email = 'corriere2@veloce24.test';
 
 INSERT INTO indirizzi (via, civico) VALUES
   ('Via Belenzani', '1'),

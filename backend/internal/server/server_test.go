@@ -7,18 +7,26 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"lastmiledelivery/backend/internal/autenticazione"
+	"lastmiledelivery/backend/internal/identita"
 )
 
-func serverSenzaDatabase(t *testing.T) *httptest.Server {
+var firmatarioTest = autenticazione.NuovoFirmatario([]byte("segreto-di-prova-lungo-almeno-32-caratteri"), time.Hour)
+
+func serverSenzaDatabase(t *testing.T, ammettiHeaderID bool) *httptest.Server {
 	t.Helper()
 	db, err := pgxpool.New(context.Background(), "postgres://x:x@127.0.0.1:1/x?connect_timeout=2")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(db.Close)
-	srv := httptest.NewServer(Nuovo(db, Config{MaxTentativi: 3}))
+	srv := httptest.NewServer(Nuovo(db, Config{
+		MaxTentativi: 3, Firmatario: firmatarioTest, Postino: autenticazione.PostinoLog{}, AmmettiHeaderID: ammettiHeaderID,
+	}))
 	t.Cleanup(srv.Close)
 	return srv
 }
@@ -41,7 +49,7 @@ func chiama(t *testing.T, srv *httptest.Server, metodo, percorso, corpo string, 
 }
 
 func TestDatabaseNonRaggiungibile503(t *testing.T) {
-	srv := serverSenzaDatabase(t)
+	srv := serverSenzaDatabase(t, true)
 	for _, c := range []struct{ metodo, percorso string }{
 		{http.MethodGet, "/api/spedizioni"},
 		{http.MethodPost, "/api/spedizioni"},
@@ -61,7 +69,7 @@ func TestDatabaseNonRaggiungibile503(t *testing.T) {
 }
 
 func TestSenzaIdentita401(t *testing.T) {
-	srv := serverSenzaDatabase(t)
+	srv := serverSenzaDatabase(t, true)
 	if stato, _, _ := chiama(t, srv, http.MethodPatch, "/api/spedizioni/1/stato", `{"stato":"ritirata"}`, nil); stato != http.StatusUnauthorized {
 		t.Fatalf("atteso 401, ottenuto %d", stato)
 	}
@@ -74,8 +82,41 @@ func TestSenzaIdentita401(t *testing.T) {
 	}
 }
 
+func TestTokenBearer(t *testing.T) {
+	srv := serverSenzaDatabase(t, false)
+	token, _, err := firmatarioTest.Firma(9, identita.Richiedente{Ruolo: identita.Corriere, ID: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stato, _, _ := chiama(t, srv, http.MethodGet, "/api/spedizioni", "", map[string]string{"Authorization": "Bearer " + token})
+	if stato != http.StatusServiceUnavailable {
+		t.Fatalf("token valido: la richiesta arriva al database (503 qui), ottenuto %d", stato)
+	}
+	for nome, h := range map[string]map[string]string{
+		"header X-Id spenti":    {"X-Id-Corriere": "1"},
+		"token manomesso":       {"Authorization": "Bearer " + token + "x"},
+		"schema non Bearer":     {"Authorization": "Basic abc"},
+		"token di altro server": {"Authorization": "Bearer " + tokenAltroSegreto(t)},
+	} {
+		stato, header, _ := chiama(t, srv, http.MethodGet, "/api/spedizioni", "", h)
+		if stato != http.StatusUnauthorized || header.Get("WWW-Authenticate") != "Bearer" {
+			t.Errorf("%s: atteso 401 con WWW-Authenticate, ottenuto %d", nome, stato)
+		}
+	}
+}
+
+func tokenAltroSegreto(t *testing.T) string {
+	t.Helper()
+	altro := autenticazione.NuovoFirmatario([]byte("un-altro-segreto-lungo-almeno-32-caratteri"), time.Hour)
+	token, _, err := altro.Firma(9, identita.Richiedente{Ruolo: identita.Corriere, ID: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return token
+}
+
 func TestPercorsiNonPrevisti(t *testing.T) {
-	srv := serverSenzaDatabase(t)
+	srv := serverSenzaDatabase(t, true)
 	if stato, _, _ := chiama(t, srv, http.MethodGet, "/api/inesistente", "", nil); stato != http.StatusNotFound {
 		t.Fatalf("atteso 404, ottenuto %d", stato)
 	}
@@ -84,6 +125,7 @@ func TestPercorsiNonPrevisti(t *testing.T) {
 		{http.MethodGet, "/api/spedizioni/1/note", "POST"},
 		{http.MethodDelete, "/api/spedizioni", "GET, POST"},
 		{http.MethodPost, "/api/spedizioni/1/stato", "PATCH"},
+		{http.MethodGet, "/api/auth/login", "POST"},
 	} {
 		stato, header, _ := chiama(t, srv, c.metodo, c.percorso, "", nil)
 		if stato != http.StatusMethodNotAllowed || header.Get("Allow") != c.ammessi {
