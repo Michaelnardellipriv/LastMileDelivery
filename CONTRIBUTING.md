@@ -2,19 +2,16 @@
 
 | | |
 |---|---|
-| **Progetto** | *Last Mile Delivery* |
-| **Team** | *GLS / Francesco Platenotti, Dennis Pasquali, Gianluca Vivaldi, Micheal Nandelli, Mohammad Amine Reddad, Pellegrini Christian* |
-| **Data** | 30/09/2026* |
-| **Versione** | *v0.1 — riscrivetela quando le regole cambiano davvero* |
+| **Progetto** | LastMileDelivery |
+| **Team** | GLS — Francesco Plateroti, Dennis Pasquali, Gianluca Vivaldi, Michael Nardelli, Mohammed Amine Reddad, Christian Pellegrini |
+| **Data** | 30/09/2026 |
+| **Versione** | v0.1 |
 
 Queste regole valgono per **tutti** i membri del team, comprese le persone
 che le hanno scritte. Se una regola non viene rispettata da nessuno, cambiatela
 qui — non ignoratela in silenzio.
 
 ## Branch strategy
-
-*Definite i prefissi che usate e cosa contiene `main`. Esempio già visto a
-lezione, adattatelo se il team ne vuole un altro — basta scriverlo qui.*
 
 ```
 main                 sempre funzionante, nessun commit diretto
@@ -47,8 +44,6 @@ futuro — anche voi, tra un mese — deve capire perché quel commit esiste.*
 
 ## Pull/merge request e review
 
-*Rispondete a queste tre domande, in modo verificabile:*
-
 
 - Chi può fare merge su `main`? lo si fa insieme in team tranne per la documentazione questa puo essere pushata direttamente sul main senza che debba essere rivista da tutto il team
 - Quante approvazioni servono prima del merge? da tutto il team
@@ -57,17 +52,12 @@ futuro — anche voi, tra un mese — deve capire perché quel commit esiste.*
 
 ## Gestione dei conflitti
 
-*Regola minima: cosa si fa se un conflitto non si risolve in fretta.*
-
-> se un conflitto non si risolve in 10 minuti, si chiama un altro
-> membro del team prima di forzare una scelta da soli.
+Se un conflitto non si risolve in 10 minuti, si chiama un altro
+membro del team prima di forzare una scelta da soli.
 
 ## Definition of Done
 
-*Riprendete la Definition of Done concordata alla lezione 1 (se già scritta):
-non è decorativa, è il criterio con cui si accetta o si rifiuta una PR.*
-
-> una issue è fatta quando: il codice è mergiato su `main` dopo esser stata verificata insieme 
+Una issue è fatta quando il codice è mergiato su `main` o `dev` dopo essere stato verificato/testato insieme e valgono tutti i punti seguenti.
 
 -Requisiti e Funzionalità
 
@@ -96,9 +86,6 @@ L'API o l'endpoint è documentato (es. OpenAPI / Swagger).
 Le istruzioni per il deploy e l'avvio locale del componente/servizio sono aggiornate.
 
 ## Issue e board
-
-*Dove vivono le issue (piattaforma indicata dal docente) e gli stati che
-usate — devono coincidere con quelli mostrati nella board del team.*
 
 ```
 da fare → in corso → in revisione → fatto

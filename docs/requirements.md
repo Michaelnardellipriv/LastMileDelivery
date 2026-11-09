@@ -2,16 +2,16 @@
 
 |  |  |
 | :---- | :---- |
-| **Team** | *(GLS, componenti)* |
+| **Team** | *GLS,*  Dennis Pasquali, Francesco Plateroti, Michael Nardelli, Gianluca Vivaldi, Mohammed Amine Reddad, Christian Pellegrini  |
 | **Cliente** | *Last mile delivery S.r.l.* |
-| **Data** | 23/09/2026 |
-| **Versione** | v2 |
+| **Data** | 3/11/2026 |
+| **Versione** | v3 |
 
 ## Problema
 
 *In tre righe: cosa non funziona oggi per il cliente, per chi, con quale conseguenza concreta. Non descrivete ancora una soluzione.*
 
-> Per l’azienda Veloce24 il problema riguarda il fatto che le spedizioni e il loro ciclo di vita viene tenuto tramite fogli condivisi e telefonate rendendo molto difficile all’azienda avere una visione d’insieme su uno o più spedizioni che sia univoca per tutti gli operatori, inoltre si ha un problema anche per quanto riguarda possibile perdita di dati se gli operatori con le telefonate non scrivono poi nei loro fogli condivisi la nuova spedizione o i dati associati a essa  
+> Per l’azienda last mile delivery il problema riguarda il fatto che le spedizioni e il loro ciclo di vita viene tenuto tramite fogli condivisi e telefonate rendendo molto difficile all’azienda avere una visione d’insieme su uno o più spedizioni che sia univoca per tutti gli operatori, inoltre si ha un problema anche per quanto riguarda possibile perdita di dati se gli operatori con le telefonate non scrivono poi nei loro fogli condivisi la nuova spedizione o i dati associati a essa  
 >   
 >   
 > Obiettivi del progetto  
@@ -23,7 +23,7 @@
 - Mantenere uno storico delle spedizioni interno  
 - Mantenere storico delle operazioni effettuate dai dipendenti sul portale su ciascuna spedizione visibile ad amministratore e operatori  
 - Rendere il sistema adatto ad essere integrato con massimo 20h di lavoro extra ad un servizio di notifica esterno e ad un qualsiasi gestionale o e-commerce  
-- Garantire sicurezza in modo tale che solo gli utenti autorizzati vedano determinate informazioni e possano solo eseguire determinate operazioni  
+- Garantire sicurezza in modo tale che solo gli utenti autorizzati vedano determinate informazioni e possono solo eseguire determinate operazioni  
 - Consentire agli operatori di poter effettuare operazioni sul portale tramite i loro smartphones
 
 ## Requisiti funzionali
@@ -48,9 +48,10 @@
 | RF14 | Gestione di un workflow composto da: creata, assegnata, ritirata, in consegna, consegnata, consegna non riuscita annullata e persa  |
 | RF15 | Impedimento dei passaggi di stato palesemente incoerenti. |
 | RF16 | Aggiornamento simulato dell'ultima posizione nota del corriere o del mezzo visibile solo agli operatori. |
-| RF17 | Ricerca per stato, corriere, data e riferimento spedizione. |
+| RF17 | Ricerca per stato, corriere, data e riferimento spedizione \+ parametri paginazione. |
 | RF18 | utilizzo AI per riassumere note interne |
 | RF 19 | utilizzo AI per dare una label di categoria alle problematiche interne |
+| RF 20 | fare in modo che le api possano essere adattate a sistemi esterni di ecommerce |
 
 ## 
 
