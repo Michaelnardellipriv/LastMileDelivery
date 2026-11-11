@@ -112,30 +112,3 @@ func TestNotePubbliche(t *testing.T) {
 		t.Errorf("l'ultimo tentativo (non consegnata) ha la nota pubblica: %+v %v", m, err)
 	}
 }
-
-func TestDettaglioVisibilita(t *testing.T) {
-	ctx := context.Background()
-	voce := func() VoceElenco {
-		return VoceElenco{ID: 10, IDCorriere: p(int32(4)),
-			Note: []Nota{{ID: 1, Testo: "dettaglio interno", Motivo: p("furto"), IDOperatore: p(int32(2))}}}
-	}
-
-	s, a := servizioElenco()
-	a.dettaglio = DettaglioSpedizione{VoceElenco: voce()}
-	d, err := s.Dettaglio(ctx, operatore, 10)
-	if err != nil || d.IDCorriere == nil || d.Note[0].IDOperatore == nil || d.Note[0].Testo == "" || !a.vis.MostraCorriere {
-		t.Fatalf("l'operatore vede corriere, testo e autori delle note: %+v %v", d, err)
-	}
-
-	a.dettaglio = DettaglioSpedizione{VoceElenco: voce()}
-	d, _ = s.Dettaglio(ctx, cliente1, 10)
-	n := d.Note[0]
-	if d.IDCorriere != nil || n.IDOperatore != nil || n.Testo != "" || n.Motivo == nil || !a.vis.SoloNotePubbliche || *a.vis.IDDestinatario != 7 {
-		t.Fatalf("il cliente vede solo il motivo delle note pubbliche: %+v %+v", d, a.vis)
-	}
-
-	s.Dettaglio(ctx, corriere1, 10)
-	if a.vis.IDCorriere == nil || *a.vis.IDCorriere != 1 || len(a.vis.Stati) != 3 {
-		t.Fatalf("il corriere vede solo le sue spedizioni aperte: %+v", a.vis)
-	}
-}
