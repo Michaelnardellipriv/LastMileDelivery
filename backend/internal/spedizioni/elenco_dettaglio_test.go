@@ -8,61 +8,6 @@ import (
 	"lastmiledelivery/backend/internal/identita"
 )
 
-type archivioElenco struct {
-	vis       Visibilita
-	filtro    FiltroElenco
-	voci      []VoceElenco
-	dettaglio DettaglioSpedizione
-	attuale   Spedizione
-	nota      Nota
-}
-
-func (a *archivioElenco) Dettaglio(_ context.Context, v Visibilita, _ int32) (DettaglioSpedizione, error) {
-	a.vis = v
-	return a.dettaglio, nil
-}
-
-func (a *archivioElenco) AggiungiNota(_ context.Context, _ int32, autore identita.Richiedente, testo string,
-	verifica func(Spedizione) error) (Nota, error) {
-	if err := verifica(a.attuale); err != nil {
-		return Nota{}, err
-	}
-	a.nota = Nota{Testo: testo, IsInterna: true}
-	a.nota.IDOperatore, a.nota.IDCorriere = autoreNota(autore)
-	return a.nota, nil
-}
-
-func (a *archivioElenco) Crea(context.Context, int32, NuovaSpedizione) (Spedizione, error) {
-	return Spedizione{}, nil
-}
-
-func (a *archivioElenco) Aggiorna(context.Context, int32, identita.Richiedente,
-	func(Spedizione) (Modifica, error)) (Spedizione, bool, error) {
-	return Spedizione{}, false, nil
-}
-
-func (a *archivioElenco) Storico(context.Context, int32) ([]VoceStorico, error) {
-	return []VoceStorico{{ID: 1, Operazione: "creazione"}}, nil
-}
-
-func (a *archivioElenco) Elenca(_ context.Context, v Visibilita, f FiltroElenco) ([]VoceElenco, error) {
-	a.vis, a.filtro = v, f
-	return a.voci, nil
-}
-
-var (
-	cliente1       = identita.Richiedente{Ruolo: identita.Cliente, ID: 7}
-	amministratore = identita.Richiedente{Ruolo: identita.Amministratore, ID: 1}
-	filtroBase     = FiltroElenco{Pagina: 1, PerPagina: 20}
-)
-
-func servizioElenco(voci ...VoceElenco) (*Servizio, *archivioElenco) {
-	a := &archivioElenco{voci: voci}
-	s := NuovoServizio(a, 3, 30)
-	s.adesso = func() time.Time { return time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC) }
-	return s, a
-}
-
 func TestVisibilitaPerRuolo(t *testing.T) {
 	s, a := servizioElenco()
 
@@ -139,42 +84,6 @@ func TestValidaFiltro(t *testing.T) {
 	}
 }
 
-func TestClienteEAmministratoreNonModificano(t *testing.T) {
-	s := servizioTest()
-	for _, r := range []identita.Richiedente{cliente1, amministratore} {
-		if _, err := s.CambiaStato(context.Background(), r, 10, CambioStato{Stato: Ritirata}); tipoErrore(err) != "403" {
-			t.Errorf("%s non cambia lo stato: %v", r.Ruolo, err)
-		}
-		if _, err := s.Crea(context.Background(), r, NuovaSpedizione{}); tipoErrore(err) != "403" {
-			t.Errorf("%s non crea spedizioni: %v", r.Ruolo, err)
-		}
-		if _, _, err := s.Assegna(context.Background(), r, 10, p(int32(1))); tipoErrore(err) != "403" {
-			t.Errorf("%s non assegna: %v", r.Ruolo, err)
-		}
-		if _, err := s.RegistraTentativo(context.Background(), r, 10, TentativoFallito{}); tipoErrore(err) != "403" {
-			t.Errorf("%s non registra tentativi: %v", r.Ruolo, err)
-		}
-		if _, err := s.ModificaDati(context.Background(), r, 10, DatiSpedizione{IsReso: p(true)}); tipoErrore(err) != "403" {
-			t.Errorf("%s non modifica i dati: %v", r.Ruolo, err)
-		}
-	}
-}
-
-func TestStoricoSoloAmministratoreEOperatore(t *testing.T) {
-	s, _ := servizioElenco()
-	for _, r := range []identita.Richiedente{amministratore, operatore} {
-		voci, err := s.Storico(context.Background(), r, 10)
-		if err != nil || len(voci) != 1 {
-			t.Errorf("%s vede lo storico: %v %v", r.Ruolo, voci, err)
-		}
-	}
-	for _, r := range []identita.Richiedente{corriere1, cliente1} {
-		if _, err := s.Storico(context.Background(), r, 10); tipoErrore(err) != "403" {
-			t.Errorf("%s non vede lo storico: %v", r.Ruolo, err)
-		}
-	}
-}
-
 func TestFiltriElenco(t *testing.T) {
 	s, a := servizioElenco()
 	oggi := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
@@ -207,5 +116,32 @@ func TestFiltriElenco(t *testing.T) {
 	}
 	if _, err := s.Elenca(context.Background(), amministratore, FiltroElenco{IDCorriere: &corriere, Pagina: 1, PerPagina: 20}); err != nil {
 		t.Errorf("l'amministratore filtra per corriere: %v", err)
+	}
+}
+
+func TestDettaglioVisibilita(t *testing.T) {
+	ctx := context.Background()
+	voce := func() VoceElenco {
+		return VoceElenco{ID: 10, IDCorriere: p(int32(4)),
+			Note: []Nota{{ID: 1, Testo: "dettaglio interno", Motivo: p("furto"), IDOperatore: p(int32(2))}}}
+	}
+
+	s, a := servizioElenco()
+	a.dettaglio = DettaglioSpedizione{VoceElenco: voce()}
+	d, err := s.Dettaglio(ctx, operatore, 10)
+	if err != nil || d.IDCorriere == nil || d.Note[0].IDOperatore == nil || d.Note[0].Testo == "" || !a.vis.MostraCorriere {
+		t.Fatalf("l'operatore vede corriere, testo e autori delle note: %+v %v", d, err)
+	}
+
+	a.dettaglio = DettaglioSpedizione{VoceElenco: voce()}
+	d, _ = s.Dettaglio(ctx, cliente1, 10)
+	n := d.Note[0]
+	if d.IDCorriere != nil || n.IDOperatore != nil || n.Testo != "" || n.Motivo == nil || !a.vis.SoloNotePubbliche || *a.vis.IDDestinatario != 7 {
+		t.Fatalf("il cliente vede solo il motivo delle note pubbliche: %+v %+v", d, a.vis)
+	}
+
+	s.Dettaglio(ctx, corriere1, 10)
+	if a.vis.IDCorriere == nil || *a.vis.IDCorriere != 1 || len(a.vis.Stati) != 3 {
+		t.Fatalf("il corriere vede solo le sue spedizioni aperte: %+v", a.vis)
 	}
 }

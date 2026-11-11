@@ -4,4 +4,4 @@ if (-not $env:TEST_DATABASE_URL) {
     exit 1
 }
 
-go test -tags=integration -count=1 -v ./tests
+go test -tags=integration -count=1 -v ./tests/integration-tests
