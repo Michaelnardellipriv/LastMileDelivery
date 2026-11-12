@@ -38,6 +38,12 @@ type RiferimentoNonTrovato struct {
 
 func (e *RiferimentoNonTrovato) Error() string { return e.Campo + ": " + e.Messaggio }
 
+type NonAutenticato struct {
+	Messaggio string
+}
+
+func (e *NonAutenticato) Error() string { return e.Messaggio }
+
 type NonAutorizzato struct {
 	Messaggio string
 }

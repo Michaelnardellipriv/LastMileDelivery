@@ -2,17 +2,23 @@ openapi: 3.0.3
 
 info:
   title: LastMileDelivery API
-  version: "0.17.0"
+  version: "0.18.0"
   description: |
     API per la gestione delle spedizioni di Veloce24.
 
     Se il contratto e il codice divergono, il contratto ha vinto: va aggiornato
     nello stesso commit del codice.
 
-    **Identificazione provvisoria.** Finché il login non è integrato, chi chiama si
-    indica con uno solo degli header `X-Id-Operatore`, `X-Id-Corriere`, `X-Id-Cliente`,
-    `X-Id-Amministratore` (id nella tabella del ruolo). Non è autenticazione: vale solo
-    per lo sviluppo. Sarà sostituito dal token JWT senza cambiare il resto del contratto.
+    **Autenticazione.** Si fa il login con `POST /api/auth/login` (email e password) e si
+    manda il token ricevuto in ogni richiesta: `Authorization: Bearer <token>`. Il token
+    contiene ruolo e id dell'utente e scade dopo `DURATA_TOKEN` (predefinito 8 ore).
+    Negli schemi di sicurezza qui sotto `operatore`, `corriere`, `cliente`, `amministratore`
+    indicano il ruolo richiesto: il token deve essere di un utente con quel ruolo.
+
+    Solo per lo sviluppo, finché `IDENTITA_HEADER_SVILUPPO` vale `attiva` (predefinito), al
+    posto del token si accetta ancora uno solo degli header `X-Id-Operatore`, `X-Id-Corriere`,
+    `X-Id-Cliente`, `X-Id-Amministratore` (id nella tabella del ruolo). In produzione va
+    impostata a `disattiva`.
     Clienti e amministratori possono solo leggere: il cliente l'elenco e il dettaglio
     delle sue spedizioni, l'amministratore tutte le spedizioni e il loro storico.
     L'amministratore non crea, modifica né elimina spedizioni, note o storico: tutte le
@@ -20,7 +26,12 @@ info:
 
     **Configurazione del server** (variabili d'ambiente): `DATABASE_URL` (obbligatoria),
     `LISTEN_ADDR` (predefinito `127.0.0.1:8080`), `MAX_TENTATIVI` (predefinito 3),
-    `GIORNI_VISIBILITA_CLIENTE` (predefinito 30).
+    `GIORNI_VISIBILITA_CLIENTE` (predefinito 30), `JWT_SEGRETO` (almeno 32 caratteri; se
+    manca se ne genera uno casuale a ogni avvio), `DURATA_TOKEN` (predefinito `8h`),
+    `IDENTITA_HEADER_SVILUPPO` (`attiva` o `disattiva`), `LINK_RECUPERO_PASSWORD` (pagina a
+    cui punta il link della mail), `SMTP_HOST`, `SMTP_PORT` (predefinito 587),
+    `SMTP_UTENTE`, `SMTP_PASSWORD`, `SMTP_MITTENTE`. Senza `SMTP_HOST` le mail non vengono
+    inviate ma scritte nel log del server.
 
     **Ciclo di vita** (stati del tipo `stato_spedizione` del database):
 
@@ -79,11 +90,157 @@ servers:
     description: Server locale di sviluppo
 
 tags:
+  - name: autenticazione
+    description: Login, cambio e recupero della password
   - name: spedizioni
   - name: posizioni
     description: Posizione simulata dei corrieri (RF16) e intervallo di invio
 
 paths:
+  /api/auth/login:
+    post:
+      tags: [autenticazione]
+      summary: Login con email e password
+      description: |
+        Restituisce il token da mandare in `Authorization: Bearer <token>`. L'email non
+        distingue maiuscole e minuscole. Password sbagliata ed email sconosciuta danno lo
+        stesso 401, per non rivelare quali email esistono. Ogni utente ha una password fin
+        dalla creazione (obbligatoria nel database); al cliente destinatario la comunica
+        l'operatore per mail.
+        Se l'utente ha più ruoli (per esempio corriere e cliente) va indicato `ruolo`.
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Login' }
+            example: { email: destinatario@veloce24.test, password: LaMiaPassword1 }
+      responses:
+        '200':
+          description: Login riuscito
+          headers:
+            Cache-Control:
+              schema: { type: string, example: no-store }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Sessione' }
+              example:
+                token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI0IiwicnVvbG8iOiJjbGllbnRlIiwiaWQiOjIsImlhdCI6MCwiZXhwIjowfQ.firma
+                tipo: Bearer
+                scade_il: '2026-11-09T18:00:00Z'
+                utente: { id_utente: 4, ruolo: cliente, id: 2, nome: Dora, cognome: Destinataria, email: destinatario@veloce24.test }
+        '400':
+          description: '`email` o `password` mancanti; utente con più ruoli senza `ruolo`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+        '401':
+          description: Email o password non corrette
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+              example: { errore: email o password non corrette }
+        '403':
+          description: '`ruolo` indicato che l''utente non ha'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+        '415': { $ref: '#/components/responses/NonJSON' }
+        '500': { $ref: '#/components/responses/ErroreInterno' }
+        '503': { $ref: '#/components/responses/NonDisponibile' }
+
+  /api/auth/cambio-password:
+    post:
+      tags: [autenticazione]
+      summary: Cambio della propria password
+      description: Per l'utente già autenticato. Serve la password attuale.
+      operationId: cambiaPassword
+      security:
+        - operatore: []
+        - corriere: []
+        - cliente: []
+        - amministratore: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CambioPassword' }
+            example: { password_attuale: LaMiaPassword1, nuova_password: LaNuovaPassword2 }
+      responses:
+        '204': { description: Password cambiata }
+        '400':
+          description: Campi mancanti; nuova password sotto gli 8 caratteri, oltre i 72 byte o uguale all'attuale
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+        '401': { $ref: '#/components/responses/NonIdentificato' }
+        '403':
+          description: Password attuale non corretta
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+        '415': { $ref: '#/components/responses/NonJSON' }
+        '500': { $ref: '#/components/responses/ErroreInterno' }
+        '503': { $ref: '#/components/responses/NonDisponibile' }
+
+  /api/auth/recupero-password:
+    post:
+      tags: [autenticazione]
+      summary: Richiesta di recupero della password via mail
+      description: |
+        Per chi ha dimenticato la password: se l'email è registrata, invia una mail con un
+        link valido 30 minuti per sceglierne una nuova. La risposta è sempre
+        202, anche per email sconosciute, per non rivelare quali email esistono. Una nuova
+        richiesta annulla i link precedenti; oltre 3 richieste nell'ultima ora per lo stesso
+        utente la mail non viene inviata. Il link è `LINK_RECUPERO_PASSWORD?token=<token>`.
+      operationId: richiediRecuperoPassword
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RecuperoPassword' }
+            example: { email: destinatario@veloce24.test }
+      responses:
+        '202':
+          description: Richiesta presa in carico
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Messaggio' }
+        '400':
+          description: '`email` mancante'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+        '415': { $ref: '#/components/responses/NonJSON' }
+        '500': { $ref: '#/components/responses/ErroreInterno' }
+        '503': { $ref: '#/components/responses/NonDisponibile' }
+
+  /api/auth/reimposta-password:
+    post:
+      tags: [autenticazione]
+      summary: Nuova password con il token ricevuto per mail
+      description: Il token vale una sola volta e per 30 minuti.
+      operationId: reimpostaPassword
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReimpostaPassword' }
+            example: { token: NNwZnQuouqNT2e5W0BxoqrNfne0D8KZ_SJoLqnoKkPM, nuova_password: LaNuovaPassword2 }
+      responses:
+        '204': { description: Password impostata }
+        '400':
+          description: Token mancante, non valido, scaduto o già usato; nuova password non valida
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+        '415': { $ref: '#/components/responses/NonJSON' }
+        '500': { $ref: '#/components/responses/ErroreInterno' }
+        '503': { $ref: '#/components/responses/NonDisponibile' }
+
   /api/spedizioni:
     get:
       tags: [spedizioni]
@@ -762,26 +919,31 @@ paths:
 
 components:
   securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Token ottenuto da POST /api/auth/login
     operatore:
       type: apiKey
       in: header
       name: X-Id-Operatore
-      description: PROVVISORIO, solo sviluppo — id in operatori_logistici
+      description: Token Bearer di un utente con questo ruolo; solo in sviluppo anche questo header con l'id in operatori_logistici
     corriere:
       type: apiKey
       in: header
       name: X-Id-Corriere
-      description: PROVVISORIO, solo sviluppo — id in corrieri
+      description: Token Bearer di un utente con questo ruolo; solo in sviluppo anche questo header con l'id in corrieri
     cliente:
       type: apiKey
       in: header
       name: X-Id-Cliente
-      description: PROVVISORIO, solo sviluppo — id in clienti
+      description: Token Bearer di un utente con questo ruolo; solo in sviluppo anche questo header con l'id in clienti
     amministratore:
       type: apiKey
       in: header
       name: X-Id-Amministratore
-      description: PROVVISORIO, solo sviluppo — id in amministratori
+      description: Token Bearer di un utente con questo ruolo; solo in sviluppo anche questo header con l'id in amministratori
 
   parameters:
     IdSpedizione:
@@ -1189,6 +1351,68 @@ components:
         corrieri:
           type: array
           items: { $ref: '#/components/schemas/PosizioneCorriere' }
+
+    Login:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string }
+        ruolo:
+          type: string
+          enum: [operatore, corriere, cliente, amministratore]
+          description: Solo se l'utente ha più ruoli
+
+    Sessione:
+      type: object
+      required: [token, tipo, scade_il, utente]
+      properties:
+        token: { type: string }
+        tipo: { type: string, enum: [Bearer] }
+        scade_il: { type: string, format: date-time }
+        utente:
+          type: object
+          required: [id_utente, ruolo, id, nome, cognome, email]
+          properties:
+            id_utente: { type: integer, format: int32 }
+            ruolo: { type: string, enum: [operatore, corriere, cliente, amministratore] }
+            id:
+              type: integer
+              format: int32
+              description: Id nella tabella del ruolo (operatori_logistici, corrieri, clienti, amministratori)
+            nome: { type: string }
+            cognome: { type: string }
+            email: { type: string }
+
+    CambioPassword:
+      type: object
+      additionalProperties: false
+      required: [password_attuale, nuova_password]
+      properties:
+        password_attuale: { type: string }
+        nuova_password: { type: string, minLength: 8, description: Da 8 caratteri a 72 byte }
+
+    RecuperoPassword:
+      type: object
+      additionalProperties: false
+      required: [email]
+      properties:
+        email: { type: string, format: email }
+
+    ReimpostaPassword:
+      type: object
+      additionalProperties: false
+      required: [token, nuova_password]
+      properties:
+        token: { type: string }
+        nuova_password: { type: string, minLength: 8, description: Da 8 caratteri a 72 byte }
+
+    Messaggio:
+      type: object
+      required: [messaggio]
+      properties:
+        messaggio: { type: string }
 
     Errore:
       type: object

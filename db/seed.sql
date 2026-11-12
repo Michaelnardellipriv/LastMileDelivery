@@ -1,3 +1,4 @@
+-- Tutti gli utenti di prova hanno la password PasswordProva1 (solo sviluppo).
 -- Dati di prova per testare GET /api/spedizioni
 -- Da eseguire su un database con lo schema appena caricato (database vuoto).
 DO $$
@@ -8,20 +9,20 @@ DECLARE
     ass2 INT; ass3 INT;
     sp2 INT;
 BEGIN
-    INSERT INTO utenti (nome, cognome, prefisso, nr_telefono, email)
-        VALUES ('Op', 'Erator', '+39', '3330000001', 'operatore@veloce24.test') RETURNING id INTO u_op;
-    INSERT INTO utenti (nome, cognome, prefisso, nr_telefono, email)
-        VALUES ('Cor', 'Riere', '+39', '3330000002', 'corriere@veloce24.test') RETURNING id INTO u_cor;
-    INSERT INTO utenti (nome, cognome, prefisso, nr_telefono, email)
-        VALUES ('Mit', 'Tente', '+39', '3330000003', 'mittente@veloce24.test') RETURNING id INTO u_mit;
-    INSERT INTO utenti (nome, cognome, prefisso, nr_telefono, email)
-        VALUES ('Des', 'Tinatario', '+39', '3330000004', 'destinatario@veloce24.test') RETURNING id INTO u_des;
-    INSERT INTO utenti (nome, cognome, prefisso, nr_telefono, email)
-        VALUES ('Ad', 'Min', '+39', '3330000005', 'admin@veloce24.test') RETURNING id INTO u_adm;
+    INSERT INTO utenti (nome, cognome, prefisso, nr_telefono, email, pwd_hash)
+        VALUES ('Op', 'Erator', '+39', '3330000001', 'operatore@veloce24.test', '$2a$10$SNjhWOVP8LM0v7WcZuAjROVxOjm3QadNZirnsdusfZvt3FjLAl7vG') RETURNING id INTO u_op;
+    INSERT INTO utenti (nome, cognome, prefisso, nr_telefono, email, pwd_hash)
+        VALUES ('Cor', 'Riere', '+39', '3330000002', 'corriere@veloce24.test', '$2a$10$SNjhWOVP8LM0v7WcZuAjROVxOjm3QadNZirnsdusfZvt3FjLAl7vG') RETURNING id INTO u_cor;
+    INSERT INTO utenti (nome, cognome, prefisso, nr_telefono, email, pwd_hash)
+        VALUES ('Mit', 'Tente', '+39', '3330000003', 'mittente@veloce24.test', '$2a$10$SNjhWOVP8LM0v7WcZuAjROVxOjm3QadNZirnsdusfZvt3FjLAl7vG') RETURNING id INTO u_mit;
+    INSERT INTO utenti (nome, cognome, prefisso, nr_telefono, email, pwd_hash)
+        VALUES ('Des', 'Tinatario', '+39', '3330000004', 'destinatario@veloce24.test', '$2a$10$SNjhWOVP8LM0v7WcZuAjROVxOjm3QadNZirnsdusfZvt3FjLAl7vG') RETURNING id INTO u_des;
+    INSERT INTO utenti (nome, cognome, prefisso, nr_telefono, email, pwd_hash)
+        VALUES ('Ad', 'Min', '+39', '3330000005', 'admin@veloce24.test', '$2a$10$SNjhWOVP8LM0v7WcZuAjROVxOjm3QadNZirnsdusfZvt3FjLAl7vG') RETURNING id INTO u_adm;
 
-    INSERT INTO operatori_logistici (pwd_hash, id_utente) VALUES ('x', u_op)  RETURNING id INTO op;
-    INSERT INTO corrieri            (pwd_hash, id_utente) VALUES ('x', u_cor) RETURNING id INTO cor;
-    INSERT INTO amministratori      (pwd_hash, id_utente) VALUES ('x', u_adm);
+    INSERT INTO operatori_logistici (id_utente) VALUES (u_op)  RETURNING id INTO op;
+    INSERT INTO corrieri            (id_utente) VALUES (u_cor) RETURNING id INTO cor;
+    INSERT INTO amministratori      (id_utente) VALUES (u_adm);
     INSERT INTO clienti (id_utente) VALUES (u_mit) RETURNING id INTO mit;
     INSERT INTO clienti (id_utente) VALUES (u_des) RETURNING id INTO des;
 
