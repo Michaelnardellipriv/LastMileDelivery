@@ -64,6 +64,9 @@ func (s *Servizio) validaNuova(n NuovaSpedizione) *errori.Validazione {
 	controllaID(e, "id_indirizzo_spedizione", n.IDIndirizzoSpedizione)
 	controllaIndirizzi(e, n.IDIndirizzoRitiro, n.IDIndirizzoSpedizione)
 	controllaData(e, n.DataoraRichiesta, s.adesso())
+	if n.IDCorriere != nil {
+		controllaID(e, "id_corriere", *n.IDCorriere)
+	}
 	return e
 }
 

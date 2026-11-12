@@ -14,6 +14,7 @@ import (
 
 	"lastmiledelivery/backend/internal/autenticazione"
 	"lastmiledelivery/backend/internal/database"
+	"lastmiledelivery/backend/internal/httpx"
 	"lastmiledelivery/backend/internal/server"
 )
 
@@ -27,6 +28,10 @@ func esegui() error {
 	connessione := os.Getenv("DATABASE_URL")
 	if connessione == "" {
 		return errors.New("DATABASE_URL non impostata")
+	}
+	cors, err := httpx.NuovoCORS(os.Getenv("CORS_ORIGIN"))
+	if err != nil {
+		return err
 	}
 	indirizzo := valore("LISTEN_ADDR", valore("HTTP_ADDR", "127.0.0.1:8080"))
 	maxTentativi, err := strconv.Atoi(valore("MAX_TENTATIVI", "3"))
@@ -63,6 +68,7 @@ func esegui() error {
 		Postino:                 postino(),
 		LinkRecuperoPassword:    valore("LINK_RECUPERO_PASSWORD", "http://localhost:8080/reimposta-password"),
 		AmmettiHeaderID:         ammettiHeaderID,
+		CORS:                    cors,
 	}
 	srv := &http.Server{
 		Addr:              indirizzo,

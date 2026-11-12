@@ -37,6 +37,14 @@ func controllaPassword(e *errori.Validazione, campo string, p *string) {
 	}
 }
 
+func ControllaPassword(e *errori.Validazione, campo string, p *string) {
+	controllaPassword(e, campo, p)
+}
+
+func HashPassword(p string) (string, error) {
+	return hashPassword(p)
+}
+
 func hashPassword(p string) (string, error) {
 	h, err := bcrypt.GenerateFromPassword([]byte(p), bcrypt.DefaultCost)
 	return string(h), err

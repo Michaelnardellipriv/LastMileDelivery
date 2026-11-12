@@ -5,6 +5,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"lastmiledelivery/backend/internal/anagrafiche"
 	"lastmiledelivery/backend/internal/autenticazione"
 	"lastmiledelivery/backend/internal/httpx"
 	"lastmiledelivery/backend/internal/idempotenza"
@@ -20,6 +21,7 @@ type Config struct {
 	Postino                 autenticazione.Postino
 	LinkRecuperoPassword    string
 	AmmettiHeaderID         bool
+	CORS                    *httpx.CORS
 }
 
 func Nuovo(db *pgxpool.Pool, cfg Config) http.Handler {
@@ -34,8 +36,14 @@ func Nuovo(db *pgxpool.Pool, cfg Config) http.Handler {
 	servizioSpedizioni := spedizioni.NuovoServizio(spedizioni.NuovoRepository(db), cfg.MaxTentativi, cfg.GiorniVisibilitaCliente)
 	spedizioni.NuovoHandler(servizioSpedizioni).Registra(rotte, richiediUtente, idempotente)
 
+	servizioAnagrafiche := anagrafiche.NuovoServizio(anagrafiche.NuovoRepository(db), cfg.Postino)
+	anagrafiche.NuovoHandler(servizioAnagrafiche).Registra(rotte, richiediUtente, idempotente)
+
 	servizioPosizioni := posizioni.NuovoServizio(posizioni.NuovoRepository(db))
 	posizioni.NuovoHandler(servizioPosizioni).Registra(rotte, richiediUtente)
 
-	return rotte.Handler()
+	if cfg.CORS == nil {
+		return rotte.Handler()
+	}
+	return cfg.CORS.Middleware(rotte.Handler())
 }

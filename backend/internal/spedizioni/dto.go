@@ -14,6 +14,7 @@ type richiestaCrea struct {
 	IDIndirizzoRitiro     *int32  `json:"id_indirizzo_ritiro"`
 	IDIndirizzoSpedizione *int32  `json:"id_indirizzo_spedizione"`
 	DataoraRichiesta      *string `json:"dataora_richiesta_spedizione"`
+	IDCorriere            *int32  `json:"id_corriere"`
 }
 
 type richiestaModifica struct {
@@ -105,6 +106,7 @@ func (req richiestaCrea) versoDominio() (NuovaSpedizione, *errori.Validazione) {
 	} else {
 		n.DataoraRichiesta = t
 	}
+	n.IDCorriere = req.IDCorriere
 	return n, e
 }
 
@@ -129,8 +131,33 @@ func (req richiestaModifica) versoDominio() (DatiSpedizione, error) {
 }
 
 type indirizzoDTO struct {
-	Via    string `json:"via"`
-	Civico string `json:"civico"`
+	Via     string  `json:"via"`
+	Civico  string  `json:"civico"`
+	Citta   *string `json:"citta"`
+	CAP     *string `json:"cap"`
+	Regione *string `json:"regione"`
+	Nazione *string `json:"nazione"`
+}
+
+type personaDTO struct {
+	ID       *int32  `json:"id,omitempty"`
+	Nome     string  `json:"nome"`
+	Cognome  string  `json:"cognome"`
+	Email    *string `json:"email,omitempty"`
+	Telefono *string `json:"telefono,omitempty"`
+}
+
+func versoPersonaDTO(p Persona) personaDTO {
+	d := personaDTO{Nome: p.Nome, Cognome: p.Cognome, Email: p.Email, Telefono: p.Telefono}
+	if p.ID != 0 {
+		id := p.ID
+		d.ID = &id
+	}
+	return d
+}
+
+func versoIndirizzoDTO(i Indirizzo) indirizzoDTO {
+	return indirizzoDTO{Via: i.Via, Civico: i.Civico, Citta: i.Citta, CAP: i.CAP, Regione: i.Regione, Nazione: i.Nazione}
 }
 
 type notaDTO struct {
@@ -154,11 +181,14 @@ type voceElencoDTO struct {
 	IsReso                bool         `json:"is_reso"`
 	CreataIl              time.Time    `json:"creata_il"`
 	DataoraRichiesta      time.Time    `json:"dataora_richiesta_spedizione"`
-	IDClienteMittente     int32        `json:"id_cliente_mittente"`
+	IDClienteMittente     *int32       `json:"id_cliente_mittente,omitempty"`
 	IDClienteDestinatario int32        `json:"id_cliente_destinatario"`
 	IndirizzoRitiro       indirizzoDTO `json:"indirizzo_ritiro"`
 	IndirizzoSpedizione   indirizzoDTO `json:"indirizzo_spedizione"`
+	Mittente              *personaDTO  `json:"mittente,omitempty"`
+	Destinatario          personaDTO   `json:"destinatario"`
 	IDCorriere            *int32       `json:"id_corriere,omitempty"`
+	Corriere              *personaDTO  `json:"corriere,omitempty"`
 	ConclusaIl            *time.Time   `json:"conclusa_il"`
 	Note                  []notaDTO    `json:"note"`
 }
@@ -182,13 +212,26 @@ func versoVoceDTO(v VoceElenco) voceElencoDTO {
 	for j, n := range v.Note {
 		note[j] = versoNotaDTO(n)
 	}
+	var corriere, mittente *personaDTO
+	var idMittente *int32
+	if v.Corriere != nil {
+		c := versoPersonaDTO(*v.Corriere)
+		corriere = &c
+	}
+	if v.Mittente != nil {
+		m := versoPersonaDTO(*v.Mittente)
+		mittente, idMittente = &m, m.ID
+	}
 	return voceElencoDTO{
 		ID: v.ID, CodOrdine: v.CodOrdine, Stato: v.Stato.String(), IsReso: v.IsReso,
 		CreataIl: v.CreataIl.UTC(), DataoraRichiesta: v.DataoraRichiesta.UTC(),
-		IDClienteMittente: v.IDClienteMittente, IDClienteDestinatario: v.IDClienteDestinatario,
-		IndirizzoRitiro:     indirizzoDTO{v.IndirizzoRitiro.Via, v.IndirizzoRitiro.Civico},
-		IndirizzoSpedizione: indirizzoDTO{v.IndirizzoSpedizione.Via, v.IndirizzoSpedizione.Civico},
+		IDClienteMittente: idMittente, IDClienteDestinatario: v.IDClienteDestinatario,
+		IndirizzoRitiro:     versoIndirizzoDTO(v.IndirizzoRitiro),
+		IndirizzoSpedizione: versoIndirizzoDTO(v.IndirizzoSpedizione),
+		Mittente:            mittente,
+		Destinatario:        versoPersonaDTO(v.Destinatario),
 		IDCorriere:          v.IDCorriere,
+		Corriere:            corriere,
 		ConclusaIl:          inUTC(v.ConclusaIl),
 		Note:                note,
 	}
