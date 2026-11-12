@@ -24,8 +24,20 @@ type FiltroElenco struct {
 }
 
 type Indirizzo struct {
-	Via    string
-	Civico string
+	Via     string
+	Civico  string
+	Citta   *string
+	CAP     *string
+	Regione *string
+	Nazione *string
+}
+
+type Persona struct {
+	ID       int32
+	Nome     string
+	Cognome  string
+	Email    *string
+	Telefono *string
 }
 
 type VoceElenco struct {
@@ -39,18 +51,22 @@ type VoceElenco struct {
 	IDClienteDestinatario int32
 	IndirizzoRitiro       Indirizzo
 	IndirizzoSpedizione   Indirizzo
+	Mittente              *Persona
+	Destinatario          Persona
 	IDCorriere            *int32
+	Corriere              *Persona
 	ConclusaIl            *time.Time
 	Note                  []Nota
 }
 
 type Visibilita struct {
-	IDCorriere        *int32
-	Stati             []Stato
-	IDDestinatario    *int32
-	ConcluseDal       *time.Time
-	SoloNotePubbliche bool
-	MostraCorriere    bool
+	IDCorriere         *int32
+	Stati              []Stato
+	IDDestinatario     *int32
+	ConcluseDal        *time.Time
+	SoloNotePubbliche  bool
+	MostraCorriere     bool
+	NascondiIDMittente bool
 }
 
 var statiVisibiliAlCorriere = []Stato{Assegnata, Ritirata, InConsegna}
@@ -65,7 +81,7 @@ func visibilitaPer(r identita.Richiedente, giorniCliente int, adesso time.Time) 
 	case identita.Cliente:
 		id := r.ID
 		dal := adesso.AddDate(0, 0, -giorniCliente)
-		return Visibilita{IDDestinatario: &id, ConcluseDal: &dal, SoloNotePubbliche: true}, nil
+		return Visibilita{IDDestinatario: &id, ConcluseDal: &dal, SoloNotePubbliche: true, NascondiIDMittente: true}, nil
 	}
 	return Visibilita{}, &errori.NonAutorizzato{Messaggio: "ruolo non autorizzato a vedere le spedizioni"}
 }

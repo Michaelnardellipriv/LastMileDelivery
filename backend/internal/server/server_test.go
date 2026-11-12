@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"lastmiledelivery/backend/internal/autenticazione"
+	"lastmiledelivery/backend/internal/httpx"
 	"lastmiledelivery/backend/internal/identita"
 )
 
@@ -24,8 +25,13 @@ func serverSenzaDatabase(t *testing.T, ammettiHeaderID bool) *httptest.Server {
 		t.Fatal(err)
 	}
 	t.Cleanup(db.Close)
+	cors, err := httpx.NuovoCORS("http://localhost:5173")
+	if err != nil {
+		t.Fatal(err)
+	}
 	srv := httptest.NewServer(Nuovo(db, Config{
 		MaxTentativi: 3, Firmatario: firmatarioTest, Postino: autenticazione.PostinoLog{}, AmmettiHeaderID: ammettiHeaderID,
+		CORS: cors,
 	}))
 	t.Cleanup(srv.Close)
 	return srv
@@ -113,6 +119,23 @@ func tokenAltroSegreto(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return token
+}
+
+func TestCORSSulServer(t *testing.T) {
+	srv := serverSenzaDatabase(t, false)
+	for _, percorso := range []string{"/api/spedizioni/1/stato", "/api/auth/login", "/api/corrieri/posizioni"} {
+		stato, header, _ := chiama(t, srv, http.MethodOptions, percorso, "", map[string]string{
+			"Origin": "http://localhost:5173", "Access-Control-Request-Method": "PATCH",
+			"Access-Control-Request-Headers": "authorization, content-type",
+		})
+		if stato != http.StatusNoContent || header.Get("Access-Control-Allow-Origin") != "http://localhost:5173" {
+			t.Errorf("preflight su %s: atteso 204 con l'origine ammessa (non 405), ottenuto %d %v", percorso, stato, header)
+		}
+	}
+	stato, header, _ := chiama(t, srv, http.MethodGet, "/api/spedizioni", "", map[string]string{"Origin": "http://localhost:5173"})
+	if stato != http.StatusUnauthorized || header.Get("Access-Control-Allow-Origin") != "http://localhost:5173" {
+		t.Errorf("anche le risposte di errore hanno gli header CORS, così il browser le legge: %d %v", stato, header)
+	}
 }
 
 func TestPercorsiNonPrevisti(t *testing.T) {

@@ -27,6 +27,7 @@ type NuovaSpedizione struct {
 	IDIndirizzoRitiro     int32
 	IDIndirizzoSpedizione int32
 	DataoraRichiesta      time.Time
+	IDCorriere            *int32
 }
 
 type DatiSpedizione struct {
