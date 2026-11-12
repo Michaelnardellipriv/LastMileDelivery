@@ -2,6 +2,7 @@ BEGIN;
 
 
 
+DROP TABLE IF EXISTS recuperi_password      CASCADE;
 DROP TABLE IF EXISTS posizioni_corrieri     CASCADE;
 DROP TABLE IF EXISTS impostazioni           CASCADE;
 DROP TABLE IF EXISTS cambiamenti_spedizioni CASCADE;
@@ -57,11 +58,14 @@ CREATE TABLE utenti (
     prefisso     VARCHAR(5)   NOT NULL,          -- es. '+39'
     nr_telefono  VARCHAR(20)  NOT NULL,
     email        VARCHAR(254) NOT NULL,
+    -- hash bcrypt della password, obbligatorio: ogni utente nasce con la sua password
+    pwd_hash     VARCHAR(255) NOT NULL,
     CONSTRAINT uq_utenti_email    UNIQUE (email),
     CONSTRAINT uq_utenti_telefono UNIQUE (prefisso, nr_telefono),
     CONSTRAINT ck_utenti_prefisso CHECK (prefisso ~ '^\+[0-9]{1,4}$'),
     CONSTRAINT ck_utenti_telefono CHECK (nr_telefono ~ '^[0-9]{4,15}$'),
-    CONSTRAINT ck_utenti_email    CHECK (email ~* '^[^@\s]+@[^@\s]+\.[^@\s]+$')
+    CONSTRAINT ck_utenti_email    CHECK (email ~* '^[^@\s]+@[^@\s]+\.[^@\s]+$'),
+    CONSTRAINT ck_utenti_pwd_hash CHECK (pwd_hash <> '')
 );
 
 CREATE TABLE clienti (
@@ -73,7 +77,6 @@ CREATE TABLE clienti (
 
 CREATE TABLE corrieri (
     id         INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    pwd_hash     VARCHAR(255) NOT NULL,
     id_utente  INTEGER NOT NULL UNIQUE
                REFERENCES utenti (id) ON UPDATE CASCADE ON DELETE RESTRICT
             
@@ -81,14 +84,12 @@ CREATE TABLE corrieri (
 
 CREATE TABLE operatori_logistici (
     id         INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    pwd_hash     VARCHAR(255) NOT NULL,
     id_utente  INTEGER NOT NULL UNIQUE
                REFERENCES utenti (id) ON UPDATE CASCADE ON DELETE RESTRICT
 );
 
 CREATE TABLE amministratori (
     id         INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    pwd_hash     VARCHAR(255) NOT NULL,
     id_utente  INTEGER NOT NULL UNIQUE
                REFERENCES utenti (id) ON UPDATE CASCADE ON DELETE RESTRICT
 );
@@ -413,6 +414,25 @@ CREATE TABLE posizioni_corrieri (
 -- Rende veloce "ultima posizione di ogni corriere".
 CREATE INDEX ix_posizioni_corrieri_ultima
     ON posizioni_corrieri (id_corriere, rilevata_il DESC);
+
+
+-- ===== Recupero password =====
+
+-- Una riga per ogni richiesta di recupero: nel database c'è solo l'hash SHA-256
+-- del token inviato per mail, così chi legge la tabella non può usarlo.
+CREATE TABLE recuperi_password (
+    id          INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id_utente   INTEGER NOT NULL
+                REFERENCES utenti (id) ON UPDATE CASCADE ON DELETE CASCADE,
+    token_hash  CHAR(64)    NOT NULL,
+    creato_il   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    scade_il    TIMESTAMPTZ NOT NULL,
+    usato_il    TIMESTAMPTZ NULL,
+    CONSTRAINT uq_recuperi_password_token UNIQUE (token_hash),
+    CONSTRAINT ck_recuperi_password_scadenza CHECK (scade_il > creato_il)
+);
+
+CREATE INDEX ix_recuperi_password_utente ON recuperi_password (id_utente);
 
 
 COMMIT;
