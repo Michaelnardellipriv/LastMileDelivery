@@ -29,7 +29,10 @@ func (s *Servizio) Dettaglio(ctx context.Context, r identita.Richiedente, id int
 
 func nascondi(vis Visibilita, v *VoceElenco) {
 	if !vis.MostraCorriere {
-		v.IDCorriere = nil
+		v.IDCorriere, v.Corriere = nil, nil
+	}
+	if vis.NascondiIDMittente && v.Mittente != nil {
+		v.Mittente.ID = 0
 	}
 	if vis.SoloNotePubbliche {
 		for i := range v.Note {

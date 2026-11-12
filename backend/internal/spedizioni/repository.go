@@ -32,8 +32,14 @@ type interrogabile interface {
 }
 
 func (r *Repository) Crea(ctx context.Context, idOperatore int32, n NuovaSpedizione) (Spedizione, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return Spedizione{}, err
+	}
+	defer tx.Rollback(ctx)
+
 	var id int32
-	err := r.db.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		INSERT INTO spedizioni (
 			cod_ordine, id_operatore_ha_creato,
 			id_cliente_mittente, id_cliente_destinatario,
@@ -47,7 +53,29 @@ func (r *Repository) Crea(ctx context.Context, idOperatore int32, n NuovaSpedizi
 	if err != nil {
 		return Spedizione{}, traduciErrore(err)
 	}
-	return perID(ctx, r.db, id)
+
+	if n.IDCorriere != nil {
+		if _, err := tx.Exec(ctx, `SELECT set_config('app.id_operatore', $1, true)`, strconv.Itoa(int(idOperatore))); err != nil {
+			return Spedizione{}, err
+		}
+		var idAssegnazione int32
+		if err := tx.QueryRow(ctx,
+			`INSERT INTO assegnazioni (id_operatore, id_corriere) VALUES ($1, $2) RETURNING id`,
+			idOperatore, *n.IDCorriere).Scan(&idAssegnazione); err != nil {
+			return Spedizione{}, traduciErrore(err)
+		}
+		if _, err := tx.Exec(ctx, `
+			UPDATE spedizioni SET stato = 'assegnata', id_assegnazione_corrente = $2 WHERE id = $1`,
+			id, idAssegnazione); err != nil {
+			return Spedizione{}, traduciErrore(err)
+		}
+	}
+
+	creata, err := perID(ctx, tx, id)
+	if err != nil {
+		return Spedizione{}, err
+	}
+	return creata, tx.Commit(ctx)
 }
 
 func (r *Repository) Aggiorna(ctx context.Context, id int32, autore identita.Richiedente,
@@ -337,8 +365,12 @@ func (r *Repository) elenca(ctx context.Context, v Visibilita, f FiltroElenco, i
 		SELECT s.id, s.cod_ordine, s.stato::text, s.is_reso, s.creata_il,
 		       s.dataora_richiesta_spedizione,
 		       s.id_cliente_mittente, s.id_cliente_destinatario,
-		       ir.via, ir.civico, isp.via, isp.civico,
-		       a.id_corriere, ch.conclusa_il,
+		       ir.via, ir.civico, cir.nome, cir.cod_postale, cir.regione, cir.nazione,
+		       isp.via, isp.civico, cisp.nome, cisp.cod_postale, cisp.regione, cisp.nazione,
+		       um.nome, um.cognome, um.email, um.prefisso || ' ' || um.nr_telefono,
+		       ud.nome, ud.cognome, ud.email, ud.prefisso || ' ' || ud.nr_telefono,
+		       a.id_corriere, uc.nome, uc.cognome, uc.prefisso || ' ' || uc.nr_telefono,
+		       ch.conclusa_il,
 		       COALESCE((
 		           SELECT json_agg(json_build_object(
 		                      'id', n.id, 'nota', n.nota, 'is_interna', n.is_interna,
@@ -351,7 +383,31 @@ func (r *Repository) elenca(ctx context.Context, v Visibilita, f FiltroElenco, i
 		FROM spedizioni s
 		JOIN indirizzi ir  ON ir.id  = s.id_indirizzo_ritiro
 		JOIN indirizzi isp ON isp.id = s.id_indirizzo_spedizione
+		JOIN clienti cm    ON cm.id  = s.id_cliente_mittente
+		JOIN utenti um     ON um.id  = cm.id_utente
+		JOIN clienti cd    ON cd.id  = s.id_cliente_destinatario
+		JOIN utenti ud     ON ud.id  = cd.id_utente
 		LEFT JOIN assegnazioni a ON a.id = s.id_assegnazione_corrente
+		LEFT JOIN corrieri co    ON co.id = a.id_corriere
+		LEFT JOIN utenti uc      ON uc.id = co.id_utente
+		LEFT JOIN LATERAL (
+		    SELECT ci.nome, ci.cod_postale, re.nome AS regione, na.nome AS nazione
+		    FROM indirizzi_in_citta ic
+		    JOIN citta ci   ON ci.id = ic.id_citta
+		    JOIN regioni re ON re.id = ci.id_regione
+		    JOIN nazioni na ON na.id = re.id_nazione
+		    WHERE ic.id_indirizzo = ir.id
+		    ORDER BY ci.id LIMIT 1
+		) cir ON TRUE
+		LEFT JOIN LATERAL (
+		    SELECT ci.nome, ci.cod_postale, re.nome AS regione, na.nome AS nazione
+		    FROM indirizzi_in_citta ic
+		    JOIN citta ci   ON ci.id = ic.id_citta
+		    JOIN regioni re ON re.id = ci.id_regione
+		    JOIN nazioni na ON na.id = re.id_nazione
+		    WHERE ic.id_indirizzo = isp.id
+		    ORDER BY ci.id LIMIT 1
+		) cisp ON TRUE
 		LEFT JOIN LATERAL (
 		    SELECT max(c.modificato_il) AS conclusa_il
 		    FROM cambiamenti_spedizioni c
@@ -373,15 +429,28 @@ func (r *Repository) elenca(ctx context.Context, v Visibilita, f FiltroElenco, i
 		var voce VoceElenco
 		var stato string
 		var note []byte
+		var corriere, mitt Persona
+		var nomeCorriere, cognomeCorriere *string
+		ritiro, consegna := &voce.IndirizzoRitiro, &voce.IndirizzoSpedizione
+		dest := &voce.Destinatario
 		if err := righe.Scan(&voce.ID, &voce.CodOrdine, &stato, &voce.IsReso, &voce.CreataIl,
 			&voce.DataoraRichiesta,
 			&voce.IDClienteMittente, &voce.IDClienteDestinatario,
-			&voce.IndirizzoRitiro.Via, &voce.IndirizzoRitiro.Civico,
-			&voce.IndirizzoSpedizione.Via, &voce.IndirizzoSpedizione.Civico,
-			&voce.IDCorriere, &voce.ConclusaIl, &note); err != nil {
+			&ritiro.Via, &ritiro.Civico, &ritiro.Citta, &ritiro.CAP, &ritiro.Regione, &ritiro.Nazione,
+			&consegna.Via, &consegna.Civico, &consegna.Citta, &consegna.CAP, &consegna.Regione, &consegna.Nazione,
+			&mitt.Nome, &mitt.Cognome, &mitt.Email, &mitt.Telefono,
+			&dest.Nome, &dest.Cognome, &dest.Email, &dest.Telefono,
+			&voce.IDCorriere, &nomeCorriere, &cognomeCorriere, &corriere.Telefono,
+			&voce.ConclusaIl, &note); err != nil {
 			return nil, err
 		}
 		voce.Stato = Stato(stato)
+		mitt.ID, dest.ID = voce.IDClienteMittente, voce.IDClienteDestinatario
+		voce.Mittente = &mitt
+		if voce.IDCorriere != nil && nomeCorriere != nil && cognomeCorriere != nil {
+			corriere.ID, corriere.Nome, corriere.Cognome = *voce.IDCorriere, *nomeCorriere, *cognomeCorriere
+			voce.Corriere = &corriere
+		}
 		if voce.Note, err = leggiNote(note); err != nil {
 			return nil, err
 		}
