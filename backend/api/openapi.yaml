@@ -2,7 +2,7 @@ openapi: 3.0.3
 
 info:
   title: LastMileDelivery API
-  version: "0.18.0"
+  version: "0.21.0"
   description: |
     API per la gestione delle spedizioni di Veloce24.
 
@@ -25,6 +25,9 @@ info:
     altre operazioni rispondono 403, e non esistono endpoint di eliminazione.
 
     **Configurazione del server** (variabili d'ambiente): `DATABASE_URL` (obbligatoria),
+    `CORS_ORIGIN` (obbligatoria: origini del frontend web ammesse dal browser, separate da
+    virgola, senza percorso né barra finale, es. `http://localhost:5173`; `*` = tutte, solo
+    sviluppo; le richieste senza `Origin`, come quelle delle app mobile, non ne dipendono),
     `LISTEN_ADDR` (predefinito `127.0.0.1:8080`), `MAX_TENTATIVI` (predefinito 3),
     `GIORNI_VISIBILITA_CLIENTE` (predefinito 30), `JWT_SEGRETO` (almeno 32 caratteri; se
     manca se ne genera uno casuale a ogni avvio), `DURATA_TOKEN` (predefinito `8h`),
@@ -95,6 +98,11 @@ tags:
   - name: spedizioni
   - name: posizioni
     description: Posizione simulata dei corrieri (RF16) e intervallo di invio
+  - name: anagrafiche
+    description: |
+      Clienti e indirizzi, per creare una spedizione dall'interfaccia: l'operatore cerca o
+      crea mittente e destinatario (`/api/clienti`) e gli indirizzi di ritiro e consegna
+      (`/api/indirizzi`), poi crea la spedizione con gli id ottenuti (`POST /api/spedizioni`).
 
 paths:
   /api/auth/login:
@@ -343,9 +351,11 @@ paths:
       tags: [spedizioni]
       summary: Crea una spedizione
       description: |
-        L'operatore logistico crea una spedizione. Nasce sempre nello stato `creata`,
-        senza corriere. `cod_ordine` è il riferimento esterno (es. l'ordine dell'e-commerce)
-        ed è unico.
+        L'operatore logistico crea una spedizione con clienti e indirizzi già esistenti
+        (cercati o creati con `/api/clienti` e `/api/indirizzi`). Senza `id_corriere` nasce
+        `creata`; con `id_corriere` (scelto da `GET /api/corrieri`) nasce già `assegnata` a quel
+        corriere, nella stessa operazione, e lo storico registra creazione e assegnazione.
+        `cod_ordine` è il riferimento esterno (es. l'ordine dell'e-commerce) ed è unico.
       operationId: creaSpedizione
       security:
         - operatore: []
@@ -786,6 +796,187 @@ paths:
         '500': { $ref: '#/components/responses/ErroreInterno' }
         '503': { $ref: '#/components/responses/NonDisponibile' }
 
+  /api/clienti:
+    get:
+      tags: [anagrafiche]
+      summary: Ricerca dei clienti
+      description: |
+        Operatori e amministratori. `q` cerca, senza distinguere maiuscole e minuscole, in
+        nome e cognome (in qualsiasi ordine), email e numero di telefono; vuoto = tutti.
+        Ordinati per cognome e nome.
+      operationId: cercaClienti
+      security:
+        - operatore: []
+        - amministratore: []
+      parameters:
+        - { name: q, in: query, required: false, schema: { type: string, maxLength: 100 } }
+        - { name: pagina, in: query, required: false, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: per_pagina, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        '200':
+          description: Clienti trovati
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ListaClienti' }
+        '400':
+          description: Parametri non validi
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+        '401': { $ref: '#/components/responses/NonIdentificato' }
+        '403': { $ref: '#/components/responses/NonAutorizzato' }
+        '500': { $ref: '#/components/responses/ErroreInterno' }
+        '503': { $ref: '#/components/responses/NonDisponibile' }
+    post:
+      tags: [anagrafiche]
+      summary: Crea un cliente (mittente o destinatario)
+      description: |
+        Solo l'operatore. Crea l'utente con la `password` indicata dall'operatore (da 8
+        caratteri a 72 byte, salvata come hash) e il cliente, poi invia al cliente una mail con
+        email e password; `mail_inviata` dice se la mail è partita (il cliente resta creato
+        anche se l'invio fallisce).
+
+        Ogni email ha un solo ruolo: se è già usata da un qualsiasi utente (cliente, corriere,
+        operatore o amministratore) risponde 409. Un cliente già registrato si cerca con
+        `GET /api/clienti`. L'email non distingue maiuscole e minuscole.
+      operationId: creaCliente
+      security:
+        - operatore: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NuovoCliente' }
+            example: { nome: Giulia, cognome: Rossi, prefisso: '+39', nr_telefono: '3331234567', email: giulia.rossi@example.com, password: PasswordIniziale1 }
+      responses:
+        '201':
+          description: Cliente creato
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EsitoCliente' }
+        '400':
+          description: Campi mancanti o non validi, password compresa
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+        '401': { $ref: '#/components/responses/NonIdentificato' }
+        '403': { $ref: '#/components/responses/NonAutorizzato' }
+        '409':
+          description: Email già usata da un altro utente (con qualsiasi ruolo), oppure numero di telefono già usato
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+        '415': { $ref: '#/components/responses/NonJSON' }
+        '500': { $ref: '#/components/responses/ErroreInterno' }
+        '503': { $ref: '#/components/responses/NonDisponibile' }
+
+  /api/corrieri:
+    get:
+      tags: [anagrafiche]
+      summary: Elenco dei corrieri
+      description: |
+        Operatori e amministratori: tutti i corrieri, anche quelli senza spedizioni, per
+        scegliere a chi assegnare una spedizione o per il filtro `id_corriere` dell'elenco.
+        `q` cerca, senza distinguere maiuscole e minuscole, in nome e cognome, email e
+        telefono; vuoto = tutti. Ordinati per cognome e nome.
+      operationId: elencaCorrieri
+      security:
+        - operatore: []
+        - amministratore: []
+      parameters:
+        - { name: q, in: query, required: false, schema: { type: string, maxLength: 100 } }
+        - { name: pagina, in: query, required: false, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: per_pagina, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        '200':
+          description: Corrieri trovati
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ListaCorrieri' }
+        '400':
+          description: Parametri non validi
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+        '401': { $ref: '#/components/responses/NonIdentificato' }
+        '403': { $ref: '#/components/responses/NonAutorizzato' }
+        '500': { $ref: '#/components/responses/ErroreInterno' }
+        '503': { $ref: '#/components/responses/NonDisponibile' }
+
+  /api/indirizzi:
+    get:
+      tags: [anagrafiche]
+      summary: Ricerca degli indirizzi
+      description: |
+        Operatori e amministratori. `q` cerca, senza distinguere maiuscole e minuscole, in via,
+        civico, città e CAP; vuoto = tutti.
+      operationId: cercaIndirizzi
+      security:
+        - operatore: []
+        - amministratore: []
+      parameters:
+        - { name: q, in: query, required: false, schema: { type: string, maxLength: 100 } }
+        - { name: pagina, in: query, required: false, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: per_pagina, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        '200':
+          description: Indirizzi trovati
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ListaIndirizzi' }
+        '400':
+          description: Parametri non validi
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+        '401': { $ref: '#/components/responses/NonIdentificato' }
+        '403': { $ref: '#/components/responses/NonAutorizzato' }
+        '500': { $ref: '#/components/responses/ErroreInterno' }
+        '503': { $ref: '#/components/responses/NonDisponibile' }
+    post:
+      tags: [anagrafiche]
+      summary: Trova o crea un indirizzo
+      description: |
+        Solo l'operatore. Tutti i campi sono obbligatori. Nazione, regione e città vengono
+        riusate se esistono già (senza distinguere maiuscole e minuscole), altrimenti create.
+        Se nella stessa città esiste già un indirizzo con la stessa via e lo stesso civico
+        risponde 200 con quello, altrimenti lo crea e risponde 201. In entrambi i casi l'`id`
+        si usa come `id_indirizzo_ritiro` o `id_indirizzo_spedizione` della spedizione.
+      operationId: trovaOCreaIndirizzo
+      security:
+        - operatore: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NuovoIndirizzo' }
+            example: { via: Via Dante, civico: '7', citta: Milano, cap: '20121', regione: Lombardia, nazione: Italia }
+      responses:
+        '200':
+          description: Indirizzo già presente
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IndirizzoAnagrafica' }
+        '201':
+          description: Indirizzo creato
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IndirizzoAnagrafica' }
+        '400':
+          description: Campi mancanti o troppo lunghi
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+        '401': { $ref: '#/components/responses/NonIdentificato' }
+        '403': { $ref: '#/components/responses/NonAutorizzato' }
+        '415': { $ref: '#/components/responses/NonJSON' }
+        '500': { $ref: '#/components/responses/ErroreInterno' }
+        '503': { $ref: '#/components/responses/NonDisponibile' }
+
   /api/corrieri/posizione:
     post:
       tags: [posizioni]
@@ -1062,6 +1253,11 @@ components:
           format: int32
           minimum: 1
           description: Diverso dall'indirizzo di ritiro
+        id_corriere:
+          type: integer
+          format: int32
+          minimum: 1
+          description: Facoltativo; se presente la spedizione nasce già assegnata a questo corriere
 
     ModificaSpedizione:
       type: object
@@ -1189,10 +1385,131 @@ components:
 
     Indirizzo:
       type: object
-      required: [via, civico]
+      required: [via, civico, citta, cap, regione, nazione]
       properties:
         via: { type: string }
         civico: { type: string }
+        citta: { type: string, nullable: true }
+        cap: { type: string, nullable: true }
+        regione: { type: string, nullable: true }
+        nazione: { type: string, nullable: true }
+
+    NuovoIndirizzo:
+      type: object
+      additionalProperties: false
+      required: [via, civico, citta, cap, regione, nazione]
+      properties:
+        via: { type: string, maxLength: 150 }
+        civico: { type: string, maxLength: 10 }
+        citta: { type: string, maxLength: 100 }
+        cap: { type: string, maxLength: 10 }
+        regione: { type: string, maxLength: 100 }
+        nazione: { type: string, maxLength: 100 }
+
+    IndirizzoAnagrafica:
+      type: object
+      required: [id, via, civico, citta, cap, regione, nazione]
+      properties:
+        id: { type: integer, format: int32 }
+        via: { type: string }
+        civico: { type: string }
+        citta: { type: string }
+        cap: { type: string }
+        regione: { type: string }
+        nazione: { type: string }
+
+    ListaIndirizzi:
+      type: object
+      required: [dati, pagina, per_pagina]
+      properties:
+        dati:
+          type: array
+          items: { $ref: '#/components/schemas/IndirizzoAnagrafica' }
+        pagina: { type: integer }
+        per_pagina: { type: integer }
+
+    NuovoCliente:
+      type: object
+      additionalProperties: false
+      required: [nome, cognome, prefisso, nr_telefono, email, password]
+      properties:
+        nome: { type: string, maxLength: 100 }
+        cognome: { type: string, maxLength: 100 }
+        prefisso: { type: string, pattern: '^\+[0-9]{1,4}$', example: '+39' }
+        nr_telefono: { type: string, pattern: '^[0-9]{4,15}$' }
+        email: { type: string, format: email, maxLength: 254 }
+        password:
+          type: string
+          minLength: 8
+          description: Viene inviata per mail al cliente
+
+    Cliente:
+      type: object
+      required: [id, id_utente, nome, cognome, email, prefisso, nr_telefono]
+      properties:
+        id: { type: integer, format: int32, description: 'Id nella tabella clienti, da usare come id_cliente_mittente o id_cliente_destinatario' }
+        id_utente: { type: integer, format: int32 }
+        nome: { type: string }
+        cognome: { type: string }
+        email: { type: string }
+        prefisso: { type: string }
+        nr_telefono: { type: string }
+
+    EsitoCliente:
+      type: object
+      required: [cliente, mail_inviata]
+      properties:
+        cliente: { $ref: '#/components/schemas/Cliente' }
+        mail_inviata: { type: boolean, description: true se la mail con le credenziali è partita }
+
+    Corriere:
+      type: object
+      required: [id, id_utente, nome, cognome, email, prefisso, nr_telefono]
+      properties:
+        id: { type: integer, format: int32, description: 'Id nella tabella corrieri, da usare come id_corriere' }
+        id_utente: { type: integer, format: int32 }
+        nome: { type: string }
+        cognome: { type: string }
+        email: { type: string }
+        prefisso: { type: string }
+        nr_telefono: { type: string }
+
+    ListaCorrieri:
+      type: object
+      required: [dati, pagina, per_pagina]
+      properties:
+        dati:
+          type: array
+          items: { $ref: '#/components/schemas/Corriere' }
+        pagina: { type: integer }
+        per_pagina: { type: integer }
+
+    ListaClienti:
+      type: object
+      required: [dati, pagina, per_pagina]
+      properties:
+        dati:
+          type: array
+          items: { $ref: '#/components/schemas/Cliente' }
+        pagina: { type: integer }
+        per_pagina: { type: integer }
+
+    Persona:
+      type: object
+      required: [nome, cognome]
+      description: |
+        Dati di un cliente o del corriere, secondo chi chiama:
+        - operatore e amministratore: mittente e destinatario con id, email e telefono;
+          corriere con id e telefono;
+        - corriere: mittente e destinatario con id, email e telefono; niente corriere;
+        - cliente: mittente con nome, cognome, email e telefono (senza id), destinatario con id,
+          email e telefono; niente corriere.
+      properties:
+        id: { type: integer, format: int32, description: 'Id nella tabella clienti o corrieri; assente per il mittente quando chiama il cliente' }
+        nome: { type: string }
+        cognome: { type: string }
+        email: { type: string, description: Dei clienti; il corriere non ha l'email qui }
+        telefono: { type: string, example: '+39 3330000005' }
 
     Autore:
       type: object
@@ -1235,10 +1552,11 @@ components:
         - is_reso
         - creata_il
         - dataora_richiesta_spedizione
-        - id_cliente_mittente
         - id_cliente_destinatario
         - indirizzo_ritiro
         - indirizzo_spedizione
+        - mittente
+        - destinatario
         - conclusa_il
         - note
       properties:
@@ -1248,15 +1566,23 @@ components:
         is_reso: { type: boolean }
         creata_il: { type: string, format: date-time }
         dataora_richiesta_spedizione: { type: string, format: date-time }
-        id_cliente_mittente: { type: integer, format: int32 }
+        id_cliente_mittente:
+          type: integer
+          format: int32
+          description: Assente quando chiama il cliente
         id_cliente_destinatario: { type: integer, format: int32 }
         indirizzo_ritiro: { $ref: '#/components/schemas/Indirizzo' }
         indirizzo_spedizione: { $ref: '#/components/schemas/Indirizzo' }
+        mittente: { $ref: '#/components/schemas/Persona' }
+        destinatario: { $ref: '#/components/schemas/Persona' }
         id_corriere:
           type: integer
           format: int32
           nullable: true
           description: Presente solo per operatore e amministratore
+        corriere:
+          allOf: [{ $ref: '#/components/schemas/Persona' }]
+          description: Solo per operatore e amministratore, e solo se la spedizione ha un corriere
         conclusa_il:
           type: string
           format: date-time

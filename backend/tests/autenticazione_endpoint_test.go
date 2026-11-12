@@ -111,7 +111,7 @@ func TestLogin(t *testing.T) {
 		}
 	})
 
-	t.Run("utente_con_piu_ruoli", func(t *testing.T) {
+	t.Run("un_solo_ruolo_per_email", func(t *testing.T) {
 		email := "doppio." + f.suffisso + "@test.it"
 		var idUtente, idCorriere, idCliente int32
 		ctx := t.Context()
@@ -122,20 +122,16 @@ func TestLogin(t *testing.T) {
 		if err := f.db.QueryRow(ctx, `INSERT INTO corrieri (id_utente) VALUES ($1) RETURNING id`, idUtente).Scan(&idCorriere); err != nil {
 			t.Fatal(err)
 		}
-		if err := f.db.QueryRow(ctx, `INSERT INTO clienti (id_utente) VALUES ($1) RETURNING id`, idUtente).Scan(&idCliente); err != nil {
-			t.Fatal(err)
+		err := f.db.QueryRow(ctx, `INSERT INTO clienti (id_utente) VALUES ($1) RETURNING id`, idUtente).Scan(&idCliente)
+		if err == nil || !strings.Contains(err.Error(), "un solo ruolo") {
+			t.Fatalf("il database rifiuta un secondo ruolo per la stessa email, ottenuto %v", err)
 		}
 		f.impostaPassword(t, email, "PasswordDoppia1")
-
-		r := f.login(t, map[string]any{"email": email, "password": "PasswordDoppia1"}, 400)
-		if !contiene(campiInErrore(r), "ruolo") {
-			t.Fatalf("con più ruoli va indicato quale: %s", r.grezzo)
+		r := f.login(t, map[string]any{"email": email, "password": "PasswordDoppia1"}, 200)
+		if u := r.corpo["utente"].(map[string]any); u["ruolo"] != "corriere" || int32(u["id"].(float64)) != idCorriere {
+			t.Fatalf("resta solo il ruolo di corriere: %s", r.grezzo)
 		}
-		r = f.login(t, map[string]any{"email": email, "password": "PasswordDoppia1", "ruolo": "cliente"}, 200)
-		if u := r.corpo["utente"].(map[string]any); u["ruolo"] != "cliente" || int32(u["id"].(float64)) != idCliente {
-			t.Fatalf("login come cliente: %s", r.grezzo)
-		}
-		f.login(t, map[string]any{"email": email, "password": "PasswordDoppia1", "ruolo": "amministratore"}, 403)
+		f.login(t, map[string]any{"email": email, "password": "PasswordDoppia1", "ruolo": "cliente"}, 403)
 	})
 }
 
