@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'backend_page.dart';
+import 'operatore/app.dart';
 import 'store.dart';
 
 void main() => runApp(const App());
@@ -63,6 +64,18 @@ class LoginPage extends StatelessWidget {
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const BackendAccessoPage(apiBase: apiBase)),
+                ),
+              ),
+            ),
+          if (apiBase.isNotEmpty)
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.admin_panel_settings_outlined),
+                title: const Text('Area operatori'),
+                subtitle: const Text('Login con email e password, spedizioni, mappa dei corrieri'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const AreaOperatore(apiBase: apiBase)),
                 ),
               ),
             ),
