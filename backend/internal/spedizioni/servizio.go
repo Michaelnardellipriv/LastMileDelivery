@@ -63,7 +63,6 @@ func (s *Servizio) validaNuova(n NuovaSpedizione) *errori.Validazione {
 	controllaID(e, "id_indirizzo_ritiro", n.IDIndirizzoRitiro)
 	controllaID(e, "id_indirizzo_spedizione", n.IDIndirizzoSpedizione)
 	controllaIndirizzi(e, n.IDIndirizzoRitiro, n.IDIndirizzoSpedizione)
-	controllaData(e, n.DataoraRichiesta, s.adesso())
 	if n.IDCorriere != nil {
 		controllaID(e, "id_corriere", *n.IDCorriere)
 	}
@@ -98,9 +97,6 @@ func (s *Servizio) validaDati(d DatiSpedizione) error {
 		if v != nil {
 			controllaID(e, campo, *v)
 		}
-	}
-	if d.DataoraRichiesta != nil {
-		controllaData(e, *d.DataoraRichiesta, s.adesso())
 	}
 	return e.Err()
 }
@@ -194,7 +190,7 @@ func validaTentativo(t TentativoFallito) error {
 	}
 	controllaNota(e, t.Nota, "obbligatoria per ogni tentativo non riuscito")
 	if t.Tipo.Valido() {
-		controllaMotivo(e, t.Motivo, motiviTentativo(t.Tipo), "obbligatorio per ogni tentativo non riuscito")
+		controllaMotivo(e, t.Motivo, "obbligatorio per ogni tentativo non riuscito")
 	}
 	return e.Err()
 }
@@ -256,8 +252,8 @@ func validaCambio(c CambioStato) error {
 	case altroEndpoint[c.Stato] != "":
 		e.Aggiungi("stato", "\""+c.Stato.String()+"\" "+altroEndpoint[c.Stato])
 	}
-	if regola, chiusa := motiviStato[c.Stato]; chiusa {
-		controllaMotivo(e, c.Motivo, regola.ammessi, "")
+	if _, conMotivo := azioniConMotivo[c.Stato]; conMotivo {
+		controllaMotivo(e, c.Motivo, "")
 		controllaNota(e, c.Nota, "")
 	} else {
 		if c.Nota != nil {
@@ -300,8 +296,8 @@ func (s *Servizio) decidiStato(r identita.Richiedente, attuale Spedizione, c Cam
 }
 
 func (s *Servizio) richiediMotivoENota(attuale Spedizione, c CambioStato) error {
-	regola, chiusa := motiviStato[c.Stato]
-	if !chiusa {
+	azione, conMotivo := azioniConMotivo[c.Stato]
+	if !conMotivo {
 		return nil
 	}
 	e := &errori.Validazione{}
@@ -313,10 +309,10 @@ func (s *Servizio) richiediMotivoENota(attuale Spedizione, c CambioStato) error 
 		return e.Err()
 	}
 	if c.Motivo == nil {
-		e.Aggiungi("motivo", "obbligatorio per "+regola.azione)
+		e.Aggiungi("motivo", "obbligatorio per "+azione)
 	}
 	if c.Nota == nil {
-		e.Aggiungi("nota", "obbligatoria per "+regola.azione)
+		e.Aggiungi("nota", "obbligatoria per "+azione)
 	}
 	return e.Err()
 }

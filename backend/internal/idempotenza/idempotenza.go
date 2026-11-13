@@ -99,7 +99,10 @@ func (reg *Registro) Middleware(next http.Handler) http.Handler {
 
 		reg.mu.Lock()
 		defer reg.mu.Unlock()
-		if copia.stato >= 500 {
+		// Si ricorda solo una richiesta riuscita (2xx): una richiesta rifiutata (dati non
+		// validi, conflitto, permessi...) non ha cambiato nulla, quindi chi corregge i dati
+		// può rimandarla con la stessa chiave senza ricevere 409.
+		if copia.stato < 200 || copia.stato >= 300 {
 			delete(reg.voci, id)
 			return
 		}
