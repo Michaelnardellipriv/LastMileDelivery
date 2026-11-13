@@ -34,6 +34,7 @@ type fixture struct {
 	idDestinatario   int32
 	idRitiro         int32
 	idConsegna       int32
+	idAltro          int32
 	idAmministratore int32
 	idCorrierePos    int32
 	idCorriereFermo  int32
@@ -106,6 +107,8 @@ func creaFixture(t *testing.T) *fixture {
 	f.idConsegna = inserisci(`INSERT INTO indirizzi (via, civico) VALUES ('Via Museo', '12') RETURNING id`)
 	inserisci(`INSERT INTO indirizzi_in_citta (id_citta, id_indirizzo) VALUES ($1, $2) RETURNING id`, citta, f.idRitiro)
 	inserisci(`INSERT INTO indirizzi_in_citta (id_citta, id_indirizzo) VALUES ($1, $2) RETURNING id`, citta, f.idConsegna)
+	f.idAltro = inserisci(`INSERT INTO indirizzi (via, civico) VALUES ('Via Belenzani', '3') RETURNING id`)
+	inserisci(`INSERT INTO indirizzi_in_citta (id_citta, id_indirizzo) VALUES ($1, $2) RETURNING id`, citta, f.idAltro)
 	return f
 }
 
@@ -347,6 +350,15 @@ func TestCreaSpedizione(t *testing.T) {
 		if r.corpo["stato"] != "creata" || r.corpo["id_corriere"] != nil || r.corpo["id"].(float64) <= 0 || r.corpo["is_reso"] != false {
 			t.Fatalf("spedizione creata non corretta: %s", r.grezzo)
 		}
+		if r.corpo["ritirata_il"] != nil {
+			t.Fatalf("alla creazione la data del ritiro non c'è ancora: %s", r.grezzo)
+		}
+		conRitiro := f.corpoValido("DATA-RITIRO")
+		conRitiro["ritirata_il"] = time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339)
+		if r := f.chiama(t, http.MethodPost, "/api/spedizioni", conRitiro, comeOperatore(f)); r.stato != http.StatusBadRequest ||
+			!contiene(campiInErrore(r), "ritirata_il") {
+			t.Fatalf("ritirata_il la decide il sistema: atteso 400 sul campo, ottenuto %d %s", r.stato, r.grezzo)
+		}
 		conReso := f.corpoValido("RESO")
 		conReso["is_reso"] = true
 		if r := f.chiama(t, http.MethodPost, "/api/spedizioni", conReso, comeOperatore(f)); r.stato != http.StatusBadRequest {
@@ -365,7 +377,7 @@ func TestCreaSpedizione(t *testing.T) {
 	t.Run("valori_non_validi_tutti_insieme_400", func(t *testing.T) {
 		corpo := f.corpoValido("X")
 		corpo["cod_ordine"] = "ORD 1"
-		corpo["dataora_richiesta_spedizione"] = time.Now().Add(-48 * time.Hour).UTC().Format(time.RFC3339)
+		corpo["dataora_richiesta_spedizione"] = "domani alle 9"
 		corpo["id_indirizzo_spedizione"] = f.idRitiro
 		delete(corpo, "id_cliente_destinatario")
 		r := f.chiama(t, http.MethodPost, "/api/spedizioni", corpo, comeOperatore(f))
@@ -374,6 +386,14 @@ func TestCreaSpedizione(t *testing.T) {
 			if r.stato != http.StatusBadRequest || !contiene(campi, c) {
 				t.Fatalf("atteso 400 con errore su %s, ottenuto %d %v", c, r.stato, campi)
 			}
+		}
+	})
+
+	t.Run("data_richiesta_nel_passato_201", func(t *testing.T) {
+		corpo := f.corpoValido("PASSATO")
+		corpo["dataora_richiesta_spedizione"] = time.Now().Add(-48 * time.Hour).UTC().Format(time.RFC3339)
+		if r := f.chiama(t, http.MethodPost, "/api/spedizioni", corpo, comeOperatore(f)); r.stato != http.StatusCreated {
+			t.Fatalf("la data richiesta può essere nel passato: atteso 201, ottenuto %d %s", r.stato, r.grezzo)
 		}
 	})
 
@@ -418,6 +438,20 @@ func TestCreaSpedizione(t *testing.T) {
 		}
 	})
 
+	t.Run("idempotency_key_riusabile_dopo_un_errore", func(t *testing.T) {
+		h := comeOperatore(f)
+		h["Idempotency-Key"] = "correzione-" + f.suffisso
+		sbagliato := f.corpoValido("CORR")
+		sbagliato["cod_ordine"] = "CON SPAZI"
+		if r := f.chiama(t, http.MethodPost, "/api/spedizioni", sbagliato, h); r.stato != http.StatusBadRequest {
+			t.Fatalf("dati sbagliati: atteso 400, ottenuto %d %s", r.stato, r.grezzo)
+		}
+		r := f.chiama(t, http.MethodPost, "/api/spedizioni", f.corpoValido("CORR"), h)
+		if r.stato != http.StatusCreated || r.header.Get("Idempotent-Replayed") != "" {
+			t.Fatalf("dopo un errore, i dati corretti con la stessa chiave vanno accettati: %d %s", r.stato, r.grezzo)
+		}
+	})
+
 	t.Run("corriere_non_puo_creare_403", func(t *testing.T) {
 		r := f.chiama(t, http.MethodPost, "/api/spedizioni", f.corpoValido("COR"), comeCorriere(f.idCorriere1))
 		if r.stato != http.StatusForbidden {
@@ -444,13 +478,14 @@ func TestModificaDati(t *testing.T) {
 	t.Run("modifica_prima_del_ritiro_200_e_storico", func(t *testing.T) {
 		id := f.nuovaSpedizione(t, "MOD")
 		data := time.Now().Add(72 * time.Hour).UTC().Truncate(time.Second)
-		corpo := map[string]any{"dataora_richiesta_spedizione": data.Format(time.RFC3339)}
+		corpo := map[string]any{"id_indirizzo_spedizione": f.idAltro, "dataora_richiesta_spedizione": data.Format(time.RFC3339)}
 		r := f.modifica(t, id, op, corpo, 200)
-		if r.corpo["dataora_richiesta_spedizione"] != data.Format(time.RFC3339) {
+		if int32(r.corpo["id_indirizzo_spedizione"].(float64)) != corpo["id_indirizzo_spedizione"] ||
+			r.corpo["dataora_richiesta_spedizione"] != data.Format(time.RFC3339) {
 			t.Fatalf("dati non aggiornati: %s", r.grezzo)
 		}
 		if n := f.conta(t, `SELECT count(*) FROM cambiamenti_spedizioni WHERE id_spedizione = $1
-			AND operazione = 'modifica' AND id_operatore = $2 AND valore_nuovo ? 'dataora_richiesta_spedizione'`, id, f.idOperatore); n != 1 {
+			AND operazione = 'modifica' AND id_operatore = $2 AND valore_nuovo ? 'id_indirizzo_spedizione'`, id, f.idOperatore); n != 1 {
 			t.Fatalf("modifica non registrata nello storico con l'operatore")
 		}
 
@@ -465,8 +500,16 @@ func TestModificaDati(t *testing.T) {
 	t.Run("dopo_il_ritiro_409", func(t *testing.T) {
 		id := f.nuovaSpedizione(t, "MODRIT")
 		f.assegna(t, id, f.idCorriere1, 201)
-		f.stato(t, id, c1, map[string]any{"stato": "ritirata"}, 200)
-		f.modifica(t, id, op, map[string]any{"dataora_richiesta_spedizione": time.Now().Add(96 * time.Hour).UTC().Format(time.RFC3339)}, 409)
+		r := f.stato(t, id, c1, map[string]any{"stato": "ritirata"}, 200)
+		ritiro, _ := r.corpo["ritirata_il"].(string)
+		if ritiro == "" {
+			t.Fatalf("il passaggio in ritirata registra data e ora del ritiro: %s", r.grezzo)
+		}
+		f.modifica(t, id, op, map[string]any{"id_indirizzo_spedizione": f.idAltro}, 409)
+		f.stato(t, id, c1, map[string]any{"stato": "in consegna"}, 200)
+		if d := f.dettaglio(t, id, op, 200); d.corpo["ritirata_il"] != ritiro {
+			t.Fatalf("la data del ritiro resta quella del primo ritiro: %s", d.grezzo)
+		}
 	})
 
 	t.Run("reso_solo_se_annullata_persa_o_non_consegnata", func(t *testing.T) {
@@ -479,7 +522,7 @@ func TestModificaDati(t *testing.T) {
 			t.Fatalf("l'annullamento non deve impostare is_reso: %s", r.grezzo)
 		}
 		f.modifica(t, id, c1, map[string]any{"is_reso": true}, 403)
-		f.modifica(t, id, op, map[string]any{"is_reso": true, "dataora_richiesta_spedizione": time.Now().Add(96 * time.Hour).UTC().Format(time.RFC3339)}, 409)
+		f.modifica(t, id, op, map[string]any{"is_reso": true, "id_indirizzo_spedizione": f.idAltro}, 409)
 		r = f.modifica(t, id, op, map[string]any{"is_reso": true}, 200)
 		if r.corpo["is_reso"] != true || r.corpo["stato"] != "annullata" {
 			t.Fatalf("reso su spedizione annullata: %s", r.grezzo)
@@ -497,6 +540,7 @@ func TestModificaDati(t *testing.T) {
 		f.modifica(t, id, op, map[string]any{"stato": "consegnata"}, 400)
 		f.modifica(t, id, op, map[string]any{"id_indirizzo_spedizione": f.idRitiro}, 400)
 		f.modifica(t, id, op, map[string]any{"dataora_richiesta_spedizione": "domani"}, 400)
+		f.modifica(t, id, op, map[string]any{"ritirata_il": "2026-12-01T09:00:00Z"}, 400)
 		r := f.modifica(t, id, op, map[string]any{"id_cliente_destinatario": 999999999}, 400)
 		if !contiene(campiInErrore(r), "id_cliente_destinatario") {
 			t.Fatalf("atteso errore su id_cliente_destinatario: %s", r.grezzo)
@@ -649,7 +693,7 @@ func TestTentativi(t *testing.T) {
 			t.Fatalf("attesi gli errori su nota e motivo: %v", campi)
 		}
 		f.tentativo(t, id, c1, map[string]any{"nota": "x"}, 400)
-		f.tentativo(t, id, c1, map[string]any{"tipo": "ritiro", "nota": "x", "motivo": "destinatario assente"}, 400)
+		f.tentativo(t, id, c1, map[string]any{"tipo": "ritiro", "nota": "x", "motivo": "pioveva"}, 400) // fuori elenco
 		r = f.tentativo(t, id, c1, map[string]any{"tipo": "ritiro", "nota": "x", "motivo": "pacco non pronto"}, 201)
 		if int(r.corpo["tentativi_ritiro_falliti"].(float64)) != 1 {
 			t.Fatalf("ritiro con motivo: %s", r.grezzo)

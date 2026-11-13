@@ -24,6 +24,7 @@ class _NuovaSpedizionePageState extends State<NuovaSpedizionePage> {
   Object? _errore;
   bool _attesa = false;
 
+  /// Ogni modifica dei dati è una richiesta nuova, quindi una chiave nuova.
   void _cambiato() => _chiave = widget.api.nuovaChiave();
 
   Future<void> _scegliData() async {
@@ -32,10 +33,10 @@ class _NuovaSpedizionePageState extends State<NuovaSpedizionePage> {
       initialDate: _richiesta,
       firstDate: DateTime(2000),
       lastDate: DateTime(2100),
-      helpText: 'Giorno del ritiro',
+      helpText: 'Giorno richiesto per la spedizione',
     );
     if (d == null || !mounted) return;
-    final o = await showTimePicker(context: context, initialTime: TimeOfDay.fromDateTime(_richiesta), helpText: 'Ora del ritiro');
+    final o = await showTimePicker(context: context, initialTime: TimeOfDay.fromDateTime(_richiesta), helpText: 'Ora richiesta');
     if (o == null) return;
     setState(() {
       _richiesta = DateTime(d.year, d.month, d.day, o.hour, o.minute);
@@ -70,6 +71,9 @@ class _NuovaSpedizionePageState extends State<NuovaSpedizionePage> {
       });
       widget.alCreata(s.id);
     } catch (e) {
+      // Il backend ha risposto con un errore: la richiesta non ha creato nulla, quindi il
+      // prossimo invio (magari con i dati corretti) è una richiesta nuova.
+      if (e is ErroreServer && e.status != null) _cambiato();
       if (mounted) setState(() => _errore = e);
     } finally {
       if (mounted) setState(() => _attesa = false);
@@ -84,24 +88,38 @@ class _NuovaSpedizionePageState extends State<NuovaSpedizionePage> {
     required Future<void> Function() scegli,
     VoidCallback? togli,
     String? errore,
-  }) =>
-      Card(
-        margin: const EdgeInsets.only(bottom: 12),
-        child: ListTile(
-          leading: Icon(icona),
-          title: Text(valore ?? etichetta, style: valore == null ? TextStyle(color: Theme.of(context).colorScheme.outline) : null),
-          subtitle: Text([
-            if (valore != null) etichetta,
-            if (dettaglio != null && dettaglio.isNotEmpty) dettaglio,
-            if (errore != null) errore,
-          ].join('\n')),
-          isThreeLine: dettaglio != null && dettaglio.isNotEmpty,
-          trailing: Wrap(spacing: 4, children: [
-            if (togli != null && valore != null) IconButton(tooltip: 'Togli', onPressed: togli, icon: const Icon(Icons.close)),
-            OutlinedButton(onPressed: _attesa ? null : scegli, child: Text(valore == null ? 'Scegli' : 'Cambia')),
-          ]),
-        ),
-      );
+  }) {
+    final colori = Theme.of(context).colorScheme;
+    // Errore del backend su questo campo: bordo, icona e messaggio in rosso, come nei campi di testo.
+    final inErrore = errore != null;
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      shape: inErrore
+          ? RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: colori.error, width: 1.5))
+          : null,
+      child: ListTile(
+        leading: Icon(icona, color: inErrore ? colori.error : null),
+        title: Text(valore ?? etichetta, style: valore == null ? TextStyle(color: inErrore ? colori.error : colori.outline) : null),
+        subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+          if (valore != null) Text(etichetta),
+          if (dettaglio != null && dettaglio.isNotEmpty) Text(dettaglio),
+          if (inErrore)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Row(children: [
+                Icon(Icons.error_outline, size: 16, color: colori.error),
+                const SizedBox(width: 4),
+                Expanded(child: Text(errore, style: TextStyle(color: colori.error, fontWeight: FontWeight.w500))),
+              ]),
+            ),
+        ]),
+        trailing: Wrap(spacing: 4, children: [
+          if (togli != null && valore != null) IconButton(tooltip: 'Togli', onPressed: togli, icon: const Icon(Icons.close)),
+          OutlinedButton(onPressed: _attesa ? null : scegli, child: Text(valore == null ? 'Scegli' : 'Cambia')),
+        ]),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -186,9 +204,10 @@ class _NuovaSpedizionePageState extends State<NuovaSpedizionePage> {
             },
           ),
           _scelta(
-            etichetta: 'Data e ora del ritiro *',
+            etichetta: 'Data e ora richieste per la spedizione *',
             icona: Icons.schedule,
             valore: fmtDataOra(_richiesta),
+            dettaglio: 'La data e ora del ritiro le registra il sistema quando il corriere ritira il pacco',
             errore: erroreCampo(err, 'dataora_richiesta_spedizione'),
             scegli: _scegliData,
           ),

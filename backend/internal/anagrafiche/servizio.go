@@ -22,6 +22,13 @@ var (
 	formatoPrefisso = regexp.MustCompile(`^\+[0-9]{1,4}$`)
 	formatoTelefono = regexp.MustCompile(`^[0-9]{4,15}$`)
 	formatoEmail    = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
+
+	// indirizzi
+	contieneLettera  = regexp.MustCompile(`\p{L}`)
+	formatoCivico    = regexp.MustCompile(`^(?i:snc|[0-9]{1,5}(?: ?[/-]? ?[a-z0-9]{1,3})?)$`)
+	formatoLuogo     = regexp.MustCompile(`^\p{L}[\p{L} '’.-]*$`)
+	formatoCAPItalia = regexp.MustCompile(`^[0-9]{5}$`)
+	formatoCAPEstero = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9 -]{1,8})[A-Za-z0-9]$`)
 )
 
 type Cliente struct {
@@ -246,8 +253,36 @@ func (s *Servizio) TrovaOCreaIndirizzo(ctx context.Context, r identita.Richieden
 		Regione: testo(e, "regione", n.Regione, 100),
 		Nazione: testo(e, "nazione", n.Nazione, 100),
 	}
+	controllaIndirizzo(e, i)
 	if err := e.Err(); err != nil {
 		return Indirizzo{}, false, err
 	}
 	return s.archivio.TrovaOCreaIndirizzo(ctx, i)
+}
+
+// controllaIndirizzo verifica il formato dei campi già presenti (quelli mancanti
+// li ha già segnalati testo come obbligatori).
+func controllaIndirizzo(e *errori.Validazione, i Indirizzo) {
+	if i.Via != "" && !contieneLettera.MatchString(i.Via) {
+		e.Aggiungi("via", "deve contenere il nome della via, non solo numeri o simboli")
+	}
+	if i.Civico != "" && !formatoCivico.MatchString(i.Civico) {
+		e.Aggiungi("civico", "formato non valido: numero con eventuale lettera o barra, es. 12, 12A, 12/B, oppure SNC")
+	}
+	for _, c := range []struct{ campo, valore string }{
+		{"citta", i.Citta}, {"regione", i.Regione}, {"nazione", i.Nazione},
+	} {
+		if c.valore != "" && !formatoLuogo.MatchString(c.valore) {
+			e.Aggiungi(c.campo, "solo lettere, spazi, apostrofi, punti e trattini")
+		}
+	}
+	switch {
+	case i.CAP == "":
+	case strings.EqualFold(i.Nazione, "Italia"):
+		if !formatoCAPItalia.MatchString(i.CAP) {
+			e.Aggiungi("cap", "in Italia il CAP è di 5 cifre, es. 38121")
+		}
+	case !formatoCAPEstero.MatchString(i.CAP):
+		e.Aggiungi("cap", "formato non valido: da 3 a 10 tra lettere, cifre, spazi e trattini")
+	}
 }

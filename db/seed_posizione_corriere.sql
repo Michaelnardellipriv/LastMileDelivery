@@ -44,13 +44,13 @@ JOIN utenti uc ON uc.id = co.id_utente AND uc.email = 'corriere@veloce24.test';
 -- spedizione già "in consegna": il corriere può trasmettere la posizione
 INSERT INTO spedizioni (
     stato, cod_ordine, id_operatore_ha_creato,
-    id_cliente_mittente, id_cliente_destinatario, dataora_richiesta_spedizione,
+    id_cliente_mittente, id_cliente_destinatario, dataora_richiesta_spedizione, ritirata_il,
     id_indirizzo_ritiro, id_indirizzo_spedizione, id_assegnazione_corrente
 )
 SELECT 'in consegna', 'SEED-POS-001', a.id_operatore,
        (SELECT cl.id FROM clienti cl JOIN utenti u ON u.id = cl.id_utente WHERE u.email = 'mittente@veloce24.test'),
        (SELECT cl.id FROM clienti cl JOIN utenti u ON u.id = cl.id_utente WHERE u.email = 'destinatario@veloce24.test'),
-       now(),
+       now(), now(),
        (SELECT id FROM indirizzi WHERE via = 'Via Belenzani'),
        (SELECT id FROM indirizzi WHERE via = 'Via Manci'),
        a.id
@@ -69,13 +69,13 @@ JOIN utenti uc ON uc.id = co.id_utente AND uc.email = 'corriere2@veloce24.test';
 
 INSERT INTO spedizioni (
     stato, cod_ordine, id_operatore_ha_creato,
-    id_cliente_mittente, id_cliente_destinatario, dataora_richiesta_spedizione,
+    id_cliente_mittente, id_cliente_destinatario, dataora_richiesta_spedizione, ritirata_il,
     id_indirizzo_ritiro, id_indirizzo_spedizione, id_assegnazione_corrente
 )
 SELECT 'ritirata', 'SEED-POS-002', a.id_operatore,
        (SELECT cl.id FROM clienti cl JOIN utenti u ON u.id = cl.id_utente WHERE u.email = 'mittente@veloce24.test'),
        (SELECT cl.id FROM clienti cl JOIN utenti u ON u.id = cl.id_utente WHERE u.email = 'destinatario@veloce24.test'),
-       now(),
+       now(), now(),
        (SELECT id FROM indirizzi WHERE via = 'Via Belenzani'),
        (SELECT id FROM indirizzi WHERE via = 'Via Manci'),
        a.id

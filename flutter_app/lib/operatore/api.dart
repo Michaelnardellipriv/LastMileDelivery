@@ -13,19 +13,22 @@ class ErroreServer implements Exception {
   final int? status; // null = backend non raggiungibile (rete, CORS, timeout)
   final String messaggio;
   final Map<String, String> campi; // errori per campo, dal campo "dettagli"
-  ErroreServer(this.status, this.messaggio, [this.campi = const {}]);
+  /// Dettagli tecnici (metodo, percorso, risposta grezza): vanno in console, non a schermo.
+  final String tecnico;
+  ErroreServer(this.status, this.messaggio, [this.campi = const {}, this.tecnico = '']);
 
-  String get perUtente {
-    if (status == null) {
-      return 'Backend non raggiungibile: controlla che sia avviato e che CORS_ORIGIN '
-          'coincida con l\'indirizzo di questa pagina.';
-    }
-    if (campi.isEmpty) return messaggio;
-    return '$messaggio: ${campi.entries.map((e) => '${e.key} ${e.value}').join('; ')}';
-  }
+  /// Messaggio breve per l'utente. I dettagli dei campi si mostrano accanto ai campi.
+  String get perUtente => switch (status) {
+        null => 'Impossibile contattare il server. Controlla la connessione e riprova.',
+        401 => 'Sessione scaduta o credenziali non valide: accedi di nuovo.',
+        404 => 'Elemento non trovato: potrebbe essere stato modificato. Aggiorna la pagina.',
+        >= 500 => 'Il server ha avuto un problema. Riprova tra poco.',
+        _ when campi.isNotEmpty => 'Alcuni dati non sono validi: controlla i campi evidenziati.',
+        _ => messaggio,
+      };
 
   @override
-  String toString() => 'ErroreServer($status, $messaggio, $campi)';
+  String toString() => 'ErroreServer($status, $messaggio, campi: $campi${tecnico.isEmpty ? '' : ', $tecnico'})';
 }
 
 DateTime? _data(Object? v) => v == null ? null : DateTime.parse(v as String).toLocal();
@@ -63,7 +66,8 @@ class Autore {
   Autore(this.ruolo, this.id, this.nome, this.cognome);
   factory Autore.daJson(Map<String, dynamic> j) =>
       Autore(j['ruolo'] as String? ?? '', j['id'] as int? ?? 0, j['nome'] as String?, j['cognome'] as String?);
-  String get testo => nome == null ? '$ruolo $id' : '$nome $cognome ($ruolo)';
+  /// Chi ha fatto l'azione: nome, cognome, ruolo e id.
+  String get testo => nome == null ? '$ruolo · id $id' : '$nome $cognome ($ruolo · id $id)';
 }
 
 class Nota {
@@ -84,7 +88,7 @@ class Spedizione {
   final String codOrdine, stato;
   final bool isReso;
   final DateTime creataIl, richiestaIl;
-  final DateTime? conclusaIl, annullataIl;
+  final DateTime? ritirataIl, conclusaIl, annullataIl;
   final Persona? mittente, corriere;
   final Persona destinatario;
   final int? idCorriere;
@@ -99,6 +103,7 @@ class Spedizione {
     required this.isReso,
     required this.creataIl,
     required this.richiestaIl,
+    this.ritirataIl,
     this.conclusaIl,
     this.annullataIl,
     this.mittente,
@@ -119,6 +124,7 @@ class Spedizione {
         isReso: j['is_reso'] as bool? ?? false,
         creataIl: _data(j['creata_il'])!,
         richiestaIl: _data(j['dataora_richiesta_spedizione'])!,
+        ritirataIl: _data(j['ritirata_il']),
         conclusaIl: _data(j['conclusa_il']),
         annullataIl: _data(j['annullata_il']),
         mittente: j['mittente'] == null ? null : Persona.daJson(j['mittente'] as Map<String, dynamic>),
@@ -260,7 +266,11 @@ class ApiOperatore {
     return [for (final v in j['dati'] as List) VoceStorico.daJson(v as Map<String, dynamic>)];
   }
 
-  Future<Spedizione> creaSpedizione({
+  /// Crea la spedizione. La risposta di POST /api/spedizioni è la spedizione "piatta"
+  /// (solo id, senza persone e indirizzi): da qui servono id, codice e stato, il
+  /// dettaglio completo si legge poi con [dettaglio]. La data richiesta la sceglie
+  /// l'operatore; la data del ritiro la registra il sistema, quindi non si manda.
+  Future<({int id, String codOrdine, String stato})> creaSpedizione({
     required String codOrdine,
     int? idMittente,
     int? idDestinatario,
@@ -269,17 +279,19 @@ class ApiOperatore {
     DateTime? richiestaIl,
     int? idCorriere,
     required String chiave,
-  }) async =>
-      // I campi non scelti non vengono mandati: è il backend a dire quali mancano.
-      Spedizione.daJson(await _chiama('POST', '/api/spedizioni', chiave: chiave, corpo: {
-        'cod_ordine': codOrdine,
-        if (idMittente != null) 'id_cliente_mittente': idMittente,
-        if (idDestinatario != null) 'id_cliente_destinatario': idDestinatario,
-        if (idRitiro != null) 'id_indirizzo_ritiro': idRitiro,
-        if (idConsegna != null) 'id_indirizzo_spedizione': idConsegna,
-        if (richiestaIl != null) 'dataora_richiesta_spedizione': richiestaIl.toUtc().toIso8601String(),
-        if (idCorriere != null) 'id_corriere': idCorriere,
-      }) as Map<String, dynamic>);
+  }) async {
+    // I campi non scelti non vengono mandati: è il backend a dire quali mancano.
+    final j = await _chiama('POST', '/api/spedizioni', chiave: chiave, corpo: {
+      'cod_ordine': codOrdine,
+      if (idMittente != null) 'id_cliente_mittente': idMittente,
+      if (idDestinatario != null) 'id_cliente_destinatario': idDestinatario,
+      if (idRitiro != null) 'id_indirizzo_ritiro': idRitiro,
+      if (idConsegna != null) 'id_indirizzo_spedizione': idConsegna,
+      if (richiestaIl != null) 'dataora_richiesta_spedizione': richiestaIl.toUtc().toIso8601String(),
+      if (idCorriere != null) 'id_corriere': idCorriere,
+    }) as Map<String, dynamic>;
+    return (id: j['id'] as int, codOrdine: j['cod_ordine'] as String, stato: j['stato'] as String);
+  }
 
   Future<void> assegna(int id, int idCorriere) =>
       _chiama('POST', '/api/spedizioni/$id/assegnazioni', chiave: nuovaChiave(), corpo: {'id_corriere': idCorriere});
@@ -294,11 +306,10 @@ class ApiOperatore {
   Future<void> aggiungiNota(int id, String testo) =>
       _chiama('POST', '/api/spedizioni/$id/note', chiave: nuovaChiave(), corpo: {'nota': testo});
 
-  Future<Map<String, List<String>>> motivi() async {
+  /// Elenco unico dei motivi pubblici (GET /api/motivi): non è filtrato per stato.
+  Future<List<String>> motivi() async {
     final j = await _chiama('GET', '/api/motivi') as Map<String, dynamic>;
-    return {
-      for (final e in j.entries) e.key: [for (final m in e.value as List) m as String]
-    };
+    return [for (final m in j['dati'] as List) m as String];
   }
 
   Future<Posizioni> posizioni() async {
@@ -375,10 +386,10 @@ class ApiOperatore {
     try {
       r = await http.Response.fromStream(await _http.send(richiesta).timeout(const Duration(seconds: 10)));
     } on TimeoutException {
-      throw ErroreServer(null, 'timeout');
+      throw ErroreServer(null, 'timeout', const {}, '$metodo $uri: nessuna risposta entro 10 s');
     } on http.ClientException catch (e) {
       // Nel browser un blocco CORS arriva qui, senza status: non è distinguibile da "backend spento".
-      throw ErroreServer(null, e.message);
+      throw ErroreServer(null, e.message, const {}, '$metodo $uri: ${e.message} (backend spento o CORS_ORIGIN diverso da questa pagina?)');
     }
 
     if (r.statusCode == 204) return null;
@@ -390,18 +401,18 @@ class ApiOperatore {
       esci();
       alScadereDelToken?.call();
     }
-    throw _errore(r.statusCode, testo);
+    throw _errore(r.statusCode, testo, '$metodo $uri → ${r.statusCode}: $testo');
   }
 
-  static ErroreServer _errore(int status, String testo) {
+  static ErroreServer _errore(int status, String testo, String tecnico) {
     try {
       final j = jsonDecode(testo) as Map<String, dynamic>;
       final campi = <String, String>{
         for (final d in (j['dettagli'] as List? ?? const [])) (d as Map<String, dynamic>)['campo'] as String: d['messaggio'] as String,
       };
-      return ErroreServer(status, j['errore'] as String? ?? 'errore $status', campi);
+      return ErroreServer(status, j['errore'] as String? ?? 'errore $status', campi, tecnico);
     } catch (_) {
-      return ErroreServer(status, testo.trim().isEmpty ? 'errore HTTP $status' : testo.trim());
+      return ErroreServer(status, testo.trim().isEmpty ? 'errore HTTP $status' : testo.trim(), const {}, tecnico);
     }
   }
 }

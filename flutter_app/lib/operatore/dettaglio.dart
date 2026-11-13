@@ -27,6 +27,7 @@ class _DettaglioSpedizioneState extends State<DettaglioSpedizione> {
   DateTime? _posizioneLetta;
   Timer? _timerPosizione;
   Object? _errore;
+  Object? _erroreNota;
   bool _attesa = true;
   bool _invio = false;
   final _nota = TextEditingController();
@@ -124,8 +125,26 @@ class _DettaglioSpedizioneState extends State<DettaglioSpedizione> {
   }
 
   Future<void> _aggiungiNota() async {
-    await _esegui(() => api.aggiungiNota(widget.id, _nota.text), 'Nota interna aggiunta');
-    if (mounted) _nota.clear();
+    setState(() {
+      _invio = true;
+      _erroreNota = null;
+    });
+    try {
+      await api.aggiungiNota(widget.id, _nota.text);
+      if (!mounted) return;
+      _nota.clear();
+      avviso(context, 'Nota interna aggiunta');
+      await _carica();
+    } catch (e) {
+      if (!mounted) return;
+      if (erroreCampo(e, 'nota') != null) {
+        setState(() => _erroreNota = e);
+      } else {
+        mostraErrore(context, e);
+      }
+    } finally {
+      if (mounted) setState(() => _invio = false);
+    }
   }
 
   @override
@@ -166,7 +185,8 @@ class _DettaglioSpedizioneState extends State<DettaglioSpedizione> {
         ),
         Sezione('Spedizione', [
           Riga('Creata il', fmtDataOra(s.creataIl)),
-          Riga('Ritiro richiesto', fmtDataOra(s.richiestaIl)),
+          Riga('Richiesta per', fmtDataOra(s.richiestaIl)),
+          Riga('Ritirata il', s.ritirataIl == null ? 'non ancora ritirata' : fmtDataOra(s.ritirataIl!)),
           if (s.conclusaIl != null) Riga('Conclusa il', fmtDataOra(s.conclusaIl!)),
           if (s.annullataIl != null) Riga('Annullata il', fmtDataOra(s.annullataIl!)),
           Riga('Reso', s.isReso ? 'sì' : 'no'),
@@ -226,10 +246,11 @@ class _DettaglioSpedizioneState extends State<DettaglioSpedizione> {
               controller: _nota,
               minLines: 1,
               maxLines: 4,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: 'Nuova nota interna',
                 helperText: 'Le note pubbliche (motivo per il cliente) si scrivono cambiando lo stato in annullata o persa',
-                border: OutlineInputBorder(),
+                errorText: erroreCampo(_erroreNota, 'nota'),
+                border: const OutlineInputBorder(),
               ),
             ),
           ),
@@ -281,35 +302,32 @@ class _DialogoStato extends StatefulWidget {
 }
 
 class _DialogoStatoState extends State<_DialogoStato> {
-  static const _elencoPerStato = {'annullata': 'annullamento', 'persa': 'perdita'};
-
   String? _stato;
   String? _motivo;
-  final _motivoLibero = TextEditingController();
   final _nota = TextEditingController();
-  Map<String, List<String>>? _motivi; // null finché non arrivano; vuoto se il backend non li espone
+  List<String>? _motivi; // null finché non arrivano
+  Object? _erroreMotivi;
   Object? _errore;
   bool _invio = false;
 
   @override
   void initState() {
     super.initState();
-    widget.api.motivi().then((m) {
-      if (mounted) setState(() => _motivi = m);
-    }, onError: (_) {
-      if (mounted) setState(() => _motivi = const {});
-    });
+    _caricaMotivi();
   }
 
-  List<String> get _motiviDelloStato {
-    final m = _motivi ?? const {};
-    final elenco = m[_elencoPerStato[_stato]];
-    return elenco ?? {for (final l in m.values) ...l}.toList();
+  void _caricaMotivi() {
+    setState(() => _erroreMotivi = null);
+    widget.api.motivi().then((m) {
+      if (mounted) setState(() => _motivi = m);
+    }, onError: (Object e) {
+      if (mounted) setState(() => _erroreMotivi = e);
+    });
   }
 
   Future<void> _invia() async {
     final stato = _stato;
-    final motivo = _motivi?.isEmpty ?? true ? (_motivoLibero.text.isEmpty ? null : _motivoLibero.text) : _motivo;
+    final motivo = _motivo;
     setState(() {
       _invio = true;
       _errore = null;
@@ -339,24 +357,19 @@ class _DialogoStatoState extends State<_DialogoStato> {
               decoration:
                   InputDecoration(labelText: 'Nuovo stato', errorText: erroreCampo(err, 'stato'), border: const OutlineInputBorder()),
               items: [for (final s in statiSpedizione) DropdownMenuItem(value: s, child: Text(s))],
-              onChanged: (s) => setState(() {
-                _stato = s;
-                _motivo = null;
-              }),
+              onChanged: (s) => setState(() => _stato = s),
             ),
             const SizedBox(height: 12),
-            if (_motivi == null)
-              const LinearProgressIndicator()
-            else if (_motivi!.isEmpty)
-              TextField(
-                controller: _motivoLibero,
-                decoration: InputDecoration(
-                  labelText: 'Motivo (pubblico, lo vede il cliente)',
-                  helperText: 'Per annullata e persa',
-                  errorText: erroreCampo(err, 'motivo'),
-                  border: const OutlineInputBorder(),
+            if (_erroreMotivi != null)
+              Row(children: [
+                Expanded(
+                  child: Text('Elenco dei motivi non disponibile. ${testoErrore(_erroreMotivi!)}',
+                      style: TextStyle(color: Theme.of(context).colorScheme.error)),
                 ),
-              )
+                TextButton(onPressed: _caricaMotivi, child: const Text('Riprova')),
+              ])
+            else if (_motivi == null)
+              const LinearProgressIndicator()
             else
               DropdownButtonFormField<String?>(
                 value: _motivo,
@@ -368,7 +381,8 @@ class _DialogoStatoState extends State<_DialogoStato> {
                 ),
                 items: [
                   const DropdownMenuItem(value: null, child: Text('Nessun motivo')),
-                  for (final m in _motiviDelloStato) DropdownMenuItem(value: m, child: Text(m)),
+                  // tutti i motivi, senza filtri per stato: quale è ammesso lo decide il backend
+                  for (final m in _motivi!) DropdownMenuItem(value: m, child: Text(m)),
                 ],
                 onChanged: (m) => setState(() => _motivo = m),
               ),

@@ -9,6 +9,7 @@ type Spedizione struct {
 	IsReso                   bool
 	CreataIl                 time.Time
 	DataoraRichiesta         time.Time
+	RitirataIl               *time.Time
 	IDClienteMittente        int32
 	IDClienteDestinatario    int32
 	IDIndirizzoRitiro        int32
