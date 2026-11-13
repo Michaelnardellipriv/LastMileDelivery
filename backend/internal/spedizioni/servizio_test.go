@@ -241,15 +241,13 @@ func TestTentativiDiConsegna(t *testing.T) {
 
 func TestValidaTentativo(t *testing.T) {
 	casi := map[string]TentativoFallito{
-		"tipo sconosciuto":             {Tipo: "volo", Nota: p("x")},
-		"senza nota":                   {Tipo: TentativoRitiro},
-		"consegna senza nota":          {Tipo: TentativoConsegna, Motivo: p("x")},
-		"nota vuota":                   {Tipo: TentativoRitiro, Nota: p("  ")},
-		"motivo fuori elenco":          {Tipo: TentativoConsegna, Nota: p("x"), Motivo: p("pioveva")},
-		"motivo di ritiro su consegna": {Tipo: TentativoConsegna, Nota: p("x"), Motivo: p("mittente assente")},
-		"motivo di consegna su ritiro": {Tipo: TentativoRitiro, Nota: p("x"), Motivo: p("destinatario assente")},
-		"ritiro senza motivo":          {Tipo: TentativoRitiro, Nota: p("x")},
-		"consegna senza motivo":        {Tipo: TentativoConsegna, Nota: p("x")},
+		"tipo sconosciuto":      {Tipo: "volo", Nota: p("x")},
+		"senza nota":            {Tipo: TentativoRitiro},
+		"consegna senza nota":   {Tipo: TentativoConsegna, Motivo: p("x")},
+		"nota vuota":            {Tipo: TentativoRitiro, Nota: p("  ")},
+		"motivo fuori elenco":   {Tipo: TentativoConsegna, Nota: p("x"), Motivo: p("pioveva")},
+		"ritiro senza motivo":   {Tipo: TentativoRitiro, Nota: p("x")},
+		"consegna senza motivo": {Tipo: TentativoConsegna, Nota: p("x")},
 	}
 	for nome, c := range casi {
 		t.Run(nome, func(t *testing.T) {
@@ -262,6 +260,9 @@ func TestValidaTentativo(t *testing.T) {
 		"ritiro con motivo":   {Tipo: TentativoRitiro, Nota: p("x"), Motivo: p("pacco non pronto")},
 		"consegna con motivo": {Tipo: TentativoConsegna, Nota: p("x"), Motivo: p("indirizzo errato")},
 		"altro":               {Tipo: TentativoConsegna, Nota: p("x"), Motivo: p("altro")},
+		// l'elenco dei motivi è unico: non si filtra per tipo di tentativo
+		"motivo di ritiro su consegna": {Tipo: TentativoConsegna, Nota: p("x"), Motivo: p("mittente assente")},
+		"motivo di consegna su ritiro": {Tipo: TentativoRitiro, Nota: p("x"), Motivo: p("destinatario assente")},
 	} {
 		if err := validaTentativo(c); err != nil {
 			t.Errorf("%s: deve essere valido, ottenuto %v", nome, err)
@@ -295,15 +296,18 @@ func TestModificaDati(t *testing.T) {
 		t.Fatal("stessi valori: nessuna modifica")
 	}
 
-	passata := s.adesso().Add(-time.Hour)
 	for nome, dati := range map[string]DatiSpedizione{
 		"nessun campo":  {},
 		"id non valido": {IDClienteMittente: p(int32(0))},
-		"data passata":  {DataoraRichiesta: &passata},
 	} {
 		if tipoErrore(s.validaDati(dati)) != "400" {
 			t.Errorf("%s: atteso 400", nome)
 		}
+	}
+	// la data richiesta può essere anche nel passato (es. spedizione registrata in ritardo)
+	passata := s.adesso().Add(-48 * time.Hour)
+	if err := s.validaDati(DatiSpedizione{DataoraRichiesta: &passata}); err != nil {
+		t.Fatalf("data richiesta nel passato ammessa: %v", err)
 	}
 	if _, err := s.ModificaDati(context.Background(), corriere1, 10, d); tipoErrore(err) != "403" {
 		t.Fatalf("un corriere non modifica i dati: %v", err)
@@ -327,10 +331,13 @@ func TestRegoleNuova(t *testing.T) {
 	for _, e := range s.RegoleNuova(n) {
 		campi[e.Campo] = true
 	}
-	for _, c := range []string{"cod_ordine", "id_indirizzo_spedizione", "dataora_richiesta_spedizione"} {
+	for _, c := range []string{"cod_ordine", "id_indirizzo_spedizione"} {
 		if !campi[c] {
 			t.Errorf("manca l'errore su %s", c)
 		}
+	}
+	if campi["dataora_richiesta_spedizione"] {
+		t.Error("la data richiesta nel passato è ammessa")
 	}
 }
 
@@ -387,7 +394,8 @@ func TestMotivoObbligatorio(t *testing.T) {
 		{"annullata con motivo e nota", CambioStato{Stato: Annullata, Motivo: p("richiesta del destinatario"), Nota: p("x")}, "nessuno"},
 		{"persa con motivo e nota", CambioStato{Stato: Persa, Motivo: p("smarrita in deposito"), Nota: p("x")}, "nessuno"},
 		{"motivo fuori elenco", CambioStato{Stato: Annullata, Motivo: p("ci ho ripensato"), Nota: p("x")}, "400"},
-		{"motivo di perdita su annullata", CambioStato{Stato: Annullata, Motivo: p("furto"), Nota: p("x")}, "400"},
+		{"motivo di perdita su annullata: elenco unico, nessun filtro", CambioStato{Stato: Annullata, Motivo: p("furto"), Nota: p("x")}, "nessuno"},
+		{"motivo di consegna su persa: elenco unico, nessun filtro", CambioStato{Stato: Persa, Motivo: p("destinatario assente"), Nota: p("x")}, "nessuno"},
 		{"motivo su un altro stato", CambioStato{Stato: Ritirata, Motivo: p("altro")}, "400"},
 		{"ritirata senza nota né motivo", CambioStato{Stato: Ritirata}, "nessuno"},
 	}

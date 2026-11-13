@@ -16,6 +16,8 @@ type VoceStorico struct {
 	ModificatoIl  time.Time
 	IDOperatore   *int32
 	IDCorriere    *int32
+	NomeAutore    *string
+	CognomeAutore *string
 }
 
 func (s *Servizio) Storico(ctx context.Context, r identita.Richiedente, id int32) ([]VoceStorico, error) {

@@ -29,6 +29,13 @@ func (h *Handler) Registra(rotte *httpx.Rotte, identifica, idempotente httpx.Mid
 	rotte.Gestisci(http.MethodPatch, "/api/spedizioni/{id}/stato", http.HandlerFunc(h.cambiaStato), identifica, idempotente)
 	rotte.Gestisci(http.MethodPost, "/api/spedizioni/{id}/note", http.HandlerFunc(h.aggiungiNota), identifica, idempotente)
 	rotte.Gestisci(http.MethodGet, "/api/spedizioni/{id}/storico", http.HandlerFunc(h.storico), identifica)
+	rotte.Gestisci(http.MethodGet, "/api/motivi", http.HandlerFunc(h.motivi), identifica)
+}
+
+// motivi restituisce l'elenco unico dei motivi pubblici ammessi: i client lo
+// mostrano in un menu a tendina invece di far scrivere il motivo a mano.
+func (h *Handler) motivi(w http.ResponseWriter, r *http.Request) {
+	httpx.ScriviJSON(w, http.StatusOK, rispostaMotivi{Dati: Motivi})
 }
 
 func (h *Handler) dettaglio(w http.ResponseWriter, r *http.Request) {

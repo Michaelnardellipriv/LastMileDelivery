@@ -2,7 +2,7 @@ openapi: 3.0.3
 
 info:
   title: LastMileDelivery API
-  version: "0.21.0"
+  version: "0.24.0"
   description: |
     API per la gestione delle spedizioni di Veloce24.
 
@@ -62,8 +62,8 @@ info:
       passa da sola a `non consegnata`.
 
     Ogni tentativo (ritiro e consegna) richiede `motivo` e `nota`, e così i cambi di stato
-    in `annullata` e `persa`. La `nota` è testo libero; il `motivo` è un valore fisso (vedi
-    gli schemi `MotivoRitiro`, `MotivoConsegna`, `MotivoAnnullamento`, `MotivoPerdita`).
+    in `annullata` e `persa`. La `nota` è testo libero; il `motivo` è un valore dell'elenco
+    unico `Motivo` (lo stesso di `GET /api/motivi`), non filtrato per stato o tipo di tentativo.
 
     Metodi: `POST` per gli endpoint che creano qualcosa (spedizione, assegnazione,
     tentativo, nota), `PATCH` per quelli che modificano la spedizione (dati e stato).
@@ -378,7 +378,8 @@ paths:
         '400':
           description: |
             Dati non validi: JSON malformato, campo mancante o non previsto, tipo errato,
-            data non ISO 8601 o nel passato, cliente o indirizzo inesistente, indirizzi uguali.
+            data non ISO 8601, `ritirata_il` inviata dal client (la decide il
+            sistema), cliente o indirizzo inesistente, indirizzi uguali.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Errore' }
@@ -482,7 +483,7 @@ paths:
             schema: { $ref: '#/components/schemas/ModificaSpedizione' }
             examples:
               dati:
-                summary: Cambia indirizzo e data (spedizione creata o assegnata)
+                summary: Cambia indirizzo e data richiesta (spedizione creata o assegnata)
                 value:
                   id_indirizzo_spedizione: 3
                   dataora_richiesta_spedizione: '2026-11-03T14:00:00+01:00'
@@ -494,8 +495,9 @@ paths:
         '200': { $ref: '#/components/responses/SpedizioneAggiornata' }
         '400':
           description: |
-            Dati non validi: nessun campo, campo non previsto, data nel passato,
-            riferimento inesistente, indirizzo di spedizione uguale a quello di ritiro.
+            Dati non validi: nessun campo, campo non previsto, data non ISO 8601, `ritirata_il`
+            (la decide il sistema), riferimento inesistente, indirizzo di spedizione uguale a
+            quello di ritiro.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Errore' }
@@ -600,7 +602,7 @@ paths:
       responses:
         '201': { $ref: '#/components/responses/SpedizioneCreata' }
         '400':
-          description: '`tipo` mancante o sconosciuto, `nota` mancante o vuota, `motivo` mancante o non previsto per quel tipo di tentativo'
+          description: '`tipo` mancante o sconosciuto, `nota` mancante o vuota, `motivo` mancante o fuori elenco'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Errore' }
@@ -778,13 +780,13 @@ paths:
                     valore_vecchio: null
                     valore_nuovo: { id: 42, stato: creata, cod_ordine: ORD-2026-0001 }
                     modificato_il: '2026-11-01T09:00:00Z'
-                    autore: { ruolo: operatore, id: 1 }
+                    autore: { ruolo: operatore, id: 1, nome: Oscar, cognome: Operatore }
                   - id: 2
                     operazione: modifica
                     valore_vecchio: { stato: assegnata }
                     valore_nuovo: { stato: ritirata }
                     modificato_il: '2026-11-01T10:30:00Z'
-                    autore: { ruolo: corriere, id: 1 }
+                    autore: { ruolo: corriere, id: 1, nome: Carlo, cognome: Corriere }
         '400':
           description: Id non valido
           content:
@@ -795,6 +797,34 @@ paths:
         '404': { $ref: '#/components/responses/NonTrovata' }
         '500': { $ref: '#/components/responses/ErroreInterno' }
         '503': { $ref: '#/components/responses/NonDisponibile' }
+
+  /api/motivi:
+    get:
+      tags: [spedizioni]
+      summary: Motivi pubblici ammessi
+      description: |
+        Elenco unico dei motivi che il cliente vede: i client lo mostrano in un menu a tendina.
+        Sono gli unici valori accettati nel campo `motivo` di `POST /api/spedizioni/{id}/tentativi`
+        e `PATCH /api/spedizioni/{id}/stato`; l'elenco non dipende dallo stato né dal tipo di
+        tentativo.
+      operationId: elencoMotivi
+      security:
+        - operatore: []
+        - corriere: []
+        - cliente: []
+        - amministratore: []
+      responses:
+        '200':
+          description: Elenco dei motivi
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Motivi' }
+              example:
+                dati: [mittente assente, pacco non pronto, indirizzo di ritiro errato, destinatario assente,
+                       indirizzo errato, rifiutata dal destinatario, accesso impossibile, richiesta del mittente,
+                       richiesta del destinatario, dati della spedizione errati, ritiro non riuscito,
+                       smarrita in deposito, smarrita durante il trasporto, furto, altro]
+        '401': { $ref: '#/components/responses/NonIdentificato' }
 
   /api/clienti:
     get:
@@ -1152,6 +1182,9 @@ components:
         un timeout) il server non la esegue una seconda volta e restituisce la risposta
         della prima, con l'header `Idempotent-Replayed: true`. Vale 24 ore, per utente e
         per percorso. La stessa chiave con dati diversi dà 409.
+        Il server si ricorda solo le richieste riuscite (2xx): una richiesta rifiutata (400,
+        403, 404, 409...) non ha cambiato nulla, quindi si può rimandare con la stessa
+        chiave, anche con i dati corretti.
       schema: { type: string, minLength: 1, maxLength: 255 }
 
   responses:
@@ -1246,7 +1279,13 @@ components:
         dataora_richiesta_spedizione:
           type: string
           format: date-time
-          description: ISO 8601 con fuso orario, non nel passato
+          description: Data e ora richieste per la spedizione, decise dall'operatore. ISO 8601 con fuso orario; può essere anche nel passato
+        ritirata_il:
+          type: string
+          format: date-time
+          description: |
+            Non si invia: data e ora del ritiro le registra il sistema quando il corriere porta
+            la spedizione in `ritirata`. Se presente la richiesta è rifiutata con 400 sul campo.
         id_indirizzo_ritiro: { type: integer, format: int32, minimum: 1 }
         id_indirizzo_spedizione:
           type: integer
@@ -1273,7 +1312,13 @@ components:
         dataora_richiesta_spedizione:
           type: string
           format: date-time
-          description: ISO 8601 con fuso orario, non nel passato
+          description: Data e ora richieste per la spedizione, decise dall'operatore. ISO 8601 con fuso orario; può essere anche nel passato
+        ritirata_il:
+          type: string
+          format: date-time
+          description: |
+            Non si invia: data e ora del ritiro le registra il sistema quando il corriere porta
+            la spedizione in `ritirata`. Se presente la richiesta è rifiutata con 400 sul campo.
         id_indirizzo_ritiro: { type: integer, format: int32, minimum: 1 }
         id_indirizzo_spedizione: { type: integer, format: int32, minimum: 1 }
 
@@ -1299,11 +1344,10 @@ components:
           description: Nota interna (mai visibile al destinatario)
         motivo:
           description: |
-            Con `tipo: ritiro` un valore di `MotivoRitiro`, con `tipo: consegna` un valore di
-            `MotivoConsegna`. Sempre obbligatorio; è l'unica parte della nota visibile al cliente.
-          anyOf:
-            - $ref: '#/components/schemas/MotivoRitiro'
-            - $ref: '#/components/schemas/MotivoConsegna'
+            Un valore dell'elenco unico `Motivo`. Sempre obbligatorio; è l'unica parte della nota
+            visibile al cliente.
+          allOf:
+            - $ref: '#/components/schemas/Motivo'
 
     CambioStato:
       type: object
@@ -1320,28 +1364,30 @@ components:
           description: Nota interna. Obbligatoria per `annullata` e `persa` (facoltativa annullando dopo 3 ritiri falliti), non ammessa con gli altri stati.
         motivo:
           description: |
-            Obbligatorio per `annullata` (un valore di `MotivoAnnullamento`) e `persa` (un valore
-            di `MotivoPerdita`); facoltativo annullando dopo 3 ritiri falliti; non ammesso con
-            gli altri stati.
-          anyOf:
-            - $ref: '#/components/schemas/MotivoAnnullamento'
-            - $ref: '#/components/schemas/MotivoPerdita'
+            Un valore dell'elenco unico `Motivo`. Obbligatorio per `annullata` e `persa`;
+            facoltativo annullando dopo 3 ritiri falliti; non ammesso con gli altri stati.
+          allOf:
+            - $ref: '#/components/schemas/Motivo'
 
-    MotivoRitiro:
+    Motivo:
       type: string
-      enum: [mittente assente, pacco non pronto, indirizzo di ritiro errato, accesso impossibile, altro]
-
-    MotivoConsegna:
-      type: string
-      enum: [destinatario assente, indirizzo errato, rifiutata dal destinatario, accesso impossibile, altro]
-
-    MotivoAnnullamento:
-      type: string
-      enum: [richiesta del mittente, richiesta del destinatario, dati della spedizione errati, ritiro non riuscito, altro]
-
-    MotivoPerdita:
-      type: string
-      enum: [smarrita in deposito, smarrita durante il trasporto, furto, altro]
+      description: Elenco unico dei motivi pubblici, valido per tentativi e cambi di stato
+      enum:
+        - mittente assente
+        - pacco non pronto
+        - indirizzo di ritiro errato
+        - destinatario assente
+        - indirizzo errato
+        - rifiutata dal destinatario
+        - accesso impossibile
+        - richiesta del mittente
+        - richiesta del destinatario
+        - dati della spedizione errati
+        - ritiro non riuscito
+        - smarrita in deposito
+        - smarrita durante il trasporto
+        - furto
+        - altro
 
     Spedizione:
       type: object
@@ -1352,6 +1398,7 @@ components:
         - is_reso
         - creata_il
         - dataora_richiesta_spedizione
+        - ritirata_il
         - id_cliente_mittente
         - id_cliente_destinatario
         - id_indirizzo_ritiro
@@ -1366,7 +1413,15 @@ components:
         stato: { $ref: '#/components/schemas/Stato' }
         is_reso: { type: boolean }
         creata_il: { type: string, format: date-time }
-        dataora_richiesta_spedizione: { type: string, format: date-time }
+        dataora_richiesta_spedizione:
+          type: string
+          format: date-time
+          description: Data e ora richieste per la spedizione, decise dall'operatore
+        ritirata_il:
+          type: string
+          format: date-time
+          nullable: true
+          description: Data e ora del ritiro, registrate al primo passaggio in `ritirata`; null prima
         id_cliente_mittente: { type: integer, format: int32 }
         id_cliente_destinatario: { type: integer, format: int32 }
         id_indirizzo_ritiro: { type: integer, format: int32 }
@@ -1398,13 +1453,20 @@ components:
       type: object
       additionalProperties: false
       required: [via, civico, citta, cap, regione, nazione]
+      description: Gli spazi iniziali e finali vengono tolti; ogni campo errato è segnalato in `dettagli`.
       properties:
-        via: { type: string, maxLength: 150 }
-        civico: { type: string, maxLength: 10 }
-        citta: { type: string, maxLength: 100 }
-        cap: { type: string, maxLength: 10 }
-        regione: { type: string, maxLength: 100 }
-        nazione: { type: string, maxLength: 100 }
+        via: { type: string, maxLength: 150, description: Deve contenere almeno una lettera }
+        civico:
+          type: string
+          maxLength: 10
+          description: Numero con eventuale lettera o barra (es. 12, 12A, 12/B) oppure SNC
+        citta: { type: string, maxLength: 100, description: 'Lettere, spazi, apostrofi, punti e trattini' }
+        cap:
+          type: string
+          maxLength: 10
+          description: 5 cifre se la nazione è Italia; altrimenti da 3 a 10 tra lettere, cifre, spazi e trattini
+        regione: { type: string, maxLength: 100, description: 'Lettere, spazi, apostrofi, punti e trattini' }
+        nazione: { type: string, maxLength: 100, description: 'Lettere, spazi, apostrofi, punti e trattini' }
 
     IndirizzoAnagrafica:
       type: object
@@ -1517,6 +1579,19 @@ components:
       properties:
         ruolo: { type: string, enum: [operatore, corriere] }
         id: { type: integer, format: int32 }
+        nome: { type: string, description: Presente nello storico e nelle note (non per il cliente) }
+        cognome: { type: string, description: Presente nello storico e nelle note (non per il cliente) }
+
+    Motivi:
+      type: object
+      required: [dati]
+      properties:
+        dati:
+          type: array
+          items: { $ref: '#/components/schemas/Motivo' }
+          description: |
+            Elenco unico dei motivi ammessi, valido per ogni tentativo fallito e per i cambi di
+            stato in `annullata` e `persa`: non è filtrato per stato o tipo di tentativo.
 
     NuovaNota:
       type: object
@@ -1552,6 +1627,7 @@ components:
         - is_reso
         - creata_il
         - dataora_richiesta_spedizione
+        - ritirata_il
         - id_cliente_destinatario
         - indirizzo_ritiro
         - indirizzo_spedizione
@@ -1566,6 +1642,11 @@ components:
         is_reso: { type: boolean }
         creata_il: { type: string, format: date-time }
         dataora_richiesta_spedizione: { type: string, format: date-time }
+        ritirata_il:
+          type: string
+          format: date-time
+          nullable: true
+          description: Data e ora del ritiro, registrate al primo passaggio in `ritirata`; null prima
         id_cliente_mittente:
           type: integer
           format: int32
@@ -1630,7 +1711,9 @@ components:
           additionalProperties: true
           description: Solo i campi cambiati, col nuovo valore; la riga intera per la creazione
         modificato_il: { type: string, format: date-time }
-        autore: { $ref: '#/components/schemas/Autore' }
+        autore:
+          allOf: [{ $ref: '#/components/schemas/Autore' }]
+          description: Con nome e cognome di chi ha fatto la modifica
 
     Storico:
       type: object

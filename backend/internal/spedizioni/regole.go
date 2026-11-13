@@ -3,7 +3,6 @@ package spedizioni
 import (
 	"regexp"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"lastmiledelivery/backend/internal/errori"
@@ -32,9 +31,8 @@ var altroEndpoint = map[Stato]string{
 }
 
 const (
-	maxCodOrdine       = 50
-	maxNota            = 2000
-	tolleranzaOrologio = 5 * time.Minute
+	maxCodOrdine = 50
+	maxNota      = 2000
 )
 
 var formatoCodOrdine = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
@@ -68,12 +66,6 @@ func controllaID(e *errori.Validazione, campo string, v int32) {
 func controllaIndirizzi(e *errori.Validazione, ritiro, spedizione int32) {
 	if ritiro > 0 && ritiro == spedizione {
 		e.Aggiungi("id_indirizzo_spedizione", "deve essere diverso dall'indirizzo di ritiro")
-	}
-}
-
-func controllaData(e *errori.Validazione, data, adesso time.Time) {
-	if !data.IsZero() && data.Before(adesso.Add(-tolleranzaOrologio)) {
-		e.Aggiungi("dataora_richiesta_spedizione", "non può essere nel passato")
 	}
 }
 
