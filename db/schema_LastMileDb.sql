@@ -200,7 +200,11 @@ CREATE TABLE spedizioni (
                                   REFERENCES clienti (id)   ON UPDATE CASCADE ON DELETE RESTRICT,
     id_cliente_destinatario       INTEGER NOT NULL
                                   REFERENCES clienti (id)   ON UPDATE CASCADE ON DELETE RESTRICT,
+    -- data e ora richieste per la spedizione: le imposta l'operatore
     dataora_richiesta_spedizione  TIMESTAMPTZ NOT NULL,
+    -- data e ora del ritiro: le registra il sistema quando il corriere porta la
+    -- spedizione in 'ritirata' (resta quella del primo ritiro)
+    ritirata_il                   TIMESTAMPTZ NULL,
     id_indirizzo_ritiro           INTEGER NOT NULL
                                   REFERENCES indirizzi (id) ON UPDATE CASCADE ON DELETE RESTRICT,
     id_indirizzo_spedizione       INTEGER NOT NULL
@@ -220,6 +224,9 @@ CREATE TABLE spedizioni (
         (stato = 'annullata') = (annullata_il IS NOT NULL)
     ),
     CONSTRAINT ck_spedizioni_date_annullamento   CHECK (annullata_il IS NULL OR annullata_il >= creata_il),
+    CONSTRAINT ck_spedizioni_date_ritiro         CHECK (ritirata_il IS NULL OR ritirata_il >= creata_il),
+    -- prima del ritiro la data del ritiro non c'è
+    CONSTRAINT ck_spedizioni_ritiro_stato        CHECK (stato NOT IN ('creata', 'assegnata') OR ritirata_il IS NULL),
     -- da 'assegnata' in poi serve l'assegnazione (e quindi il corriere);
     -- possono non averla solo le spedizioni 'creata' e 'annullata'
     CONSTRAINT ck_spedizioni_assegnazione_stato  CHECK (

@@ -3,6 +3,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'api.dart';
 import 'comuni.dart';
@@ -154,16 +155,21 @@ class _Campi {
   final Map<String, TextEditingController> c;
   _Campi(List<String> nomi) : c = {for (final n in nomi) n: TextEditingController()};
   String operator [](String n) => c[n]!.text;
-  Widget campo(String nome, String etichetta, Object? errore, {bool password = false, String? suggerimento, double larghezza = 240}) =>
+  Widget campo(String nome, String etichetta, Object? errore,
+          {bool password = false, String? suggerimento, double larghezza = 240, List<TextInputFormatter>? formati, TextInputType? tastiera}) =>
       SizedBox(
         width: larghezza,
         child: TextField(
           controller: c[nome],
           obscureText: password,
+          inputFormatters: formati,
+          keyboardType: tastiera,
           decoration: InputDecoration(
             labelText: etichetta,
             helperText: suggerimento,
             errorText: erroreCampo(errore, nome),
+            errorMaxLines: 4, // nei campi stretti (civico, CAP) il messaggio va a capo invece di essere tagliato
+            helperMaxLines: 2,
             border: const OutlineInputBorder(),
           ),
         ),
@@ -179,7 +185,7 @@ class _NuovoCliente extends StatefulWidget {
 
 class _NuovoClienteState extends State<_NuovoCliente> {
   final _campi = _Campi(['nome', 'cognome', 'prefisso', 'nr_telefono', 'email', 'password']);
-  late final String _chiave = widget.api.nuovaChiave();
+  late String _chiave = widget.api.nuovaChiave();
   Object? _errore;
   bool _attesa = false;
 
@@ -212,6 +218,9 @@ class _NuovoClienteState extends State<_NuovoCliente> {
               : 'Cliente creato, ma la mail con le credenziali NON è partita: comunicagliele tu.');
       Navigator.of(context).pop(cliente);
     } catch (e) {
+      // Risposta di errore dal backend: non è stato creato nulla, il prossimo invio
+      // (con i dati corretti) è una richiesta nuova e usa una chiave nuova.
+      if (e is ErroreServer && e.status != null) _chiave = widget.api.nuovaChiave();
       setState(() => _errore = e);
     } finally {
       if (mounted) setState(() => _attesa = false);
@@ -227,8 +236,11 @@ class _NuovoClienteState extends State<_NuovoCliente> {
             child: Wrap(spacing: 12, runSpacing: 12, children: [
               _campi.campo('nome', 'Nome', _errore),
               _campi.campo('cognome', 'Cognome', _errore),
-              _campi.campo('prefisso', 'Prefisso', _errore, larghezza: 90),
-              _campi.campo('nr_telefono', 'Telefono', _errore, larghezza: 390),
+              _campi.campo('prefisso', 'Prefisso', _errore,
+                  larghezza: 90, tastiera: TextInputType.phone, formati: [FilteringTextInputFormatter.allow(RegExp(r'[+0-9]'))]),
+              // si possono scrivere solo cifre; il formato completo lo controlla comunque il backend
+              _campi.campo('nr_telefono', 'Telefono', _errore,
+                  larghezza: 390, tastiera: TextInputType.phone, formati: [FilteringTextInputFormatter.digitsOnly]),
               _campi.campo('email', 'Email', _errore, larghezza: 492),
               _campi.campo('password', 'Password iniziale', _errore,
                   password: true, larghezza: 492, suggerimento: 'Almeno 8 caratteri: verrà inviata al cliente per mail'),
@@ -253,7 +265,7 @@ class _NuovoIndirizzo extends StatefulWidget {
 
 class _NuovoIndirizzoState extends State<_NuovoIndirizzo> {
   final _campi = _Campi(['via', 'civico', 'citta', 'cap', 'regione', 'nazione']);
-  late final String _chiave = widget.api.nuovaChiave();
+  late String _chiave = widget.api.nuovaChiave();
   Object? _errore;
   bool _attesa = false;
 
@@ -280,6 +292,9 @@ class _NuovoIndirizzoState extends State<_NuovoIndirizzo> {
       );
       if (mounted) Navigator.of(context).pop(ind);
     } catch (e) {
+      // Risposta di errore dal backend: non è stato creato nulla, il prossimo invio
+      // (con i dati corretti) è una richiesta nuova e usa una chiave nuova.
+      if (e is ErroreServer && e.status != null) _chiave = widget.api.nuovaChiave();
       setState(() => _errore = e);
     } finally {
       if (mounted) setState(() => _attesa = false);

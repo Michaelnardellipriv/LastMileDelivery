@@ -168,6 +168,44 @@ func TestIndirizzi(t *testing.T) {
 	}
 }
 
+func TestFormatoIndirizzo(t *testing.T) {
+	s := NuovoServizio(&archivioFinto{}, &postinoFinto{})
+	valido := func() NuovoIndirizzo {
+		return NuovoIndirizzo{Via: p("Via Roma"), Civico: p("12/B"), Citta: p("Sant'Orsola Terme"), CAP: p("38121"),
+			Regione: p("Trentino-Alto Adige"), Nazione: p("Italia")}
+	}
+	if _, _, err := s.TrovaOCreaIndirizzo(context.Background(), operatore, valido()); err != nil {
+		t.Fatalf("indirizzo valido rifiutato: %v", err)
+	}
+	estero := valido()
+	estero.Nazione, estero.CAP, estero.Civico = p("Regno Unito"), p("SW1A 1AA"), p("SNC")
+	if _, _, err := s.TrovaOCreaIndirizzo(context.Background(), operatore, estero); err != nil {
+		t.Fatalf("CAP estero e civico SNC sono ammessi: %v", err)
+	}
+	casi := map[string]struct {
+		campo  string
+		cambia func(*NuovoIndirizzo)
+	}{
+		"via solo numeri":      {"via", func(n *NuovoIndirizzo) { n.Via = p("123") }},
+		"civico con parole":    {"civico", func(n *NuovoIndirizzo) { n.Civico = p("dodici") }},
+		"città con cifre":      {"citta", func(n *NuovoIndirizzo) { n.Citta = p("Trento2") }},
+		"regione con simboli":  {"regione", func(n *NuovoIndirizzo) { n.Regione = p("Trentino#") }},
+		"nazione con cifre":    {"nazione", func(n *NuovoIndirizzo) { n.Nazione = p("1talia") }},
+		"CAP italiano a 4":     {"cap", func(n *NuovoIndirizzo) { n.CAP = p("3812") }},
+		"CAP italiano lettere": {"cap", func(n *NuovoIndirizzo) { n.CAP = p("38A21") }},
+		"CAP estero con #":     {"cap", func(n *NuovoIndirizzo) { n.Nazione, n.CAP = p("Francia"), p("75#01") }},
+	}
+	for nome, c := range casi {
+		n := valido()
+		c.cambia(&n)
+		_, _, err := s.TrovaOCreaIndirizzo(context.Background(), operatore, n)
+		v, ok := err.(*errori.Validazione)
+		if !ok || !v.Segnalato(c.campo) {
+			t.Errorf("%s: atteso errore sul campo %s, ottenuto %v", nome, c.campo, err)
+		}
+	}
+}
+
 func TestRicercheSoloOperatoreEAmministratore(t *testing.T) {
 	a := &archivioFinto{}
 	s := NuovoServizio(a, &postinoFinto{})

@@ -163,7 +163,10 @@ func (r *Repository) Aggiorna(ctx context.Context, id int32, autore identita.Ric
 			id_cliente_destinatario      = COALESCE($8, id_cliente_destinatario),
 			id_indirizzo_ritiro          = COALESCE($9, id_indirizzo_ritiro),
 			id_indirizzo_spedizione      = COALESCE($10, id_indirizzo_spedizione),
-			dataora_richiesta_spedizione = COALESCE($11, dataora_richiesta_spedizione)
+			dataora_richiesta_spedizione = COALESCE($11, dataora_richiesta_spedizione),
+			-- data e ora del ritiro: le registra il sistema al primo passaggio in 'ritirata'
+			ritirata_il                  = CASE WHEN $2::stato_spedizione = 'ritirata' THEN COALESCE(ritirata_il, now())
+			                                    ELSE ritirata_il END
 		WHERE id = $1`,
 		id, string(m.NuovoStato), idAssegnazione, m.Annulla, autore.ID,
 		d.IsReso, d.IDClienteMittente, d.IDClienteDestinatario,
@@ -225,6 +228,15 @@ func (r *Repository) AggiungiNota(ctx context.Context, id int32, autore identita
 	).Scan(&n.ID, &n.CreataIl); err != nil {
 		return Nota{}, err
 	}
+	if err := tx.QueryRow(ctx, `
+		SELECT u.nome, u.cognome
+		FROM utenti u
+		LEFT JOIN operatori_logistici o ON o.id_utente = u.id
+		LEFT JOIN corrieri c            ON c.id_utente = u.id
+		WHERE o.id = $1 OR c.id = $2`, n.IDOperatore, n.IDCorriere,
+	).Scan(&n.NomeAutore, &n.CognomeAutore); err != nil {
+		return Nota{}, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return Nota{}, err
 	}
@@ -237,7 +249,7 @@ func perID(ctx context.Context, q interrogabile, id int32) (Spedizione, error) {
 	var ritiri, consegne, uscite int64
 	err := q.QueryRow(ctx, `
 		SELECT s.id, s.cod_ordine, s.stato::text, s.is_reso, s.creata_il,
-		       s.dataora_richiesta_spedizione,
+		       s.dataora_richiesta_spedizione, s.ritirata_il,
 		       s.id_cliente_mittente, s.id_cliente_destinatario,
 		       s.id_indirizzo_ritiro, s.id_indirizzo_spedizione,
 		       a.id_corriere, s.annullata_il,
@@ -249,7 +261,7 @@ func perID(ctx context.Context, q interrogabile, id int32) (Spedizione, error) {
 		LEFT JOIN assegnazioni a ON a.id = s.id_assegnazione_corrente
 		WHERE s.id = $1`, id,
 	).Scan(&s.ID, &s.CodOrdine, &stato, &s.IsReso, &s.CreataIl,
-		&s.DataoraRichiesta,
+		&s.DataoraRichiesta, &s.RitirataIl,
 		&s.IDClienteMittente, &s.IDClienteDestinatario,
 		&s.IDIndirizzoRitiro, &s.IDIndirizzoSpedizione,
 		&s.IDCorriere, &s.AnnullataIl, &ritiri, &consegne, &uscite)
@@ -363,7 +375,7 @@ func (r *Repository) elenca(ctx context.Context, v Visibilita, f FiltroElenco, i
 
 	query := fmt.Sprintf(`
 		SELECT s.id, s.cod_ordine, s.stato::text, s.is_reso, s.creata_il,
-		       s.dataora_richiesta_spedizione,
+		       s.dataora_richiesta_spedizione, s.ritirata_il,
 		       s.id_cliente_mittente, s.id_cliente_destinatario,
 		       ir.via, ir.civico, cir.nome, cir.cod_postale, cir.regione, cir.nazione,
 		       isp.via, isp.civico, cisp.nome, cisp.cod_postale, cisp.regione, cisp.nazione,
@@ -375,9 +387,14 @@ func (r *Repository) elenca(ctx context.Context, v Visibilita, f FiltroElenco, i
 		           SELECT json_agg(json_build_object(
 		                      'id', n.id, 'nota', n.nota, 'is_interna', n.is_interna,
 		                      'motivo', n.motivo, 'creata_il', n.creata_il,
-		                      'id_operatore', n.id_operatore_logistico_creata, 'id_corriere', n.id_corriere_creata
+		                      'id_operatore', n.id_operatore_logistico_creata, 'id_corriere', n.id_corriere_creata,
+		                      'nome_autore', COALESCE(uno.nome, unc.nome), 'cognome_autore', COALESCE(uno.cognome, unc.cognome)
 		                  ) ORDER BY n.creata_il, n.id)
 		           FROM note n
+		           LEFT JOIN operatori_logistici nop ON nop.id = n.id_operatore_logistico_creata
+		           LEFT JOIN utenti uno              ON uno.id = nop.id_utente
+		           LEFT JOIN corrieri nco            ON nco.id = n.id_corriere_creata
+		           LEFT JOIN utenti unc              ON unc.id = nco.id_utente
 		           WHERE n.id_spedizione = s.id %s
 		       ), '[]'::json)
 		FROM spedizioni s
@@ -434,7 +451,7 @@ func (r *Repository) elenca(ctx context.Context, v Visibilita, f FiltroElenco, i
 		ritiro, consegna := &voce.IndirizzoRitiro, &voce.IndirizzoSpedizione
 		dest := &voce.Destinatario
 		if err := righe.Scan(&voce.ID, &voce.CodOrdine, &stato, &voce.IsReso, &voce.CreataIl,
-			&voce.DataoraRichiesta,
+			&voce.DataoraRichiesta, &voce.RitirataIl,
 			&voce.IDClienteMittente, &voce.IDClienteDestinatario,
 			&ritiro.Via, &ritiro.Civico, &ritiro.Citta, &ritiro.CAP, &ritiro.Regione, &ritiro.Nazione,
 			&consegna.Via, &consegna.Civico, &consegna.Citta, &consegna.CAP, &consegna.Regione, &consegna.Nazione,
@@ -461,13 +478,15 @@ func (r *Repository) elenca(ctx context.Context, v Visibilita, f FiltroElenco, i
 
 func leggiNote(dati []byte) ([]Nota, error) {
 	var grezze []struct {
-		ID          int32     `json:"id"`
-		Nota        string    `json:"nota"`
-		IsInterna   bool      `json:"is_interna"`
-		Motivo      *string   `json:"motivo"`
-		CreataIl    time.Time `json:"creata_il"`
-		IDOperatore *int32    `json:"id_operatore"`
-		IDCorriere  *int32    `json:"id_corriere"`
+		ID            int32     `json:"id"`
+		Nota          string    `json:"nota"`
+		IsInterna     bool      `json:"is_interna"`
+		Motivo        *string   `json:"motivo"`
+		CreataIl      time.Time `json:"creata_il"`
+		IDOperatore   *int32    `json:"id_operatore"`
+		IDCorriere    *int32    `json:"id_corriere"`
+		NomeAutore    *string   `json:"nome_autore"`
+		CognomeAutore *string   `json:"cognome_autore"`
 	}
 	if err := json.Unmarshal(dati, &grezze); err != nil {
 		return nil, err
@@ -475,7 +494,7 @@ func leggiNote(dati []byte) ([]Nota, error) {
 	note := make([]Nota, len(grezze))
 	for i, g := range grezze {
 		note[i] = Nota{ID: g.ID, Testo: g.Nota, IsInterna: g.IsInterna, Motivo: g.Motivo, CreataIl: g.CreataIl,
-			IDOperatore: g.IDOperatore, IDCorriere: g.IDCorriere}
+			IDOperatore: g.IDOperatore, IDCorriere: g.IDCorriere, NomeAutore: g.NomeAutore, CognomeAutore: g.CognomeAutore}
 	}
 	return note, nil
 }
@@ -490,10 +509,16 @@ func (r *Repository) Storico(ctx context.Context, id int32) ([]VoceStorico, erro
 	}
 
 	righe, err := r.db.Query(ctx, `
-		SELECT id, operazione::text, valore_vecchio, valore_nuovo, modificato_il, id_operatore, id_corriere
-		FROM cambiamenti_spedizioni
-		WHERE id_spedizione = $1
-		ORDER BY modificato_il, id`, id)
+		SELECT c.id, c.operazione::text, c.valore_vecchio, c.valore_nuovo, c.modificato_il,
+		       c.id_operatore, c.id_corriere,
+		       COALESCE(uo.nome, uc.nome), COALESCE(uo.cognome, uc.cognome)
+		FROM cambiamenti_spedizioni c
+		LEFT JOIN operatori_logistici o ON o.id = c.id_operatore
+		LEFT JOIN utenti uo             ON uo.id = o.id_utente
+		LEFT JOIN corrieri co           ON co.id = c.id_corriere
+		LEFT JOIN utenti uc             ON uc.id = co.id_utente
+		WHERE c.id_spedizione = $1
+		ORDER BY c.modificato_il, c.id`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -503,7 +528,7 @@ func (r *Repository) Storico(ctx context.Context, id int32) ([]VoceStorico, erro
 	for righe.Next() {
 		var v VoceStorico
 		if err := righe.Scan(&v.ID, &v.Operazione, &v.ValoreVecchio, &v.ValoreNuovo,
-			&v.ModificatoIl, &v.IDOperatore, &v.IDCorriere); err != nil {
+			&v.ModificatoIl, &v.IDOperatore, &v.IDCorriere, &v.NomeAutore, &v.CognomeAutore); err != nil {
 			return nil, err
 		}
 		voci = append(voci, v)

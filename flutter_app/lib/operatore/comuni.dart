@@ -31,7 +31,22 @@ class ChipStato extends StatelessWidget {
 
 void avviso(BuildContext context, String messaggio) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(messaggio)));
 
-String testoErrore(Object e) => e is ErroreServer ? e.perUtente : 'Errore inatteso: $e';
+final _giaRegistrati = Expando<bool>();
+
+/// Scrive l'errore completo nella console del browser (una volta sola per errore):
+/// a schermo va solo il messaggio breve di [testoErrore].
+void registraErrore(Object e, [StackTrace? traccia]) {
+  if (_giaRegistrati[e] == true) return;
+  _giaRegistrati[e] = true;
+  traccia ??= e is Error ? e.stackTrace : null;
+  debugPrint('[Veloce24] errore: $e${traccia == null ? '' : '\n$traccia'}');
+}
+
+/// Messaggio breve per l'utente; i dettagli tecnici finiscono in console.
+String testoErrore(Object e) {
+  registraErrore(e);
+  return e is ErroreServer ? e.perUtente : 'Si è verificato un errore imprevisto. Riprova; se succede ancora avvisa l\'assistenza.';
+}
 
 void mostraErrore(BuildContext context, Object e) {
   if (!context.mounted) return;

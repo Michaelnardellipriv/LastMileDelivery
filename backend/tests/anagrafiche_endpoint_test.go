@@ -18,7 +18,13 @@ func telefonoUnico() string {
 func TestCreazioneSpedizioneDaGUI(t *testing.T) {
 	f := preparaFixture(t)
 	op, admin, c1, dest := comeOperatore(f), comeAmministratore(f), comeCorriere(f.idCorriere1), comeCliente(f.idDestinatario)
-	nazione := "Italia " + f.suffisso
+	// nazione unica per ogni esecuzione, ma solo lettere (il backend rifiuta le cifre nei nomi dei luoghi)
+	nazione := "Italia " + strings.Map(func(r rune) rune {
+		if r >= '0' && r <= '9' {
+			return 'g' + (r - '0')
+		}
+		return r
+	}, f.suffisso)
 
 	nuovoCliente := func(email string, password any) map[string]any {
 		c := map[string]any{"nome": "Giulia", "cognome": "Nuova", "prefisso": "+39", "nr_telefono": telefonoUnico(), "email": email}

@@ -152,6 +152,82 @@ void main() {
     expect(api.utente, isNull);
   });
 
+  test('creazione: legge la risposta piatta del backend, manda la data richiesta e non quella del ritiro', () async {
+    late http.Request inviata;
+    final api = _api((req) async {
+      inviata = req;
+      // POST /api/spedizioni risponde con la spedizione "piatta": niente persone né indirizzi
+      return _json({
+        'id': 77,
+        'cod_ordine': 'ORD-77',
+        'stato': 'assegnata',
+        'is_reso': false,
+        'creata_il': '2026-11-13T09:00:00Z',
+        'dataora_richiesta_spedizione': '2026-11-13T09:00:00Z',
+        'ritirata_il': null,
+        'id_cliente_mittente': 3,
+        'id_cliente_destinatario': 7,
+        'id_indirizzo_ritiro': 1,
+        'id_indirizzo_spedizione': 2,
+        'id_corriere': 1,
+        'annullata_il': null,
+        'tentativi_ritiro_falliti': 0,
+        'tentativi_consegna_falliti': 0,
+      }, 201);
+    });
+    final s = await api.creaSpedizione(
+        codOrdine: 'ORD-77',
+        idMittente: 3,
+        idDestinatario: 7,
+        idRitiro: 1,
+        idConsegna: 2,
+        richiestaIl: DateTime.utc(2026, 11, 20, 9),
+        idCorriere: 1,
+        chiave: 'k');
+    expect((s.id, s.codOrdine, s.stato), (77, 'ORD-77', 'assegnata'));
+    final corpo = jsonDecode(inviata.body) as Map<String, dynamic>;
+    expect(corpo['dataora_richiesta_spedizione'], '2026-11-20T09:00:00.000Z');
+    expect(corpo.containsKey('ritirata_il'), isFalse);
+    expect(corpo['id_corriere'], 1);
+  });
+
+  test('messaggi per l\'utente brevi, dettagli tecnici a parte', () async {
+    final api = _api((_) async => _json({
+          'errore': 'dati non validi',
+          'dettagli': [
+            {'campo': 'cod_ordine', 'messaggio': 'obbligatorio'},
+            {'campo': 'id_cliente_mittente', 'messaggio': 'obbligatorio'},
+          ]
+        }, 400));
+    try {
+      await api.creaSpedizione(codOrdine: '', chiave: 'k');
+      fail('atteso un errore');
+    } on ErroreServer catch (e) {
+      expect(e.perUtente, 'Alcuni dati non sono validi: controlla i campi evidenziati.');
+      expect(e.campi['cod_ordine'], 'obbligatorio');
+      expect(e.tecnico, contains('POST http://backend:8080/api/spedizioni → 400'));
+    }
+    expect(ErroreServer(409, 'cod_ordine già usato').perUtente, 'cod_ordine già usato');
+    expect(ErroreServer(500, 'panic: nil pointer').perUtente, isNot(contains('panic')));
+    expect(ErroreServer(null, 'XMLHttpRequest error').perUtente, isNot(contains('XMLHttpRequest')));
+  });
+
+  test('motivi: elenco unico da GET /api/motivi, senza filtri', () async {
+    final api = _api((req) async {
+      expect(req.url.path, '/api/motivi');
+      return _json({
+        'dati': ['mittente assente', 'richiesta del mittente', 'furto', 'altro'],
+      }, 200);
+    });
+    expect(await api.motivi(), ['mittente assente', 'richiesta del mittente', 'furto', 'altro']);
+  });
+
+  test('autore: nome, cognome, ruolo e id', () {
+    expect(Autore.daJson({'ruolo': 'corriere', 'id': 4, 'nome': 'Carlo', 'cognome': 'Corriere'}).testo,
+        'Carlo Corriere (corriere · id 4)');
+    expect(Autore.daJson({'ruolo': 'operatore', 'id': 1}).testo, 'operatore · id 1');
+  });
+
   test('posizioni: trova il corriere di una spedizione in consegna', () async {
     final api = _api((_) async => http.Response(
         jsonEncode({

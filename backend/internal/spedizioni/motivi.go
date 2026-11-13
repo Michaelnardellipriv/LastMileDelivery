@@ -2,11 +2,11 @@ package spedizioni
 
 import (
 	"slices"
-	"strings"
 
 	"lastmiledelivery/backend/internal/errori"
 )
 
+// Motivo è la parte pubblica di una nota: l'unica che vede il cliente.
 type Motivo string
 
 const (
@@ -27,54 +27,31 @@ const (
 	MotivoAltro                 Motivo = "altro"
 )
 
-var (
-	MotiviRitiro = []Motivo{
-		MotivoMittenteAssente, MotivoPaccoNonPronto, MotivoIndirizzoRitiroErrato,
-		MotivoAccessoImpossibile, MotivoAltro,
-	}
-	MotiviConsegna = []Motivo{
-		MotivoDestinatarioAssente, MotivoIndirizzoErrato, MotivoRifiutata,
-		MotivoAccessoImpossibile, MotivoAltro,
-	}
-	MotiviAnnullamento = []Motivo{
-		MotivoRichiestaMittente, MotivoRichiestaDestinatario, MotivoDatiErrati,
-		MotivoRitiroNonRiuscito, MotivoAltro,
-	}
-	MotiviPerdita = []Motivo{
-		MotivoSmarritaInDeposito, MotivoSmarritaInTrasporto, MotivoFurto, MotivoAltro,
-	}
-)
-
-func motiviTentativo(t TipoTentativo) []Motivo {
-	if t == TentativoRitiro {
-		return MotiviRitiro
-	}
-	return MotiviConsegna
+// Motivi è l'elenco unico dei motivi ammessi. Vale per tutti i tentativi falliti e
+// per i cambi di stato in annullata e persa: chi li inserisce sceglie quello adatto,
+// il sistema non li filtra in base allo stato o al tipo di tentativo.
+var Motivi = []Motivo{
+	MotivoMittenteAssente, MotivoPaccoNonPronto, MotivoIndirizzoRitiroErrato,
+	MotivoDestinatarioAssente, MotivoIndirizzoErrato, MotivoRifiutata, MotivoAccessoImpossibile,
+	MotivoRichiestaMittente, MotivoRichiestaDestinatario, MotivoDatiErrati, MotivoRitiroNonRiuscito,
+	MotivoSmarritaInDeposito, MotivoSmarritaInTrasporto, MotivoFurto,
+	MotivoAltro,
 }
 
-var motiviStato = map[Stato]struct {
-	azione  string
-	ammessi []Motivo
-}{
-	Annullata: {"annullare una spedizione", MotiviAnnullamento},
-	Persa:     {"segnalare una spedizione persa", MotiviPerdita},
+// azioniConMotivo sono i cambi di stato che chiedono motivo pubblico e nota interna.
+var azioniConMotivo = map[Stato]string{
+	Annullata: "annullare una spedizione",
+	Persa:     "segnalare una spedizione persa",
 }
 
-func controllaMotivo(e *errori.Validazione, motivo *string, ammessi []Motivo, obbligatorio string) {
+// controllaMotivo verifica che il motivo, se c'è, sia uno di quelli dell'elenco.
+func controllaMotivo(e *errori.Validazione, motivo *string, obbligatorio string) {
 	switch {
 	case motivo == nil:
 		if obbligatorio != "" {
 			e.Aggiungi("motivo", obbligatorio)
 		}
-	case !slices.Contains(ammessi, Motivo(*motivo)):
-		e.Aggiungi("motivo", "valore non previsto: ammessi "+elencoMotivi(ammessi))
+	case !slices.Contains(Motivi, Motivo(*motivo)):
+		e.Aggiungi("motivo", "valore non previsto: usare uno dei motivi di GET /api/motivi")
 	}
-}
-
-func elencoMotivi(m []Motivo) string {
-	nomi := make([]string, len(m))
-	for i, v := range m {
-		nomi[i] = string(v)
-	}
-	return strings.Join(nomi, ", ")
 }

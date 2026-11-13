@@ -37,6 +37,7 @@ func nascondi(vis Visibilita, v *VoceElenco) {
 	if vis.SoloNotePubbliche {
 		for i := range v.Note {
 			v.Note[i].Testo, v.Note[i].IDOperatore, v.Note[i].IDCorriere = "", nil, nil
+			v.Note[i].NomeAutore, v.Note[i].CognomeAutore = nil, nil
 		}
 	}
 }

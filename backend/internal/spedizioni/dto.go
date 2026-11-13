@@ -14,7 +14,9 @@ type richiestaCrea struct {
 	IDIndirizzoRitiro     *int32  `json:"id_indirizzo_ritiro"`
 	IDIndirizzoSpedizione *int32  `json:"id_indirizzo_spedizione"`
 	DataoraRichiesta      *string `json:"dataora_richiesta_spedizione"`
-	IDCorriere            *int32  `json:"id_corriere"`
+	// decisa dal sistema: se arriva viene rifiutata con un messaggio chiaro
+	RitirataIl any    `json:"ritirata_il"`
+	IDCorriere *int32 `json:"id_corriere"`
 }
 
 type richiestaModifica struct {
@@ -24,6 +26,7 @@ type richiestaModifica struct {
 	IDIndirizzoRitiro     *int32  `json:"id_indirizzo_ritiro"`
 	IDIndirizzoSpedizione *int32  `json:"id_indirizzo_spedizione"`
 	DataoraRichiesta      *string `json:"dataora_richiesta_spedizione"`
+	RitirataIl            any     `json:"ritirata_il"`
 }
 
 type richiestaAssegnazione struct {
@@ -53,6 +56,7 @@ type spedizioneDTO struct {
 	IsReso                   bool       `json:"is_reso"`
 	CreataIl                 time.Time  `json:"creata_il"`
 	DataoraRichiesta         time.Time  `json:"dataora_richiesta_spedizione"`
+	RitirataIl               *time.Time `json:"ritirata_il"`
 	IDClienteMittente        int32      `json:"id_cliente_mittente"`
 	IDClienteDestinatario    int32      `json:"id_cliente_destinatario"`
 	IDIndirizzoRitiro        int32      `json:"id_indirizzo_ritiro"`
@@ -63,7 +67,27 @@ type spedizioneDTO struct {
 	TentativiConsegnaFalliti int        `json:"tentativi_consegna_falliti"`
 }
 
-const messaggioData = "formato non valido: usare ISO 8601 con fuso orario, es. 2026-11-02T09:00:00+01:00"
+const (
+	messaggioData       = "formato non valido: usare ISO 8601 con fuso orario, es. 2026-11-02T09:00:00+01:00"
+	messaggioDataRitiro = "non si imposta: data e ora del ritiro le registra il sistema quando il corriere porta la spedizione in ritirata"
+)
+
+// dataRitiroDiSistema rifiuta ritirata_il: la decide il sistema, non il client.
+func dataRitiroDiSistema(e *errori.Validazione, ritiro any) {
+	if ritiro != nil {
+		e.Aggiungi("ritirata_il", messaggioDataRitiro)
+	}
+}
+
+// leggiData interpreta una data ISO 8601 con fuso orario.
+func leggiData(e *errori.Validazione, campo, v string) (time.Time, bool) {
+	t, err := time.Parse(time.RFC3339, v)
+	if err != nil {
+		e.Aggiungi(campo, messaggioData)
+		return time.Time{}, false
+	}
+	return t, true
+}
 
 func versoDTO(s Spedizione) spedizioneDTO {
 	d := spedizioneDTO{
@@ -75,6 +99,7 @@ func versoDTO(s Spedizione) spedizioneDTO {
 		TentativiRitiroFalliti: s.TentativiRitiroFalliti, TentativiConsegnaFalliti: s.TentativiConsegnaFalliti,
 	}
 	d.AnnullataIl = inUTC(s.AnnullataIl)
+	d.RitirataIl = inUTC(s.RitirataIl)
 	return d
 }
 
@@ -101,11 +126,10 @@ func (req richiestaCrea) versoDominio() (NuovaSpedizione, *errori.Validazione) {
 
 	if req.DataoraRichiesta == nil {
 		e.Aggiungi("dataora_richiesta_spedizione", "obbligatoria")
-	} else if t, err := time.Parse(time.RFC3339, *req.DataoraRichiesta); err != nil {
-		e.Aggiungi("dataora_richiesta_spedizione", messaggioData)
-	} else {
+	} else if t, ok := leggiData(e, "dataora_richiesta_spedizione", *req.DataoraRichiesta); ok {
 		n.DataoraRichiesta = t
 	}
+	dataRitiroDiSistema(e, req.RitirataIl)
 	n.IDCorriere = req.IDCorriere
 	return n, e
 }
@@ -118,16 +142,14 @@ func (req richiestaModifica) versoDominio() (DatiSpedizione, error) {
 		IDIndirizzoRitiro:     req.IDIndirizzoRitiro,
 		IDIndirizzoSpedizione: req.IDIndirizzoSpedizione,
 	}
+	e := &errori.Validazione{}
 	if req.DataoraRichiesta != nil {
-		t, err := time.Parse(time.RFC3339, *req.DataoraRichiesta)
-		if err != nil {
-			e := &errori.Validazione{}
-			e.Aggiungi("dataora_richiesta_spedizione", messaggioData)
-			return d, e
+		if t, ok := leggiData(e, "dataora_richiesta_spedizione", *req.DataoraRichiesta); ok {
+			d.DataoraRichiesta = &t
 		}
-		d.DataoraRichiesta = &t
 	}
-	return d, nil
+	dataRitiroDiSistema(e, req.RitirataIl)
+	return d, e.Err()
 }
 
 type indirizzoDTO struct {
@@ -170,8 +192,12 @@ type notaDTO struct {
 }
 
 func versoNotaDTO(n Nota) notaDTO {
-	return notaDTO{ID: n.ID, Nota: n.Testo, IsInterna: n.IsInterna, Motivo: n.Motivo, CreataIl: n.CreataIl.UTC(),
+	d := notaDTO{ID: n.ID, Nota: n.Testo, IsInterna: n.IsInterna, Motivo: n.Motivo, CreataIl: n.CreataIl.UTC(),
 		Autore: autoreDa(n.IDOperatore, n.IDCorriere)}
+	if d.Autore != nil {
+		d.Autore.Nome, d.Autore.Cognome = n.NomeAutore, n.CognomeAutore
+	}
+	return d
 }
 
 type voceElencoDTO struct {
@@ -181,6 +207,7 @@ type voceElencoDTO struct {
 	IsReso                bool         `json:"is_reso"`
 	CreataIl              time.Time    `json:"creata_il"`
 	DataoraRichiesta      time.Time    `json:"dataora_richiesta_spedizione"`
+	RitirataIl            *time.Time   `json:"ritirata_il"`
 	IDClienteMittente     *int32       `json:"id_cliente_mittente,omitempty"`
 	IDClienteDestinatario int32        `json:"id_cliente_destinatario"`
 	IndirizzoRitiro       indirizzoDTO `json:"indirizzo_ritiro"`
@@ -224,7 +251,7 @@ func versoVoceDTO(v VoceElenco) voceElencoDTO {
 	}
 	return voceElencoDTO{
 		ID: v.ID, CodOrdine: v.CodOrdine, Stato: v.Stato.String(), IsReso: v.IsReso,
-		CreataIl: v.CreataIl.UTC(), DataoraRichiesta: v.DataoraRichiesta.UTC(),
+		CreataIl: v.CreataIl.UTC(), DataoraRichiesta: v.DataoraRichiesta.UTC(), RitirataIl: inUTC(v.RitirataIl),
 		IDClienteMittente: idMittente, IDClienteDestinatario: v.IDClienteDestinatario,
 		IndirizzoRitiro:     versoIndirizzoDTO(v.IndirizzoRitiro),
 		IndirizzoSpedizione: versoIndirizzoDTO(v.IndirizzoSpedizione),
@@ -262,8 +289,10 @@ func inUTC(t *time.Time) *time.Time {
 }
 
 type autoreDTO struct {
-	Ruolo string `json:"ruolo"`
-	ID    int32  `json:"id"`
+	Ruolo   string  `json:"ruolo"`
+	ID      int32   `json:"id"`
+	Nome    *string `json:"nome,omitempty"`
+	Cognome *string `json:"cognome,omitempty"`
 }
 
 type voceStoricoDTO struct {
@@ -273,6 +302,10 @@ type voceStoricoDTO struct {
 	ValoreNuovo   map[string]any `json:"valore_nuovo"`
 	ModificatoIl  time.Time      `json:"modificato_il"`
 	Autore        autoreDTO      `json:"autore"`
+}
+
+type rispostaMotivi struct {
+	Dati []Motivo `json:"dati"`
 }
 
 type rispostaStorico struct {
@@ -295,6 +328,7 @@ func versoStoricoDTO(voci []VoceStorico) rispostaStorico {
 		autore := autoreDTO{}
 		if a := autoreDa(v.IDOperatore, v.IDCorriere); a != nil {
 			autore = *a
+			autore.Nome, autore.Cognome = v.NomeAutore, v.CognomeAutore
 		}
 		r.Dati[i] = voceStoricoDTO{
 			ID: v.ID, Operazione: v.Operazione,
