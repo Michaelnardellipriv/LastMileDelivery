@@ -7,7 +7,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import 'api.dart';
-import 'comuni.dart';
+import '../comune/comuni.dart';
 import 'mappa.dart';
 import 'selettori.dart';
 
@@ -52,8 +52,8 @@ class _DettaglioSpedizioneState extends State<DettaglioSpedizione> {
       _errore = null;
     });
     try {
-      final s = await api.dettaglio(widget.id);
-      final storico = await api.storico(widget.id);
+      // dettaglio e storico insieme: una sola attesa invece di due
+      final (s, storico) = await (api.dettaglio(widget.id), api.storico(widget.id)).wait;
       if (!mounted) return;
       setState(() {
         _s = s;
@@ -115,6 +115,24 @@ class _DettaglioSpedizioneState extends State<DettaglioSpedizione> {
     avviso(context, 'Stato aggiornato: $fatto');
     widget.alCambio?.call();
     await _carica();
+  }
+
+  Future<void> _reso(bool reso) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(reso ? 'Segnare come reso?' : 'Togliere il reso?'),
+        content: Text(reso
+            ? 'La spedizione ${_s!.codOrdine} torna al mittente. La modifica resta nello storico.'
+            : 'La spedizione ${_s!.codOrdine} non sarà più segnata come reso. La modifica resta nello storico.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Annulla')),
+          FilledButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Conferma')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    await _esegui(() => api.impostaReso(widget.id, reso), reso ? 'Spedizione segnata come reso' : 'Reso tolto');
   }
 
   Future<void> _assegna() async {
@@ -181,11 +199,17 @@ class _DettaglioSpedizioneState extends State<DettaglioSpedizione> {
               icon: const Icon(Icons.person_add_alt),
               label: Text(s.corriere == null ? 'Assegna corriere' : 'Riassegna corriere'),
             ),
+            // sempre disponibile: se lo stato non ammette il reso risponde il backend
+            OutlinedButton.icon(
+              onPressed: _invio ? null : () => _reso(!s.isReso),
+              icon: Icon(s.isReso ? Icons.undo : Icons.assignment_return_outlined),
+              label: Text(s.isReso ? 'Togli reso' : 'Segna come reso'),
+            ),
           ]),
         ),
         Sezione('Spedizione', [
           Riga('Creata il', fmtDataOra(s.creataIl)),
-          Riga('Richiesta per', fmtDataOra(s.richiestaIl)),
+          Riga('Richiesta il', fmtDataOra(s.richiestaIl)),
           Riga('Ritirata il', s.ritirataIl == null ? 'non ancora ritirata' : fmtDataOra(s.ritirataIl!)),
           if (s.conclusaIl != null) Riga('Conclusa il', fmtDataOra(s.conclusaIl!)),
           if (s.annullataIl != null) Riga('Annullata il', fmtDataOra(s.annullataIl!)),
@@ -197,6 +221,9 @@ class _DettaglioSpedizioneState extends State<DettaglioSpedizione> {
           Riga('Mittente', descriviPersona(s.mittente)),
           Riga('Destinatario', descriviPersona(s.destinatario)),
           Riga('Corriere', s.corriere == null ? 'non assegnata' : descriviPersona(s.corriere)),
+          if (s.assegnataDa != null)
+            Riga('Assegnata da', [nomeConId(s.assegnataDa), if (s.assegnataDa!.email != null) s.assegnataDa!.email!,
+              if (s.assegnataDa!.telefono != null) s.assegnataDa!.telefono!].join(' · ')),
         ]),
         Sezione('Indirizzi', [
           Riga('Ritiro', s.ritiro.testo),
@@ -218,10 +245,11 @@ class _DettaglioSpedizioneState extends State<DettaglioSpedizione> {
       else ...[
         Riga('Corriere', p.nomeCompleto),
         Riga('Coordinate', '${p.latitudine.toStringAsFixed(5)}, ${p.longitudine.toStringAsFixed(5)}'),
-        Riga('Rilevata il', fmtDataOra(p.rilevataIl)),
-        if (_posizioneLetta != null) Riga('Controllata alle', fmtDataOra(_posizioneLetta!)),
+        Riga('Rilevata il', '${fmtData(p.rilevataIl)} ${fmtOra(p.rilevataIl)}'),
+        if (_posizioneLetta != null) Riga('Controllata alle', fmtOra(_posizioneLetta!)),
         const SizedBox(height: 8),
-        SizedBox(height: 260, child: MappaPosizioni(key: ValueKey(p.rilevataIl), posizioni: [p])),
+        // la stessa mappa per tutto il tempo: si sposta solo il furgone (niente tessere ricaricate)
+        SizedBox(height: 260, child: MappaPosizioni(posizioni: [p], segui: true)),
       ],
     ]);
   }
@@ -289,9 +317,10 @@ class _DettaglioSpedizioneState extends State<DettaglioSpedizione> {
   }
 }
 
-/// Cambio di stato: l'operatore sceglie lo stato e, se vuole, motivo (pubblico) e nota
-/// (interna). La richiesta parte così com'è: se lo stato non è raggiungibile o mancano
-/// motivo e nota, il backend risponde con l'errore e la finestra lo mostra.
+/// Cambio di stato: l'operatore sceglie lo stato e, se vuole aggiungere la nota pubblica,
+/// motivo (pubblico) e nota (interna). La richiesta parte così com'è, con i campi anche
+/// vuoti: se lo stato non è raggiungibile o motivo e nota mancano, sono vuoti o non sono
+/// ammessi, il backend risponde con l'errore e la finestra lo mostra.
 class _DialogoStato extends StatefulWidget {
   final ApiOperatore api;
   final int idSpedizione;
@@ -304,6 +333,7 @@ class _DialogoStato extends StatefulWidget {
 class _DialogoStatoState extends State<_DialogoStato> {
   String? _stato;
   String? _motivo;
+  bool _conNota = false; // se mandare anche motivo e nota
   final _nota = TextEditingController();
   List<String>? _motivi; // null finché non arrivano
   Object? _erroreMotivi;
@@ -327,13 +357,14 @@ class _DialogoStatoState extends State<_DialogoStato> {
 
   Future<void> _invia() async {
     final stato = _stato;
-    final motivo = _motivo;
     setState(() {
       _invio = true;
       _errore = null;
     });
     try {
-      await widget.api.cambiaStato(widget.idSpedizione, stato ?? '', motivo: motivo, nota: _nota.text.isEmpty ? null : _nota.text);
+      // con la nota pubblica, motivo e nota partono come sono a schermo, anche vuoti
+      await widget.api.cambiaStato(widget.idSpedizione, stato ?? '',
+          motivo: _conNota ? _motivo ?? '' : null, nota: _conNota ? _nota.text : null);
       if (mounted) Navigator.of(context).pop(stato);
     } catch (e) {
       if (mounted) setState(() => _errore = e);
@@ -359,8 +390,19 @@ class _DialogoStatoState extends State<_DialogoStato> {
               items: [for (final s in statiSpedizione) DropdownMenuItem(value: s, child: Text(s))],
               onChanged: (s) => setState(() => _stato = s),
             ),
-            const SizedBox(height: 12),
-            if (_erroreMotivi != null)
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: _conNota,
+              title: const Text('Aggiungi motivo e nota'),
+              subtitle: const Text('Nota pubblica: il backend la richiede per annullata e persa'),
+              onChanged: (v) => setState(() => _conNota = v),
+            ),
+            if (!_conNota) ...[
+              // errori del backend su campi che non sono a schermo
+              for (final campo in const ['motivo', 'nota'])
+                if (erroreCampo(err, campo) != null)
+                  Text('$campo: ${erroreCampo(err, campo)}', style: TextStyle(color: Theme.of(context).colorScheme.error)),
+            ] else if (_erroreMotivi != null)
               Row(children: [
                 Expanded(
                   child: Text('Elenco dei motivi non disponibile. ${testoErrore(_erroreMotivi!)}',
@@ -373,10 +415,11 @@ class _DialogoStatoState extends State<_DialogoStato> {
             else
               DropdownButtonFormField<String?>(
                 value: _motivo,
+                isExpanded: true,
                 decoration: InputDecoration(
                   labelText: 'Motivo (pubblico, lo vede il cliente)',
-                  helperText: 'Per annullata e persa',
                   errorText: erroreCampo(err, 'motivo'),
+                  errorMaxLines: 3,
                   border: const OutlineInputBorder(),
                 ),
                 items: [
@@ -386,18 +429,20 @@ class _DialogoStatoState extends State<_DialogoStato> {
                 ],
                 onChanged: (m) => setState(() => _motivo = m),
               ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _nota,
-              minLines: 2,
-              maxLines: 5,
-              decoration: InputDecoration(
-                labelText: 'Nota interna',
-                helperText: 'Per annullata e persa',
-                errorText: erroreCampo(err, 'nota'),
-                border: const OutlineInputBorder(),
+            if (_conNota) ...[
+              const SizedBox(height: 12),
+              TextField(
+                controller: _nota,
+                minLines: 2,
+                maxLines: 5,
+                decoration: InputDecoration(
+                  labelText: 'Nota interna',
+                  errorText: erroreCampo(err, 'nota'),
+                  errorMaxLines: 3,
+                  border: const OutlineInputBorder(),
+                ),
               ),
-            ),
+            ],
             if (senzaCampi)
               Padding(
                 padding: const EdgeInsets.only(top: 12),

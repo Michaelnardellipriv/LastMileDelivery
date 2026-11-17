@@ -15,6 +15,7 @@ type archivio interface {
 	Aggiorna(ctx context.Context, id int32, autore identita.Richiedente,
 		decidi func(attuale Spedizione) (Modifica, error)) (Spedizione, bool, error)
 	Elenca(ctx context.Context, v Visibilita, f FiltroElenco) ([]VoceElenco, error)
+	Conta(ctx context.Context, v Visibilita, f FiltroElenco) (int, error)
 	Storico(ctx context.Context, id int32) ([]VoceStorico, error)
 	Dettaglio(ctx context.Context, v Visibilita, id int32) (DettaglioSpedizione, error)
 	AggiungiNota(ctx context.Context, id int32, autore identita.Richiedente, testo string,
@@ -63,6 +64,7 @@ func (s *Servizio) validaNuova(n NuovaSpedizione) *errori.Validazione {
 	controllaID(e, "id_indirizzo_ritiro", n.IDIndirizzoRitiro)
 	controllaID(e, "id_indirizzo_spedizione", n.IDIndirizzoSpedizione)
 	controllaIndirizzi(e, n.IDIndirizzoRitiro, n.IDIndirizzoSpedizione)
+	controllaDataRichiesta(e, n.DataoraRichiesta, s.adesso())
 	if n.IDCorriere != nil {
 		controllaID(e, "id_corriere", *n.IDCorriere)
 	}
@@ -97,6 +99,9 @@ func (s *Servizio) validaDati(d DatiSpedizione) error {
 		if v != nil {
 			controllaID(e, campo, *v)
 		}
+	}
+	if d.DataoraRichiesta != nil {
+		controllaDataRichiesta(e, *d.DataoraRichiesta, s.adesso())
 	}
 	return e.Err()
 }
@@ -221,8 +226,7 @@ func (s *Servizio) decidiTentativo(r identita.Richiedente, attuale Spedizione, t
 			"un tentativo di consegna si registra solo su una spedizione in consegna (stato attuale: %q)", attuale.Stato)}
 	}
 	if attuale.TentativiConsegnaFalliti >= attuale.UsciteInConsegna {
-		return Modifica{}, &errori.Conflitto{Messaggio: "tentativo di consegna già registrato per questa uscita: " +
-			"l'operatore deve riportare la spedizione in ritirata e il corriere rimetterla in consegna"}
+		return Modifica{}, &errori.Conflitto{Messaggio: messaggioUscitaFallita}
 	}
 	m.NuovoStato = InConsegna
 	if attuale.TentativiConsegnaFalliti+1 >= s.maxTentativi {
@@ -284,6 +288,9 @@ func (s *Servizio) decidiStato(r identita.Richiedente, attuale Spedizione, c Cam
 		return Modifica{}, &errori.Conflitto{Messaggio: fmt.Sprintf(
 			"falliti %d tentativi di ritiro su %d: la spedizione deve essere annullata dall'operatore",
 			attuale.TentativiRitiroFalliti, s.maxTentativi)}
+	}
+	if attuale.Stato == InConsegna && c.Stato == Consegnata && attuale.TentativiConsegnaFalliti >= attuale.UsciteInConsegna {
+		return Modifica{}, &errori.Conflitto{Messaggio: messaggioUscitaFallita}
 	}
 	if err := s.richiediMotivoENota(attuale, c); err != nil {
 		return Modifica{}, err

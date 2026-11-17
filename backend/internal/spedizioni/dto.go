@@ -216,18 +216,30 @@ type voceElencoDTO struct {
 	Destinatario          personaDTO   `json:"destinatario"`
 	IDCorriere            *int32       `json:"id_corriere,omitempty"`
 	Corriere              *personaDTO  `json:"corriere,omitempty"`
+	AssegnataDa           *personaDTO  `json:"assegnata_da,omitempty"`
 	ConclusaIl            *time.Time   `json:"conclusa_il"`
 	Note                  []notaDTO    `json:"note"`
 }
 
 type rispostaElenco struct {
-	Dati      []voceElencoDTO `json:"dati"`
-	Pagina    int             `json:"pagina"`
-	PerPagina int             `json:"per_pagina"`
+	Dati           []voceElencoDTO `json:"dati"`
+	Pagina         int             `json:"pagina"`
+	PerPagina      int             `json:"per_pagina"`
+	TotaleElementi int             `json:"totale_elementi"`
+	TotalePagine   int             `json:"totale_pagine"`
 }
 
-func versoElencoDTO(voci []VoceElenco, f FiltroElenco) rispostaElenco {
-	r := rispostaElenco{Dati: make([]voceElencoDTO, len(voci)), Pagina: f.Pagina, PerPagina: f.PerPagina}
+// TotalePagine: quante pagine servono per totale elementi (0 se non ce n'è nessuno).
+func TotalePagine(totale, perPagina int) int {
+	if totale <= 0 || perPagina <= 0 {
+		return 0
+	}
+	return (totale + perPagina - 1) / perPagina
+}
+
+func versoElencoDTO(voci []VoceElenco, f FiltroElenco, totale int) rispostaElenco {
+	r := rispostaElenco{Dati: make([]voceElencoDTO, len(voci)), Pagina: f.Pagina, PerPagina: f.PerPagina,
+		TotaleElementi: totale, TotalePagine: TotalePagine(totale, f.PerPagina)}
 	for i, v := range voci {
 		r.Dati[i] = versoVoceDTO(v)
 	}
@@ -239,11 +251,15 @@ func versoVoceDTO(v VoceElenco) voceElencoDTO {
 	for j, n := range v.Note {
 		note[j] = versoNotaDTO(n)
 	}
-	var corriere, mittente *personaDTO
+	var corriere, mittente, assegnante *personaDTO
 	var idMittente *int32
 	if v.Corriere != nil {
 		c := versoPersonaDTO(*v.Corriere)
 		corriere = &c
+	}
+	if v.AssegnataDa != nil {
+		a := versoPersonaDTO(*v.AssegnataDa)
+		assegnante = &a
 	}
 	if v.Mittente != nil {
 		m := versoPersonaDTO(*v.Mittente)
@@ -259,6 +275,7 @@ func versoVoceDTO(v VoceElenco) voceElencoDTO {
 		Destinatario:        versoPersonaDTO(v.Destinatario),
 		IDCorriere:          v.IDCorriere,
 		Corriere:            corriere,
+		AssegnataDa:         assegnante,
 		ConclusaIl:          inUTC(v.ConclusaIl),
 		Note:                note,
 	}
