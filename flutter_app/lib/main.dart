@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'backend_page.dart';
-import 'operatore/app.dart';
+import 'area_riservata.dart';
 import 'store.dart';
 
 void main() => runApp(const App());
@@ -70,12 +70,12 @@ class LoginPage extends StatelessWidget {
           if (apiBase.isNotEmpty)
             Card(
               child: ListTile(
-                leading: const Icon(Icons.admin_panel_settings_outlined),
-                title: const Text('Area operatori'),
-                subtitle: const Text('Login con email e password, spedizioni, mappa dei corrieri'),
+                leading: const Icon(Icons.lock_outline),
+                title: const Text('Area riservata'),
+                subtitle: const Text('Login con email e password: operatori e corrieri entrano nella loro area'),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const AreaOperatore(apiBase: apiBase)),
+                  MaterialPageRoute(builder: (_) => const AreaRiservata(apiBase: apiBase)),
                 ),
               ),
             ),

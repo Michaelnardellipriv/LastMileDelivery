@@ -2,7 +2,7 @@ openapi: 3.0.3
 
 info:
   title: LastMileDelivery API
-  version: "0.24.0"
+  version: "0.28.0"
   description: |
     API per la gestione delle spedizioni di Veloce24.
 
@@ -46,7 +46,7 @@ info:
     | assegnata | ritirata | corriere assegnato | `PATCH /stato` |
     | creata, assegnata | annullata (`motivo` e `nota` obbligatori, facoltativi dopo 3 ritiri falliti) | operatore | `PATCH /stato` |
     | ritirata | in consegna | corriere assegnato | `PATCH /stato` |
-    | in consegna | consegnata | corriere assegnato | `PATCH /stato` |
+    | in consegna | consegnata (non nell'uscita in cui è già fallito un tentativo di consegna) | corriere assegnato | `PATCH /stato` |
     | in consegna | in consegna (consegna fallita, tentativi 1 e 2) | corriere assegnato | `POST /tentativi` con `tipo: consegna` |
     | in consegna | non consegnata (consegna fallita, 3° tentativo) | corriere assegnato | `POST /tentativi` con `tipo: consegna` |
     | in consegna | ritirata | solo operatore | `PATCH /stato` |
@@ -115,6 +115,9 @@ paths:
         stesso 401, per non rivelare quali email esistono. Ogni utente ha una password fin
         dalla creazione (obbligatoria nel database); al cliente destinatario la comunica
         l'operatore per mail.
+        Tra i clienti entra solo chi è (o è stato) destinatario di almeno una spedizione: un
+        cliente che è solo mittente, o che non ha ancora spedizioni in arrivo, riceve 403
+        anche con le credenziali giuste.
         Se l'utente ha più ruoli (per esempio corriere e cliente) va indicato `ruolo`.
       operationId: login
       security: []
@@ -150,7 +153,9 @@ paths:
               schema: { $ref: '#/components/schemas/Errore' }
               example: { errore: email o password non corrette }
         '403':
-          description: '`ruolo` indicato che l''utente non ha'
+          description: |
+            `ruolo` indicato che l'utente non ha, oppure cliente che non è destinatario di
+            nessuna spedizione (solo mittente o senza spedizioni in arrivo)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Errore' }
@@ -307,8 +312,8 @@ paths:
         - name: per_pagina
           in: query
           required: false
-          description: Elementi per pagina
-          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+          description: Spedizioni per pagina
+          schema: { type: integer, minimum: 1, maximum: 100, default: 10 }
       responses:
         '200':
           description: Elenco (può essere vuoto)
@@ -333,6 +338,8 @@ paths:
                       - { id: 1, nota: Il mittente ha annullato l'ordine, is_interna: false, motivo: richiesta del mittente, creata_il: '2026-10-27T21:01:00Z' }
                 pagina: 1
                 per_pagina: 20
+                totale_elementi: 1
+                totale_pagine: 1
         '400':
           description: Parametro non valido (`stato`, `id_corriere`, `dal`, `al`, `cod_ordine`, `pagina` o `per_pagina`)
           content:
@@ -378,7 +385,7 @@ paths:
         '400':
           description: |
             Dati non validi: JSON malformato, campo mancante o non previsto, tipo errato,
-            data non ISO 8601, `ritirata_il` inviata dal client (la decide il
+            data non ISO 8601 o nel futuro, `ritirata_il` inviata dal client (la decide il
             sistema), cliente o indirizzo inesistente, indirizzi uguali.
           content:
             application/json:
@@ -495,7 +502,7 @@ paths:
         '200': { $ref: '#/components/responses/SpedizioneAggiornata' }
         '400':
           description: |
-            Dati non validi: nessun campo, campo non previsto, data non ISO 8601, `ritirata_il`
+            Dati non validi: nessun campo, campo non previsto, data non ISO 8601 o nel futuro, `ritirata_il`
             (la decide il sistema), riferimento inesistente, indirizzo di spedizione uguale a
             quello di ritiro.
           content:
@@ -743,7 +750,7 @@ paths:
         '403': { $ref: '#/components/responses/NonAutorizzato' }
         '404': { $ref: '#/components/responses/NonTrovata' }
         '409':
-          description: Transizione non ammessa dallo stato attuale, spedizione chiusa o tentativi di ritiro esauriti
+          description: Transizione non ammessa dallo stato attuale, spedizione chiusa, tentativi di ritiro esauriti, oppure consegna nell'uscita in cui è già stato registrato un tentativo fallito (va prima riportata in ritirata dall'operatore)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Errore' }
@@ -1279,7 +1286,7 @@ components:
         dataora_richiesta_spedizione:
           type: string
           format: date-time
-          description: Data e ora richieste per la spedizione, decise dall'operatore. ISO 8601 con fuso orario; può essere anche nel passato
+          description: Momento in cui la spedizione è stata richiesta, indicato dall'operatore. ISO 8601 con fuso orario; uguale o precedente a adesso, mai nel futuro
         ritirata_il:
           type: string
           format: date-time
@@ -1312,7 +1319,7 @@ components:
         dataora_richiesta_spedizione:
           type: string
           format: date-time
-          description: Data e ora richieste per la spedizione, decise dall'operatore. ISO 8601 con fuso orario; può essere anche nel passato
+          description: Momento in cui la spedizione è stata richiesta, indicato dall'operatore. ISO 8601 con fuso orario; uguale o precedente a adesso, mai nel futuro
         ritirata_il:
           type: string
           format: date-time
@@ -1416,7 +1423,7 @@ components:
         dataora_richiesta_spedizione:
           type: string
           format: date-time
-          description: Data e ora richieste per la spedizione, decise dall'operatore
+          description: Momento in cui la spedizione è stata richiesta (mai nel futuro), indicato dall'operatore
         ritirata_il:
           type: string
           format: date-time
@@ -1482,13 +1489,15 @@ components:
 
     ListaIndirizzi:
       type: object
-      required: [dati, pagina, per_pagina]
+      required: [dati, pagina, per_pagina, totale_elementi, totale_pagine]
       properties:
         dati:
           type: array
           items: { $ref: '#/components/schemas/IndirizzoAnagrafica' }
         pagina: { type: integer }
         per_pagina: { type: integer }
+        totale_elementi: { type: integer, minimum: 0, description: Elementi che rispettano i filtri, su tutte le pagine }
+        totale_pagine: { type: integer, minimum: 0, description: 'Pagine necessarie con questo per_pagina (0 se non ci sono elementi); una pagina oltre la fine risponde con dati vuoti' }
 
     NuovoCliente:
       type: object
@@ -1538,31 +1547,34 @@ components:
 
     ListaCorrieri:
       type: object
-      required: [dati, pagina, per_pagina]
+      required: [dati, pagina, per_pagina, totale_elementi, totale_pagine]
       properties:
         dati:
           type: array
           items: { $ref: '#/components/schemas/Corriere' }
         pagina: { type: integer }
         per_pagina: { type: integer }
+        totale_elementi: { type: integer, minimum: 0, description: Elementi che rispettano i filtri, su tutte le pagine }
+        totale_pagine: { type: integer, minimum: 0, description: 'Pagine necessarie con questo per_pagina (0 se non ci sono elementi); una pagina oltre la fine risponde con dati vuoti' }
 
     ListaClienti:
       type: object
-      required: [dati, pagina, per_pagina]
+      required: [dati, pagina, per_pagina, totale_elementi, totale_pagine]
       properties:
         dati:
           type: array
           items: { $ref: '#/components/schemas/Cliente' }
         pagina: { type: integer }
         per_pagina: { type: integer }
+        totale_elementi: { type: integer, minimum: 0, description: Elementi che rispettano i filtri, su tutte le pagine }
+        totale_pagine: { type: integer, minimum: 0, description: 'Pagine necessarie con questo per_pagina (0 se non ci sono elementi); una pagina oltre la fine risponde con dati vuoti' }
 
     Persona:
       type: object
       required: [nome, cognome]
       description: |
         Dati di un cliente o del corriere, secondo chi chiama:
-        - operatore e amministratore: mittente e destinatario con id, email e telefono;
-          corriere con id e telefono;
+        - operatore e amministratore: mittente, destinatario e corriere con id, email e telefono;
         - corriere: mittente e destinatario con id, email e telefono; niente corriere;
         - cliente: mittente con nome, cognome, email e telefono (senza id), destinatario con id,
           email e telefono; niente corriere.
@@ -1570,7 +1582,7 @@ components:
         id: { type: integer, format: int32, description: 'Id nella tabella clienti o corrieri; assente per il mittente quando chiama il cliente' }
         nome: { type: string }
         cognome: { type: string }
-        email: { type: string, description: Dei clienti; il corriere non ha l'email qui }
+        email: { type: string }
         telefono: { type: string, example: '+39 3330000005' }
 
     Autore:
@@ -1664,6 +1676,12 @@ components:
         corriere:
           allOf: [{ $ref: '#/components/schemas/Persona' }]
           description: Solo per operatore e amministratore, e solo se la spedizione ha un corriere
+        assegnata_da:
+          allOf: [{ $ref: '#/components/schemas/Persona' }]
+          description: |
+            Operatore che ha fatto l'assegnazione attuale, con id (tabella operatori_logistici),
+            nome, cognome, email e telefono. Per operatore, amministratore e corriere; assente
+            per il cliente e per le spedizioni senza corriere.
         conclusa_il:
           type: string
           format: date-time
@@ -1685,13 +1703,15 @@ components:
 
     ListaSpedizioni:
       type: object
-      required: [dati, pagina, per_pagina]
+      required: [dati, pagina, per_pagina, totale_elementi, totale_pagine]
       properties:
         dati:
           type: array
           items: { $ref: '#/components/schemas/VoceElenco' }
         pagina: { type: integer, minimum: 1 }
         per_pagina: { type: integer, minimum: 1, maximum: 100 }
+        totale_elementi: { type: integer, minimum: 0, description: Elementi che rispettano i filtri, su tutte le pagine }
+        totale_pagine: { type: integer, minimum: 0, description: 'Pagine necessarie con questo per_pagina (0 se non ci sono elementi); una pagina oltre la fine risponde con dati vuoti' }
 
     VoceStorico:
       type: object

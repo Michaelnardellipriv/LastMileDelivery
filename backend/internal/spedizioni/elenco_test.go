@@ -50,6 +50,10 @@ func (a *archivioElenco) Elenca(_ context.Context, v Visibilita, f FiltroElenco)
 	return a.voci, nil
 }
 
+func (a *archivioElenco) Conta(context.Context, Visibilita, FiltroElenco) (int, error) {
+	return len(a.voci), nil
+}
+
 var (
 	cliente1       = identita.Richiedente{Ruolo: identita.Cliente, ID: 7}
 	amministratore = identita.Richiedente{Ruolo: identita.Amministratore, ID: 1}

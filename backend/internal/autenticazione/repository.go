@@ -84,6 +84,13 @@ func (r *Repository) PerRuolo(ctx context.Context, rich identita.Richiedente) (A
 	return acc, err
 }
 
+func (r *Repository) DestinatarioDiSpedizioni(ctx context.Context, idCliente int32) (bool, error) {
+	var destinatario bool
+	err := r.db.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM spedizioni WHERE id_cliente_destinatario = $1)`, idCliente).Scan(&destinatario)
+	return destinatario, err
+}
+
 func (r *Repository) AggiornaPassword(ctx context.Context, idUtente int32, hash string) error {
 	_, err := r.db.Exec(ctx, `UPDATE utenti SET pwd_hash = $2 WHERE id = $1`, idUtente, hash)
 	return err
