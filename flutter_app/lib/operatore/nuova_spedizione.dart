@@ -4,7 +4,7 @@
 import 'package:flutter/material.dart';
 
 import 'api.dart';
-import 'comuni.dart';
+import '../comune/comuni.dart';
 import 'selettori.dart';
 
 class NuovaSpedizionePage extends StatefulWidget {
@@ -19,7 +19,9 @@ class _NuovaSpedizionePageState extends State<NuovaSpedizionePage> {
   final _codOrdine = TextEditingController();
   Persona? _mittente, _destinatario, _corriere;
   Indirizzo? _ritiro, _consegna;
-  DateTime _richiesta = DateTime.now().add(const Duration(days: 1)).copyWith(hour: 9, minute: 0, second: 0, millisecond: 0, microsecond: 0);
+  DateTime _richiesta = _adesso(); // quando è stata richiesta la spedizione: si propone adesso
+
+  static DateTime _adesso() => DateTime.now().copyWith(second: 0, millisecond: 0, microsecond: 0);
   late String _chiave = widget.api.nuovaChiave();
   Object? _errore;
   bool _attesa = false;
@@ -33,10 +35,10 @@ class _NuovaSpedizionePageState extends State<NuovaSpedizionePage> {
       initialDate: _richiesta,
       firstDate: DateTime(2000),
       lastDate: DateTime(2100),
-      helpText: 'Giorno richiesto per la spedizione',
+      helpText: 'Giorno in cui è stata richiesta',
     );
     if (d == null || !mounted) return;
-    final o = await showTimePicker(context: context, initialTime: TimeOfDay.fromDateTime(_richiesta), helpText: 'Ora richiesta');
+    final o = await showTimePicker(context: context, initialTime: TimeOfDay.fromDateTime(_richiesta), helpText: 'Ora in cui è stata richiesta');
     if (o == null) return;
     setState(() {
       _richiesta = DateTime(d.year, d.month, d.day, o.hour, o.minute);
@@ -67,6 +69,7 @@ class _NuovaSpedizionePageState extends State<NuovaSpedizionePage> {
         _codOrdine.clear();
         _mittente = _destinatario = _corriere = null;
         _ritiro = _consegna = null;
+        _richiesta = _adesso();
         _cambiato();
       });
       widget.alCreata(s.id);
@@ -204,10 +207,10 @@ class _NuovaSpedizionePageState extends State<NuovaSpedizionePage> {
             },
           ),
           _scelta(
-            etichetta: 'Data e ora richieste per la spedizione *',
+            etichetta: 'Richiesta il *',
             icona: Icons.schedule,
             valore: fmtDataOra(_richiesta),
-            dettaglio: 'La data e ora del ritiro le registra il sistema quando il corriere ritira il pacco',
+            dettaglio: 'Quando è stata richiesta la spedizione. Il ritiro lo registra il sistema quando il corriere ritira il pacco',
             errore: erroreCampo(err, 'dataora_richiesta_spedizione'),
             scegli: _scegliData,
           ),

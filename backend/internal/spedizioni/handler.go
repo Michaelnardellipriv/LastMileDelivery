@@ -132,12 +132,12 @@ func (h *Handler) elenca(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	voci, err := h.servizio.Elenca(r.Context(), identita.DalContesto(r.Context()), f)
+	voci, totale, err := h.servizio.ElencaPagina(r.Context(), identita.DalContesto(r.Context()), f)
 	if err != nil {
 		httpx.RispondiErrore(w, r, err)
 		return
 	}
-	httpx.ScriviJSON(w, http.StatusOK, versoElencoDTO(voci, f))
+	httpx.ScriviJSON(w, http.StatusOK, versoElencoDTO(voci, f, totale))
 }
 
 func (h *Handler) crea(w http.ResponseWriter, r *http.Request) {

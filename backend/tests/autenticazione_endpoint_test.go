@@ -46,6 +46,7 @@ func TestLogin(t *testing.T) {
 	f := preparaFixture(t)
 	f.impostaPassword(t, f.emailDi("operatore"), "PasswordOperatore1")
 	f.impostaPassword(t, f.emailDi("destinatario"), "PasswordCliente1")
+	f.nuovaSpedizione(t, "LOGIN-DEST") // il cliente entra solo se è destinatario di almeno una spedizione
 
 	t.Run("operatore_e_cliente_destinatario", func(t *testing.T) {
 		r := f.login(t, map[string]any{"email": f.emailDi("operatore"), "password": "PasswordOperatore1"}, 200)
@@ -80,6 +81,43 @@ func TestLogin(t *testing.T) {
 		if sbagliata.corpo["errore"] != inesistente.corpo["errore"] {
 			t.Errorf("stesso messaggio per non rivelare quali email esistono: %v / %v",
 				sbagliata.corpo["errore"], inesistente.corpo["errore"])
+		}
+	})
+
+	t.Run("cliente_solo_mittente_403_finche_non_e_destinatario", func(t *testing.T) {
+		op := comeOperatore(f)
+		email := "solomittente." + f.suffisso + "@test.it"
+		r := f.chiama(t, http.MethodPost, "/api/clienti", map[string]any{
+			"nome": "Sara", "cognome": "Mittente", "prefisso": "+39",
+			"nr_telefono": fmt.Sprintf("4%d", time.Now().UnixNano()%1e9), "email": email, "password": "PasswordSara1",
+		}, op)
+		if r.stato != http.StatusCreated {
+			t.Fatalf("nuovo cliente: %d %s", r.stato, r.grezzo)
+		}
+		idCliente := r.corpo["cliente"].(map[string]any)["id"]
+
+		// spedisce un pacco ma non ne riceve: resta fuori
+		comeMittente := f.corpoValido("LOGIN-MITT")
+		comeMittente["id_cliente_mittente"] = idCliente
+		if r := f.chiama(t, http.MethodPost, "/api/spedizioni", comeMittente, op); r.stato != http.StatusCreated {
+			t.Fatalf("spedizione come mittente: %d %s", r.stato, r.grezzo)
+		}
+		rifiuto := f.login(t, map[string]any{"email": email, "password": "PasswordSara1"}, 403)
+		if msg, _ := rifiuto.corpo["errore"].(string); !strings.Contains(msg, "destinatari") || rifiuto.corpo["token"] != nil {
+			t.Fatalf("il cliente solo mittente non riceve il token: %s", rifiuto.grezzo)
+		}
+		// con la password sbagliata resta 401, come per chiunque
+		f.login(t, map[string]any{"email": email, "password": "Sbagliata123"}, 401)
+
+		// dalla prima spedizione in arrivo può entrare
+		comeDestinatario := f.corpoValido("LOGIN-DEST2")
+		comeDestinatario["id_cliente_destinatario"] = idCliente
+		if r := f.chiama(t, http.MethodPost, "/api/spedizioni", comeDestinatario, op); r.stato != http.StatusCreated {
+			t.Fatalf("spedizione come destinatario: %d %s", r.stato, r.grezzo)
+		}
+		ok := f.login(t, map[string]any{"email": email, "password": "PasswordSara1"}, 200)
+		if u := ok.corpo["utente"].(map[string]any); u["ruolo"] != "cliente" {
+			t.Fatalf("il cliente destinatario entra: %s", ok.grezzo)
 		}
 	})
 
@@ -137,7 +175,7 @@ func TestLogin(t *testing.T) {
 
 func TestCambioPassword(t *testing.T) {
 	f := preparaFixture(t)
-	email := f.emailDi("mittente")
+	email := f.emailDi("corrierefermo")
 	f.impostaPassword(t, email, "PasswordVecchia1")
 	token := conToken(f.login(t, map[string]any{"email": email, "password": "PasswordVecchia1"}, 200))
 	cambia := func(corpo map[string]any, chi map[string]string, atteso int) risposta {

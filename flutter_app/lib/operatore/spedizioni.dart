@@ -4,7 +4,7 @@
 import 'package:flutter/material.dart';
 
 import 'api.dart';
-import 'comuni.dart';
+import '../comune/comuni.dart';
 import 'dettaglio.dart';
 import 'selettori.dart';
 
@@ -22,7 +22,7 @@ class SpedizioniPageState extends State<SpedizioniPage> {
   DateTime? _dal, _al;
 
   int _pagina = 1;
-  static const _perPagina = 25;
+  static const _perPagina = ApiSessione.perPaginaSpedizioni;
   Pagina<Spedizione>? _risultato;
   Object? _errore;
   bool _attesa = false;
@@ -45,11 +45,13 @@ class SpedizioniPageState extends State<SpedizioniPage> {
     });
     try {
       final r = await widget.api.spedizioni(_filtro, pagina: pagina, perPagina: _perPagina);
-      if (mounted)
-        setState(() {
-          _risultato = r;
-          _pagina = pagina;
-        });
+      if (!mounted) return;
+      // Dopo una modifica la pagina attuale può non esistere più: si va all'ultima.
+      if (r.oltreLaFine) return _carica(pagina: r.totalePagine);
+      setState(() {
+        _risultato = r;
+        _pagina = pagina;
+      });
     } catch (e) {
       if (mounted) setState(() => _errore = e);
     } finally {
@@ -117,6 +119,7 @@ class SpedizioniPageState extends State<SpedizioniPage> {
             child: DropdownButtonFormField<String?>(
               value: _stato,
               isDense: true,
+              isExpanded: true, // il testo si adatta alla larghezza invece di sbordare
               decoration: const InputDecoration(labelText: 'Stato', isDense: true, border: OutlineInputBorder()),
               items: [
                 const DropdownMenuItem(value: null, child: Text('Tutti')),
@@ -188,23 +191,7 @@ class SpedizioniPageState extends State<SpedizioniPage> {
                         ),
                       ),
       ),
-      if (r != null)
-        Padding(
-          padding: const EdgeInsets.all(8),
-          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            IconButton(
-              tooltip: 'Pagina precedente',
-              onPressed: _attesa || _pagina <= 1 ? null : () => _carica(pagina: _pagina - 1),
-              icon: const Icon(Icons.chevron_left),
-            ),
-            Text('Pagina $_pagina'),
-            IconButton(
-              tooltip: 'Pagina successiva',
-              onPressed: _attesa || !r.forseAltre ? null : () => _carica(pagina: _pagina + 1),
-              icon: const Icon(Icons.chevron_right),
-            ),
-          ]),
-        ),
+      if (r != null) BarraPagine(pagina: r, attesa: _attesa, vaiA: (p) => _carica(pagina: p)),
     ]);
   }
 

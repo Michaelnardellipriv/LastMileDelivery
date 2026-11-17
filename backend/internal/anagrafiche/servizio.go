@@ -91,11 +91,11 @@ type Ricerca struct {
 }
 
 type archivio interface {
-	CercaClienti(ctx context.Context, r Ricerca) ([]Cliente, error)
+	CercaClienti(ctx context.Context, r Ricerca) ([]Cliente, int, error)
 	EmailUsata(ctx context.Context, email string) (bool, error)
 	CreaCliente(ctx context.Context, c Cliente, pwdHash string) (Cliente, error)
-	CercaCorrieri(ctx context.Context, r Ricerca) ([]Corriere, error)
-	CercaIndirizzi(ctx context.Context, r Ricerca) ([]Indirizzo, error)
+	CercaCorrieri(ctx context.Context, r Ricerca) ([]Corriere, int, error)
+	CercaIndirizzi(ctx context.Context, r Ricerca) ([]Indirizzo, int, error)
 	TrovaOCreaIndirizzo(ctx context.Context, i Indirizzo) (Indirizzo, bool, error)
 }
 
@@ -148,12 +148,13 @@ func testo(e *errori.Validazione, campo string, v *string, massimo int) string {
 	return t
 }
 
-func (s *Servizio) CercaClienti(ctx context.Context, r identita.Richiedente, ric Ricerca) ([]Cliente, error) {
+// CercaClienti restituisce i clienti della pagina richiesta e quanti sono in tutto.
+func (s *Servizio) CercaClienti(ctx context.Context, r identita.Richiedente, ric Ricerca) ([]Cliente, int, error) {
 	if err := puoConsultare(r); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if err := validaRicerca(ric); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	return s.archivio.CercaClienti(ctx, ric)
 }
@@ -207,12 +208,13 @@ var errEmailUsata = &errori.Conflitto{
 	Dettagli:  []errori.ErroreCampo{{Campo: "email", Messaggio: "già usata"}},
 }
 
-func (s *Servizio) CercaCorrieri(ctx context.Context, r identita.Richiedente, ric Ricerca) ([]Corriere, error) {
+// CercaCorrieri restituisce i corrieri della pagina richiesta e quanti sono in tutto.
+func (s *Servizio) CercaCorrieri(ctx context.Context, r identita.Richiedente, ric Ricerca) ([]Corriere, int, error) {
 	if r.Ruolo != identita.Operatore && r.Ruolo != identita.Amministratore {
-		return nil, &errori.NonAutorizzato{Messaggio: "l'elenco dei corrieri è consultabile solo da operatori e amministratori"}
+		return nil, 0, &errori.NonAutorizzato{Messaggio: "l'elenco dei corrieri è consultabile solo da operatori e amministratori"}
 	}
 	if err := validaRicerca(ric); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	return s.archivio.CercaCorrieri(ctx, ric)
 }
@@ -230,12 +232,13 @@ func (s *Servizio) inviaCredenziali(ctx context.Context, c Cliente, password str
 	return true
 }
 
-func (s *Servizio) CercaIndirizzi(ctx context.Context, r identita.Richiedente, ric Ricerca) ([]Indirizzo, error) {
+// CercaIndirizzi restituisce gli indirizzi della pagina richiesta e quanti sono in tutto.
+func (s *Servizio) CercaIndirizzi(ctx context.Context, r identita.Richiedente, ric Ricerca) ([]Indirizzo, int, error) {
 	if err := puoConsultare(r); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if err := validaRicerca(ric); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	return s.archivio.CercaIndirizzi(ctx, ric)
 }
