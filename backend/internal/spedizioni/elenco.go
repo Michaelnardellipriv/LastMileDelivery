@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	PerPaginaPredefinito = 20
+	PerPaginaPredefinito = 10
 	PerPaginaMassimo     = 100
 )
 
@@ -56,6 +56,7 @@ type VoceElenco struct {
 	Destinatario          Persona
 	IDCorriere            *int32
 	Corriere              *Persona
+	AssegnataDa           *Persona // operatore che ha fatto l'assegnazione attuale
 	ConclusaIl            *time.Time
 	Note                  []Nota
 }
@@ -68,6 +69,7 @@ type Visibilita struct {
 	SoloNotePubbliche  bool
 	MostraCorriere     bool
 	NascondiIDMittente bool
+	NascondiAssegnante bool
 }
 
 var statiVisibiliAlCorriere = []Stato{Assegnata, Ritirata, InConsegna}
@@ -82,7 +84,8 @@ func visibilitaPer(r identita.Richiedente, giorniCliente int, adesso time.Time) 
 	case identita.Cliente:
 		id := r.ID
 		dal := adesso.AddDate(0, 0, -giorniCliente)
-		return Visibilita{IDDestinatario: &id, ConcluseDal: &dal, SoloNotePubbliche: true, NascondiIDMittente: true}, nil
+		return Visibilita{IDDestinatario: &id, ConcluseDal: &dal, SoloNotePubbliche: true, NascondiIDMittente: true,
+			NascondiAssegnante: true}, nil
 	}
 	return Visibilita{}, &errori.NonAutorizzato{Messaggio: "ruolo non autorizzato a vedere le spedizioni"}
 }
@@ -129,4 +132,19 @@ func (s *Servizio) Elenca(ctx context.Context, r identita.Richiedente, f FiltroE
 		nascondi(vis, &voci[i])
 	}
 	return voci, nil
+}
+
+// ElencaPagina è Elenca più il numero totale di spedizioni che rispettano visibilità e
+// filtri, per mostrare "elementi da–a di N" e il numero di pagine.
+func (s *Servizio) ElencaPagina(ctx context.Context, r identita.Richiedente, f FiltroElenco) ([]VoceElenco, int, error) {
+	voci, err := s.Elenca(ctx, r, f)
+	if err != nil {
+		return nil, 0, err
+	}
+	vis, err := visibilitaPer(r, s.giorniCliente, s.adesso())
+	if err != nil {
+		return nil, 0, err
+	}
+	totale, err := s.archivio.Conta(ctx, vis, f)
+	return voci, totale, err
 }

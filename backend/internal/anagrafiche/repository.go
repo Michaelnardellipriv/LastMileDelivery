@@ -29,18 +29,34 @@ func scansionaCliente(riga pgx.CollectableRow) (Cliente, error) {
 	return c, err
 }
 
-func (r *Repository) CercaClienti(ctx context.Context, ric Ricerca) ([]Cliente, error) {
-	righe, err := r.db.Query(ctx, selezioneCliente+`
+// Ricerca per nome, cognome, email o telefono (clienti e corrieri).
+const filtroPersona = `
 		WHERE $1 = ''
 		   OR position(lower($1) in lower(u.nome || ' ' || u.cognome || ' ' || u.cognome || ' ' || u.nome)) > 0
 		   OR position(lower($1) in lower(u.email)) > 0
-		   OR position($1 in u.nr_telefono) > 0
+		   OR position($1 in u.nr_telefono) > 0`
+
+// conta restituisce quante righe trova la ricerca, su tutte le pagine.
+func (r *Repository) conta(ctx context.Context, daDove string, testo string) (int, error) {
+	var n int
+	err := r.db.QueryRow(ctx, `SELECT count(*) `+daDove, testo).Scan(&n)
+	return n, err
+}
+
+func (r *Repository) CercaClienti(ctx context.Context, ric Ricerca) ([]Cliente, int, error) {
+	const daDove = `FROM clienti cl JOIN utenti u ON u.id = cl.id_utente` + filtroPersona
+	totale, err := r.conta(ctx, daDove, ric.Testo)
+	if err != nil {
+		return nil, 0, err
+	}
+	righe, err := r.db.Query(ctx, selezioneCliente+filtroPersona+`
 		ORDER BY u.cognome, u.nome, cl.id
 		LIMIT $2 OFFSET $3`, ric.Testo, ric.PerPagina, (ric.Pagina-1)*ric.PerPagina)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return pgx.CollectRows(righe, scansionaCliente)
+	clienti, err := pgx.CollectRows(righe, scansionaCliente)
+	return clienti, totale, err
 }
 
 func (r *Repository) EmailUsata(ctx context.Context, email string) (bool, error) {
@@ -77,24 +93,25 @@ func (r *Repository) CreaCliente(ctx context.Context, c Cliente, pwdHash string)
 	return creato, tx.Commit(ctx)
 }
 
-func (r *Repository) CercaCorrieri(ctx context.Context, ric Ricerca) ([]Corriere, error) {
+func (r *Repository) CercaCorrieri(ctx context.Context, ric Ricerca) ([]Corriere, int, error) {
+	const daDove = `FROM corrieri co JOIN utenti u ON u.id = co.id_utente` + filtroPersona
+	totale, err := r.conta(ctx, daDove, ric.Testo)
+	if err != nil {
+		return nil, 0, err
+	}
 	righe, err := r.db.Query(ctx, `
-		SELECT co.id, u.id, u.nome, u.cognome, u.email, u.prefisso, u.nr_telefono
-		FROM corrieri co JOIN utenti u ON u.id = co.id_utente
-		WHERE $1 = ''
-		   OR position(lower($1) in lower(u.nome || ' ' || u.cognome || ' ' || u.cognome || ' ' || u.nome)) > 0
-		   OR position(lower($1) in lower(u.email)) > 0
-		   OR position($1 in u.nr_telefono) > 0
+		SELECT co.id, u.id, u.nome, u.cognome, u.email, u.prefisso, u.nr_telefono `+daDove+`
 		ORDER BY u.cognome, u.nome, co.id
 		LIMIT $2 OFFSET $3`, ric.Testo, ric.PerPagina, (ric.Pagina-1)*ric.PerPagina)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return pgx.CollectRows(righe, func(riga pgx.CollectableRow) (Corriere, error) {
+	corrieri, err := pgx.CollectRows(righe, func(riga pgx.CollectableRow) (Corriere, error) {
 		var c Corriere
 		err := riga.Scan(&c.ID, &c.IDUtente, &c.Nome, &c.Cognome, &c.Email, &c.Prefisso, &c.NrTelefono)
 		return c, err
 	})
+	return corrieri, totale, err
 }
 
 func traduciErrore(err error) error {
@@ -128,16 +145,22 @@ func scansionaIndirizzo(riga pgx.CollectableRow) (Indirizzo, error) {
 	return i, err
 }
 
-func (r *Repository) CercaIndirizzi(ctx context.Context, ric Ricerca) ([]Indirizzo, error) {
-	righe, err := r.db.Query(ctx, selezioneIndirizzo+`
+func (r *Repository) CercaIndirizzi(ctx context.Context, ric Ricerca) ([]Indirizzo, int, error) {
+	const filtro = `
 		WHERE $1 = ''
-		   OR position(lower($1) in lower(i.via || ' ' || i.civico || ' ' || ci.nome || ' ' || ci.cod_postale)) > 0
+		   OR position(lower($1) in lower(i.via || ' ' || i.civico || ' ' || ci.nome || ' ' || ci.cod_postale)) > 0`
+	totale, err := r.conta(ctx, "FROM ("+selezioneIndirizzo+filtro+") AS trovati", ric.Testo)
+	if err != nil {
+		return nil, 0, err
+	}
+	righe, err := r.db.Query(ctx, selezioneIndirizzo+filtro+`
 		ORDER BY ci.nome, i.via, i.civico, i.id
 		LIMIT $2 OFFSET $3`, ric.Testo, ric.PerPagina, (ric.Pagina-1)*ric.PerPagina)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return pgx.CollectRows(righe, scansionaIndirizzo)
+	indirizzi, err := pgx.CollectRows(righe, scansionaIndirizzo)
+	return indirizzi, totale, err
 }
 
 func (r *Repository) TrovaOCreaIndirizzo(ctx context.Context, i Indirizzo) (Indirizzo, bool, error) {

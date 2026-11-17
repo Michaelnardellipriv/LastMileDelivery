@@ -20,9 +20,9 @@ type archivioFinto struct {
 	indirizzo  Indirizzo
 }
 
-func (a *archivioFinto) CercaClienti(_ context.Context, r Ricerca) ([]Cliente, error) {
+func (a *archivioFinto) CercaClienti(_ context.Context, r Ricerca) ([]Cliente, int, error) {
 	a.ricerca = r
-	return []Cliente{{ID: 1}}, nil
+	return []Cliente{{ID: 1}}, 1, nil
 }
 
 func (a *archivioFinto) EmailUsata(_ context.Context, email string) (bool, error) {
@@ -36,14 +36,14 @@ func (a *archivioFinto) CreaCliente(_ context.Context, c Cliente, pwdHash string
 	return c, nil
 }
 
-func (a *archivioFinto) CercaCorrieri(_ context.Context, r Ricerca) ([]Corriere, error) {
+func (a *archivioFinto) CercaCorrieri(_ context.Context, r Ricerca) ([]Corriere, int, error) {
 	a.ricerca = r
-	return []Corriere{{ID: 2, Nome: "Carlo"}}, nil
+	return []Corriere{{ID: 2, Nome: "Carlo"}}, 1, nil
 }
 
-func (a *archivioFinto) CercaIndirizzi(_ context.Context, r Ricerca) ([]Indirizzo, error) {
+func (a *archivioFinto) CercaIndirizzi(_ context.Context, r Ricerca) ([]Indirizzo, int, error) {
 	a.ricerca = r
-	return nil, nil
+	return nil, 0, nil
 }
 
 func (a *archivioFinto) TrovaOCreaIndirizzo(_ context.Context, i Indirizzo) (Indirizzo, bool, error) {
@@ -211,25 +211,25 @@ func TestRicercheSoloOperatoreEAmministratore(t *testing.T) {
 	s := NuovoServizio(a, &postinoFinto{})
 	ric := Ricerca{Testo: "dora", Pagina: 1, PerPagina: 20}
 	for _, r := range []identita.Richiedente{operatore, amministratore} {
-		if _, err := s.CercaClienti(context.Background(), r, ric); err != nil {
+		if _, _, err := s.CercaClienti(context.Background(), r, ric); err != nil {
 			t.Errorf("%s cerca clienti: %v", r.Ruolo, err)
 		}
-		if _, err := s.CercaIndirizzi(context.Background(), r, ric); err != nil {
+		if _, _, err := s.CercaIndirizzi(context.Background(), r, ric); err != nil {
 			t.Errorf("%s cerca indirizzi: %v", r.Ruolo, err)
 		}
-		if c, err := s.CercaCorrieri(context.Background(), r, ric); err != nil || len(c) != 1 {
+		if c, _, err := s.CercaCorrieri(context.Background(), r, ric); err != nil || len(c) != 1 {
 			t.Errorf("%s cerca corrieri: %v %v", r.Ruolo, c, err)
 		}
 	}
 	for _, r := range []identita.Richiedente{corriere, cliente} {
-		if _, err := s.CercaClienti(context.Background(), r, ric); tipoErrore(err) != "403" {
+		if _, _, err := s.CercaClienti(context.Background(), r, ric); tipoErrore(err) != "403" {
 			t.Errorf("%s non cerca clienti: %v", r.Ruolo, err)
 		}
-		if _, err := s.CercaCorrieri(context.Background(), r, ric); tipoErrore(err) != "403" {
+		if _, _, err := s.CercaCorrieri(context.Background(), r, ric); tipoErrore(err) != "403" {
 			t.Errorf("%s non vede l'elenco dei corrieri: %v", r.Ruolo, err)
 		}
 	}
-	if _, err := s.CercaCorrieri(context.Background(), operatore, Ricerca{Pagina: 0, PerPagina: 20}); tipoErrore(err) != "400" {
+	if _, _, err := s.CercaCorrieri(context.Background(), operatore, Ricerca{Pagina: 0, PerPagina: 20}); tipoErrore(err) != "400" {
 		t.Errorf("pagina 0: %v", err)
 	}
 }

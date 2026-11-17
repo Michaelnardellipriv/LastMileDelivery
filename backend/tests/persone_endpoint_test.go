@@ -62,8 +62,9 @@ func TestDatiClientiECorriere(t *testing.T) {
 					t.Errorf("mittente completo: %v", m)
 				}
 				destinatarioCompleto(t, persona(v, "destinatario"))
-				if c == nil || int32(c["id"].(float64)) != f.idCorriere1 || c["nome"] != "corriere1" || c["telefono"] == nil {
-					t.Errorf("corriere con nome e telefono: %v", c)
+				if c == nil || int32(c["id"].(float64)) != f.idCorriere1 || c["nome"] != "corriere1" || c["telefono"] == nil ||
+					c["email"] != f.emailDi("corriere1") {
+					t.Errorf("corriere con nome, email e telefono: %v", c)
 				}
 			}
 		}

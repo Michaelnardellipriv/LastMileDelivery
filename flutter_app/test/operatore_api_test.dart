@@ -103,14 +103,23 @@ void main() {
     expect(s.note.single.interna, isFalse);
   });
 
-  test('il login di un non operatore viene rifiutato', () async {
-    final api = _api((_) async => http.Response(
-        jsonEncode({
-          ..._sessione,
-          'utente': {...(_sessione['utente'] as Map), 'ruolo': 'corriere'}
-        }),
-        200));
-    await expectLater(api.login('c@test.it', 'x'), throwsA(isA<ErroreServer>().having((e) => e.status, 'status', 403)));
+  test('il login vale per ogni ruolo: chi può entrare lo decide il backend', () async {
+    for (final ruolo in ['operatore', 'corriere', 'amministratore', 'cliente']) {
+      final api = _api((_) async => http.Response(
+          jsonEncode({
+            ..._sessione,
+            'utente': {...(_sessione['utente'] as Map), 'ruolo': ruolo}
+          }),
+          200));
+      expect((await api.login('u@test.it', 'x')).ruolo, ruolo);
+      expect(api.token, 'tok-123');
+    }
+    // il rifiuto del backend (es. cliente solo mittente) arriva all'utente con il suo messaggio
+    final api = _api((_) async => _json({'errore': 'accesso riservato ai clienti destinatari: non risulta nessuna spedizione destinata a te'}, 403));
+    await expectLater(
+      api.login('mittente@test.it', 'x'),
+      throwsA(isA<ErroreServer>().having((e) => e.perUtente, 'messaggio', contains('clienti destinatari'))),
+    );
     expect(api.token, isNull);
   });
 
@@ -248,5 +257,34 @@ void main() {
     final p = await api.posizioni();
     expect(p.perSpedizione(43)!.latitudine, 46.0);
     expect(p.perSpedizione(99), isNull);
+  });
+
+  test("paginazione: totali dal backend, posizione da–a di N e niente pagina successiva dopo l'ultima", () async {
+    final api = _api((req) async => _json({
+          'dati': [_spedizione, _spedizione],
+          'pagina': 3,
+          'per_pagina': 25,
+          'totale_elementi': 52,
+          'totale_pagine': 3,
+        }, 200));
+    final p = await api.spedizioni(const FiltroSpedizioni(), pagina: 3, perPagina: 25);
+    expect((p.totaleElementi, p.totalePagine, p.da, p.a), (52, 3, 51, 52));
+    expect(p.haPrecedente, isTrue);
+    expect(p.haSuccessiva, isFalse); // ultima pagina: "successiva" spenta
+
+    // pagina oltre la fine (es. dopo una modifica): va riconosciuta per tornare all'ultima
+    final oltre = Pagina<int>([], 4, 25, 52, 3);
+    expect(oltre.oltreLaFine, isTrue);
+    expect(Pagina<int>([], 1, 25, 0, 0).oltreLaFine, isFalse);
+  });
+
+  test("assegnata da: nome, cognome, email e telefono dell'operatore", () {
+    final s = Spedizione.daJson({
+      ..._spedizione,
+      'assegnata_da': {'id': 2, 'nome': 'Olga', 'cognome': 'Operatrice', 'email': 'olga@test.it', 'telefono': '+39 3330000012'},
+    });
+    expect((s.assegnataDa!.id, s.assegnataDa!.nomeCompleto, s.assegnataDa!.email, s.assegnataDa!.telefono),
+        (2, 'Olga Operatrice', 'olga@test.it', '+39 3330000012'));
+    expect(Spedizione.daJson(_spedizione).assegnataDa, isNull);
   });
 }
