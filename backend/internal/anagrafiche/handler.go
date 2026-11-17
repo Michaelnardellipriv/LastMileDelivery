@@ -24,6 +24,9 @@ func (h *Handler) Registra(rotte *httpx.Rotte, identifica, idempotente httpx.Mid
 	rotte.Gestisci(http.MethodGet, "/api/corrieri", http.HandlerFunc(h.cercaCorrieri), identifica)
 	rotte.Gestisci(http.MethodGet, "/api/indirizzi", http.HandlerFunc(h.cercaIndirizzi), identifica)
 	rotte.Gestisci(http.MethodPost, "/api/indirizzi", http.HandlerFunc(h.trovaOCreaIndirizzo), identifica, idempotente)
+	rotte.Gestisci(http.MethodGet, "/api/utenti", http.HandlerFunc(h.cercaUtenti), identifica)
+	rotte.Gestisci(http.MethodPost, "/api/utenti", http.HandlerFunc(h.creaUtente), identifica, idempotente)
+	rotte.Gestisci(http.MethodPatch, "/api/utenti/{id}", http.HandlerFunc(h.modificaUtente), identifica, idempotente)
 }
 
 type richiestaCliente struct {
@@ -33,6 +36,15 @@ type richiestaCliente struct {
 	NrTelefono *string `json:"nr_telefono"`
 	Email      *string `json:"email"`
 	Password   *string `json:"password"`
+}
+
+type richiestaUtente struct {
+	Ruolo *string `json:"ruolo"`
+	richiestaCliente
+}
+
+type richiestaStatoUtente struct {
+	Attivo *bool `json:"attivo"`
 }
 
 type richiestaIndirizzo struct {
@@ -69,6 +81,23 @@ type corriereDTO struct {
 	NrTelefono string `json:"nr_telefono"`
 }
 
+type utenteDTO struct {
+	ID         int32  `json:"id"`
+	Ruolo      string `json:"ruolo"`
+	IDRuolo    int32  `json:"id_ruolo"`
+	Nome       string `json:"nome"`
+	Cognome    string `json:"cognome"`
+	Email      string `json:"email"`
+	Prefisso   string `json:"prefisso"`
+	NrTelefono string `json:"nr_telefono"`
+	Attivo     bool   `json:"attivo"`
+}
+
+type esitoUtenteDTO struct {
+	Utente      utenteDTO `json:"utente"`
+	MailInviata bool      `json:"mail_inviata"`
+}
+
 type indirizzoDTO struct {
 	ID      int32  `json:"id"`
 	Via     string `json:"via"`
@@ -98,6 +127,11 @@ func nuovaPagina[T any](n int, ric Ricerca, totale int) pagina[T] {
 func versoClienteDTO(c Cliente) clienteDTO {
 	return clienteDTO{ID: c.ID, IDUtente: c.IDUtente, Nome: c.Nome, Cognome: c.Cognome,
 		Email: c.Email, Prefisso: c.Prefisso, NrTelefono: c.NrTelefono}
+}
+
+func versoUtenteDTO(u Utente) utenteDTO {
+	return utenteDTO{ID: u.ID, Ruolo: string(u.Ruolo), IDRuolo: u.IDRuolo, Nome: u.Nome, Cognome: u.Cognome,
+		Email: u.Email, Prefisso: u.Prefisso, NrTelefono: u.NrTelefono, Attivo: u.Attivo}
 }
 
 func versoIndirizzoDTO(i Indirizzo) indirizzoDTO {
@@ -215,4 +249,71 @@ func (h *Handler) trovaOCreaIndirizzo(w http.ResponseWriter, r *http.Request) {
 		stato = http.StatusCreated
 	}
 	httpx.ScriviJSON(w, stato, versoIndirizzoDTO(ind))
+}
+
+func (h *Handler) cercaUtenti(w http.ResponseWriter, r *http.Request) {
+	ric, ok := leggiRicerca(w, r)
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	var ruolo *string
+	if v := q.Get("ruolo"); v != "" {
+		ruolo = &v
+	}
+	var attivo *bool
+	if v := q.Get("attivo"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			httpx.ScriviErrore(w, http.StatusBadRequest, "dati non validi", errori.ErroreCampo{Campo: "attivo", Messaggio: "ammessi true, false"})
+			return
+		}
+		attivo = &b
+	}
+	utenti, totale, err := h.servizio.CercaUtenti(r.Context(), identita.DalContesto(r.Context()), ric, ruolo, attivo)
+	if err != nil {
+		httpx.RispondiErrore(w, r, err)
+		return
+	}
+	risposta := nuovaPagina[utenteDTO](len(utenti), ric, totale)
+	for i, u := range utenti {
+		risposta.Dati[i] = versoUtenteDTO(u)
+	}
+	httpx.ScriviJSON(w, http.StatusOK, risposta)
+}
+
+func (h *Handler) creaUtente(w http.ResponseWriter, r *http.Request) {
+	var req richiestaUtente
+	if !httpx.LeggiCorpo(w, r, &req) {
+		return
+	}
+	esito, err := h.servizio.CreaUtente(r.Context(), identita.DalContesto(r.Context()), NuovoUtente{
+		Ruolo: req.Ruolo,
+		NuovoCliente: NuovoCliente{
+			Nome: req.Nome, Cognome: req.Cognome, Prefisso: req.Prefisso,
+			NrTelefono: req.NrTelefono, Email: req.Email, Password: req.Password,
+		},
+	})
+	if err != nil {
+		httpx.RispondiErrore(w, r, err)
+		return
+	}
+	httpx.ScriviJSON(w, http.StatusCreated, esitoUtenteDTO{Utente: versoUtenteDTO(esito.Utente), MailInviata: esito.MailInviata})
+}
+
+func (h *Handler) modificaUtente(w http.ResponseWriter, r *http.Request) {
+	id, ok := httpx.IDDalPercorso(w, r)
+	if !ok {
+		return
+	}
+	var req richiestaStatoUtente
+	if !httpx.LeggiCorpo(w, r, &req) {
+		return
+	}
+	u, err := h.servizio.ImpostaUtenteAttivo(r.Context(), identita.DalContesto(r.Context()), id, req.Attivo)
+	if err != nil {
+		httpx.RispondiErrore(w, r, err)
+		return
+	}
+	httpx.ScriviJSON(w, http.StatusOK, versoUtenteDTO(u))
 }

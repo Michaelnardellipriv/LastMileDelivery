@@ -3,8 +3,8 @@
 |  |  |
 | :---- | :---- |
 | **Team** | GLS |
-| **Versione** | v0.16 (allineata a `backend/api/openapi.yaml` 0.16.0) |
-| **Data** | 03/11/2026 |
+| **Versione** | v0.29 (allineata a `backend/api/openapi.yaml` 0.29.0) |
+| **Data** | 17/11/2026 |
 | **Base URL (sviluppo)** | `http://localhost:8080` |
 | **Contratto formale** | [`backend/api/openapi.yaml`](../backend/api/openapi.yaml) |
 
@@ -22,6 +22,16 @@ Questo documento riassume il contratto per chi sviluppa l'app Flutter o prova le
 | `POST` | `/api/spedizioni/{id}/tentativi` | corriere assegnato | registra un ritiro o una consegna non riusciti |
 | `PATCH` | `/api/spedizioni/{id}/stato` | operatore, corriere assegnato | cambia stato |
 | `POST` | `/api/spedizioni/{id}/note` | operatore, corriere assegnato | aggiunge una nota interna |
+| `GET` | `/api/motivi` | tutti i ruoli | motivi attivi, per i menu a tendina |
+| `POST` | `/api/clienti` | operatore | crea un cliente destinatario (email, nome, cognome, prefisso, telefono, password) |
+| `GET` | `/api/impostazioni` | amministratore | parametri della gestione delle spedizioni |
+| `PATCH` | `/api/impostazioni` | amministratore | modifica uno o più parametri |
+| `GET` | `/api/impostazioni/motivi` | amministratore | tutti i motivi, anche disattivati |
+| `POST` | `/api/impostazioni/motivi` | amministratore | aggiunge un motivo |
+| `PATCH` | `/api/impostazioni/motivi/{id}` | amministratore | attiva o disattiva un motivo |
+| `GET` | `/api/utenti` | amministratore | corrieri e operatori, attivi e disattivati |
+| `POST` | `/api/utenti` | amministratore | crea un corriere o un operatore |
+| `PATCH` | `/api/utenti/{id}` | amministratore | abilita o disattiva un corriere o un operatore |
 
 `POST` per gli endpoint che creano qualcosa (spedizione, assegnazione, tentativo, nota), `PATCH` per quelli che modificano la spedizione. Non esistono endpoint di eliminazione: le spedizioni e lo storico non si cancellano.
 
@@ -101,7 +111,7 @@ Stati della spedizione (tipo `stato_spedizione` del database): `creata`, `assegn
 
 Ogni altro passaggio viene respinto (409, o 403 se lo chiede il ruolo sbagliato).
 
-**Tentativi** (massimo `MAX_TENTATIVI`, predefinito 3):
+**Tentativi** (massimo `max_tentativi_ritiro` e `max_tentativi_consegna`, impostati dall'amministratore con `PATCH /api/impostazioni`, predefinito 3 ciascuno; qui sotto gli esempi usano 3):
 
 - **Ritiro.** La spedizione resta `assegnata`. Dopo il 3° fallimento il corriere non può più registrare tentativi né ritirarla, non si può riassegnare e l'operatore la annulla.  
 - **Consegna.** Ogni uscita in consegna ammette un solo tentativo. Dopo i tentativi 1 e 2 l'operatore riporta la spedizione in `ritirata` (ed eventualmente la riassegna), poi il corriere la rimette `in consegna`. Al 3° la spedizione passa da sola a `non consegnata`.
@@ -121,14 +131,16 @@ Le note sono di due tipi:
 
 Gli altri cambi di stato non accettano né `nota` né `motivo` (400).
 
-I motivi sono valori fissi:
+I motivi sono un elenco unico, valido per tentativi, annullamenti e perdite, che gestisce l'amministratore (tabella `motivi`): `GET /api/motivi` restituisce quelli attivi e solo quelli sono accettati. All'inizio sono:
 
-| Elenco | Valori |
+| Nati per | Valori |
 | :---- | :---- |
 | ritiro | `mittente assente`, `pacco non pronto`, `indirizzo di ritiro errato`, `accesso impossibile`, `altro` |
 | consegna | `destinatario assente`, `indirizzo errato`, `rifiutata dal destinatario`, `accesso impossibile`, `altro` |
 | annullamento | `richiesta del mittente`, `richiesta del destinatario`, `dati della spedizione errati`, `ritiro non riuscito`, `altro` |
 | perdita | `smarrita in deposito`, `smarrita durante il trasporto`, `furto`, `altro` |
+
+Un motivo non si cancella né si rinomina: si disattiva, e le note che lo usano restano come sono.
 
 ## Chi vede cosa
 
@@ -137,7 +149,7 @@ I motivi sono valori fissi:
 | Operatore | tutte, in tutti gli statipiu lo storico | tutte, con testo e autore | sì |
 | Amministratore | tutte, in tutti gli stati, più lo storico; non modifica nulla | tutte, con testo e autore | sì |
 | Corriere | solo quelle assegnate a lui in `assegnata`, `ritirata`, `in consegna` | tutte, con testo e autore | no |
-| Cliente destinatario | solo le sue: quelle in corso sempre, quelle chiuse fino a `GIORNI_VISIBILITA_CLIENTE` giorni (predefinito 30\) dalla chiusura | solo il `motivo` delle note pubbliche | no |
+| Cliente destinatario | solo le sue: quelle in corso sempre, quelle chiuse fino a `giorni_visibilita_cliente` giorni (impostati dall'amministratore, predefinito 30\) dalla chiusura | solo il `motivo` delle note pubbliche | no |
 | Cliente mittente | nessuna (il cliente non ha previsto l'accesso del mittente in questa fase) | — | — |
 
 Il dettaglio risponde 404 per una spedizione che chi chiama non può vedere, come se non esistesse.
@@ -331,21 +343,92 @@ Risposta 201:
 }
 ```
 
+## Amministrazione
+
+Tutti gli endpoint di questa sezione sono riservati all'amministratore: gli altri ruoli ricevono 403\.
+
+### GET / PATCH /api/impostazioni
+
+Parametri della gestione delle spedizioni, salvati nella tabella `impostazioni` (una sola riga). Valgono dalla richiesta successiva, senza riavviare il server.
+
+| Campo | Predefinito | Limiti | Significato |
+| :---- | :---- | :---- | :---- |
+| `giorni_visibilita_cliente` | 30 | 1–365 | per quanti giorni dalla chiusura il cliente destinatario vede una spedizione |
+| `max_tentativi_ritiro` | 3 | 1–10 | ritiri falliti dopo i quali la spedizione va annullata |
+| `max_tentativi_consegna` | 3 | 1–10 | consegne fallite dopo le quali la spedizione diventa `non consegnata` |
+| `intervallo_posizione_sec` | 30 | 5–3600 | ogni quanti secondi il corriere invia la posizione e la mappa degli operatori si aggiorna (lo stesso valore di `/api/impostazioni/intervallo-posizione`) |
+
+`PATCH` accetta uno o più di questi campi e lascia invariati gli altri; corpo vuoto o valori fuori limite: 400\. Risposta 200 (anche per `GET`):
+
+```json
+{
+  "giorni_visibilita_cliente": 30,
+  "max_tentativi_ritiro": 3,
+  "max_tentativi_consegna": 2,
+  "intervallo_posizione_sec": 30,
+  "modificate_il": "2026-11-17T10:00:00Z",
+  "id_amministratore_modifica": 1
+}
+```
+
+I nuovi limiti valgono per le azioni successive anche sulle spedizioni già aperte: per esempio, portando `max_tentativi_consegna` da 3 a 2, una spedizione con già un tentativo fallito diventa `non consegnata` al prossimo.
+
+### Motivi
+
+- `GET /api/impostazioni/motivi`: tutti i motivi, `{ "dati": [ { "id": 1, "descrizione": "mittente assente", "attivo": true, "creato_il": "..." } ] }`.  
+- `POST /api/impostazioni/motivi` con `{ "descrizione": "cliente in ferie" }` (1–100 caratteri): risposta 201 con il motivo, attivo. Descrizione già presente, maiuscole a parte: 409 (se è disattivato, si riattiva).  
+- `PATCH /api/impostazioni/motivi/{id}` con `{ "attivo": false }`: risposta 200 con il motivo. Motivo inesistente: 404; disattivare l'ultimo motivo attivo: 409\.
+
+### Utenti
+
+L'amministratore crea, abilita e disattiva **corrieri** e **operatori**. I clienti destinatari li crea l'operatore con `POST /api/clienti`.
+
+`POST /api/utenti`, tutti i campi obbligatori:
+
+```json
+{
+  "ruolo": "corriere",
+  "nome": "Carlo",
+  "cognome": "Rossi",
+  "prefisso": "+39",
+  "nr_telefono": "3331234567",
+  "email": "carlo.rossi@veloce24.it",
+  "password": "PasswordIniziale1"
+}
+```
+
+`ruolo` è `corriere` oppure `operatore`; per gli altri campi valgono le regole di `POST /api/clienti`. Risposta 201 `{ "utente": { ... }, "mail_inviata": true }`, con le credenziali spedite per mail. Email o telefono già usati: 409\.
+
+Un utente nelle risposte:
+
+```json
+{ "id": 21, "ruolo": "corriere", "id_ruolo": 4, "nome": "Carlo", "cognome": "Rossi",
+  "email": "carlo.rossi@veloce24.it", "prefisso": "+39", "nr_telefono": "3331234567", "attivo": true }
+```
+
+`id` è l'id dell'utente (quello del percorso `/api/utenti/{id}`); `id_ruolo` è l'id del corriere o dell'operatore, quello usato nelle spedizioni.
+
+`GET /api/utenti` è paginato come `/api/clienti` (`q`, `pagina`, `per_pagina`), con i filtri facoltativi `ruolo` (`corriere`, `operatore`) e `attivo` (`true`, `false`).
+
+`PATCH /api/utenti/{id}` con `{ "attivo": false }` disattiva l'utente, `{ "attivo": true }` lo riabilita; risposta 200 con l'utente. 404 se l'id non è di un corriere o di un operatore. Un utente disattivato:
+
+- non può fare il login (403, solo se la password è giusta; altrimenti resta 401);  
+- i token che aveva già ricevono 403 a ogni richiesta;  
+- non riceve mail di recupero password;  
+- se è un corriere, non compare in `GET /api/corrieri` e non gli si assegnano spedizioni (409 sul campo `id_corriere`). Le spedizioni che aveva restano sue finché l'operatore non le riassegna.
+
 ## Configurazione del server
 
 | Variabile | Predefinito | Significato |
 | :---- | :---- | :---- |
 | `DATABASE_URL` | — (obbligatoria) | stringa di connessione a PostgreSQL |
 | `LISTEN_ADDR` | `127.0.0.1:8080` | indirizzo di ascolto (in Kubernetes `0.0.0.0:8080`) |
-| `MAX_TENTATIVI` | 3 | tentativi massimi di ritiro e di consegna |
-| `GIORNI_VISIBILITA_CLIENTE` | 30 | giorni in cui il cliente vede una spedizione chiusa |
 
-Il cliente ha chiesto che questi valori, l'intervallo della posizione del corriere e l'elenco dei motivi li imposti l'amministratore: per ora sono variabili d'ambiente o costanti nel codice.
+Tentativi massimi, giorni di visibilità del cliente, intervallo della posizione e motivi non sono più variabili d'ambiente: li imposta l'amministratore (vedi [Amministrazione](#amministrazione)). `MAX_TENTATIVI` e `GIORNI_VISIBILITA_CLIENTE`, se ancora impostate, vengono ignorate con un avviso nel log.
 
 ## Non ancora implementato
 
 - Login e gestione utenti (oggi gli header `X-Id-*`).  
 - RF16: posizione del corriere, inviata periodicamente da un simulatore solo mentre il corriere ha spedizioni `ritirata` o `in consegna`, e visibile solo agli operatori. Mancano tabella, endpoint e simulatore.  
-- Configurazioni gestite dall'amministratore (giorni di consultazione, tentativi, intervallo della posizione, motivi).  
 - Elenco dell'operatore filtrato di default sulle spedizioni aperte, come chiesto dal cliente: oggi mostra tutte le spedizioni, e quelle aperte si ottengono col filtro `stato`.  
 - Riassunto e categorie delle note con l'AI (RF18, RF19).

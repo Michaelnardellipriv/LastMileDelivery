@@ -18,6 +18,7 @@ type Account struct {
 	Cognome  string
 	Email    string
 	PwdHash  string
+	Attivo   bool
 	Ruoli    []identita.Richiedente
 }
 
@@ -30,7 +31,7 @@ func NuovoRepository(db *pgxpool.Pool) *Repository {
 }
 
 const selezioneAccount = `
-	SELECT u.id, u.nome, u.cognome, u.email, u.pwd_hash, o.id, c.id, cl.id, a.id
+	SELECT u.id, u.nome, u.cognome, u.email, u.pwd_hash, u.attivo, o.id, c.id, cl.id, a.id
 	FROM utenti u
 	LEFT JOIN operatori_logistici o ON o.id_utente = u.id
 	LEFT JOIN corrieri c            ON c.id_utente = u.id
@@ -40,7 +41,7 @@ const selezioneAccount = `
 func leggiAccount(riga pgx.Row) (Account, error) {
 	var acc Account
 	var op, co, cl, am *int32
-	if err := riga.Scan(&acc.IDUtente, &acc.Nome, &acc.Cognome, &acc.Email, &acc.PwdHash, &op, &co, &cl, &am); err != nil {
+	if err := riga.Scan(&acc.IDUtente, &acc.Nome, &acc.Cognome, &acc.Email, &acc.PwdHash, &acc.Attivo, &op, &co, &cl, &am); err != nil {
 		return Account{}, err
 	}
 	for _, r := range []struct {

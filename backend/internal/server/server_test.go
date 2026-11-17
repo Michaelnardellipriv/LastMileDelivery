@@ -30,7 +30,7 @@ func serverSenzaDatabase(t *testing.T, ammettiHeaderID bool) *httptest.Server {
 		t.Fatal(err)
 	}
 	srv := httptest.NewServer(Nuovo(db, Config{
-		MaxTentativi: 3, Firmatario: firmatarioTest, Postino: autenticazione.PostinoLog{}, AmmettiHeaderID: ammettiHeaderID,
+		Firmatario: firmatarioTest, Postino: autenticazione.PostinoLog{}, AmmettiHeaderID: ammettiHeaderID,
 		CORS: cors,
 	}))
 	t.Cleanup(srv.Close)

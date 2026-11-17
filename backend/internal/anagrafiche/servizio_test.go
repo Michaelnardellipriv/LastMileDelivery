@@ -18,6 +18,8 @@ type archivioFinto struct {
 	creati     int
 	ricerca    Ricerca
 	indirizzo  Indirizzo
+	utenti     RicercaUtenti
+	attivo     *bool
 }
 
 func (a *archivioFinto) CercaClienti(_ context.Context, r Ricerca) ([]Cliente, int, error) {
@@ -50,6 +52,23 @@ func (a *archivioFinto) TrovaOCreaIndirizzo(_ context.Context, i Indirizzo) (Ind
 	a.indirizzo = i
 	i.ID = 5
 	return i, true, nil
+}
+
+func (a *archivioFinto) CercaUtenti(_ context.Context, r RicercaUtenti) ([]Utente, int, error) {
+	a.utenti = r
+	return []Utente{{ID: 3}}, 1, nil
+}
+
+func (a *archivioFinto) CreaUtente(_ context.Context, ruolo identita.Ruolo, c Cliente, pwdHash string) (Utente, error) {
+	a.hash = pwdHash
+	a.creati++
+	return Utente{ID: 20, Ruolo: ruolo, IDRuolo: 4, Nome: c.Nome, Cognome: c.Cognome, Email: c.Email,
+		Prefisso: c.Prefisso, NrTelefono: c.NrTelefono, Attivo: true}, nil
+}
+
+func (a *archivioFinto) ImpostaUtenteAttivo(_ context.Context, idUtente int32, attivo bool) (Utente, error) {
+	a.attivo = &attivo
+	return Utente{ID: idUtente, Ruolo: identita.Corriere, Attivo: attivo}, nil
 }
 
 type postinoFinto struct {

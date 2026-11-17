@@ -2,7 +2,9 @@ package identita
 
 import (
 	"context"
+	"errors"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -21,12 +23,17 @@ func NuovoRepository(db *pgxpool.Pool) *Repository {
 	return &Repository{db: db}
 }
 
-func (r *Repository) Esiste(ctx context.Context, ruolo Ruolo, id int32) (bool, error) {
+// Stato dice se l'utente con quel ruolo esiste e se l'amministratore non l'ha disattivato.
+func (r *Repository) Stato(ctx context.Context, ruolo Ruolo, id int32) (esiste, attivo bool, err error) {
 	tabella, ok := tabellaDelRuolo[ruolo]
 	if !ok {
-		return false, nil
+		return false, false, nil
 	}
-	var esiste bool
-	err := r.db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM `+tabella+` WHERE id = $1)`, id).Scan(&esiste)
-	return esiste, err
+	err = r.db.QueryRow(ctx, `
+		SELECT u.attivo FROM `+tabella+` AS t JOIN utenti AS u ON u.id = t.id_utente
+		WHERE t.id = $1`, id).Scan(&attivo)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, false, nil
+	}
+	return err == nil, attivo, err
 }
