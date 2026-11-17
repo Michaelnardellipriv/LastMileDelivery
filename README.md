@@ -47,7 +47,7 @@ Servono Docker e Go 1.26.
    cd backend && go run ./cmd/server
    ```
 
-   Il server ascolta su `http://127.0.0.1:8080`. Variabili facoltative: `LISTEN_ADDR`, `MAX_TENTATIVI` (3), `GIORNI_VISIBILITA_CLIENTE` (30).
+   Il server ascolta su `http://127.0.0.1:8080`. Variabile facoltativa: `LISTEN_ADDR`. Tentativi massimi, giorni di visibilità del cliente, intervallo della posizione e motivi li imposta l'amministratore con `/api/impostazioni` (vedi [docs/api.md](docs/api.md#amministrazione)).
 
 3. Prova:
 

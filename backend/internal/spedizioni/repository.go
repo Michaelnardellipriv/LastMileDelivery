@@ -58,11 +58,9 @@ func (r *Repository) Crea(ctx context.Context, idOperatore int32, n NuovaSpedizi
 		if _, err := tx.Exec(ctx, `SELECT set_config('app.id_operatore', $1, true)`, strconv.Itoa(int(idOperatore))); err != nil {
 			return Spedizione{}, err
 		}
-		var idAssegnazione int32
-		if err := tx.QueryRow(ctx,
-			`INSERT INTO assegnazioni (id_operatore, id_corriere) VALUES ($1, $2) RETURNING id`,
-			idOperatore, *n.IDCorriere).Scan(&idAssegnazione); err != nil {
-			return Spedizione{}, traduciErrore(err)
+		idAssegnazione, err := nuovaAssegnazione(ctx, tx, idOperatore, *n.IDCorriere)
+		if err != nil {
+			return Spedizione{}, err
 		}
 		if _, err := tx.Exec(ctx, `
 			UPDATE spedizioni SET stato = 'assegnata', id_assegnazione_corrente = $2 WHERE id = $1`,
@@ -139,13 +137,11 @@ func (r *Repository) Aggiorna(ctx context.Context, id int32, autore identita.Ric
 
 	var idAssegnazione *int32
 	if m.NuovoCorriere != nil {
-		err := tx.QueryRow(ctx,
-			`INSERT INTO assegnazioni (id_operatore, id_corriere) VALUES ($1, $2) RETURNING id`,
-			autore.ID, *m.NuovoCorriere,
-		).Scan(&idAssegnazione)
+		nuova, err := nuovaAssegnazione(ctx, tx, autore.ID, *m.NuovoCorriere)
 		if err != nil {
-			return Spedizione{}, false, traduciErrore(err)
+			return Spedizione{}, false, err
 		}
+		idAssegnazione = &nuova
 	}
 
 	d := m.Dati
@@ -183,6 +179,28 @@ func (r *Repository) Aggiorna(ctx context.Context, id int32, autore identita.Ric
 		return Spedizione{}, false, err
 	}
 	return aggiornata, true, nil
+}
+
+// nuovaAssegnazione assegna il corriere solo se è attivo: un corriere disattivato
+// dall'amministratore non riceve nuove spedizioni. Se il corriere non esiste
+// l'inserimento fallisce sulla chiave esterna ("corriere non trovato").
+func nuovaAssegnazione(ctx context.Context, tx pgx.Tx, idOperatore, idCorriere int32) (int32, error) {
+	var id int32
+	err := tx.QueryRow(ctx, `
+		INSERT INTO assegnazioni (id_operatore, id_corriere)
+		SELECT $1, $2
+		WHERE NOT EXISTS (
+			SELECT 1 FROM corrieri c JOIN utenti u ON u.id = c.id_utente
+			WHERE c.id = $2 AND NOT u.attivo
+		)
+		RETURNING id`, idOperatore, idCorriere).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, &errori.Conflitto{
+			Messaggio: "il corriere è disattivato: sceglierne un altro",
+			Dettagli:  []errori.ErroreCampo{{Campo: "id_corriere", Messaggio: "corriere disattivato"}},
+		}
+	}
+	return id, traduciErrore(err)
 }
 
 func autoreNota(autore identita.Richiedente) (idOperatore, idCorriere *int32) {

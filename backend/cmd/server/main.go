@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
 	"time"
 
@@ -34,13 +33,10 @@ func esegui() error {
 		return err
 	}
 	indirizzo := valore("LISTEN_ADDR", valore("HTTP_ADDR", "127.0.0.1:8080"))
-	maxTentativi, err := strconv.Atoi(valore("MAX_TENTATIVI", "3"))
-	if err != nil || maxTentativi < 1 {
-		return errors.New("MAX_TENTATIVI deve essere un numero intero positivo")
-	}
-	giorniCliente, err := strconv.Atoi(valore("GIORNI_VISIBILITA_CLIENTE", "30"))
-	if err != nil || giorniCliente < 1 {
-		return errors.New("GIORNI_VISIBILITA_CLIENTE deve essere un numero intero positivo")
+	for _, vecchia := range []string{"MAX_TENTATIVI", "GIORNI_VISIBILITA_CLIENTE"} {
+		if os.Getenv(vecchia) != "" {
+			log.Printf("ATTENZIONE: %s non si usa più: il valore lo imposta l'amministratore con PATCH /api/impostazioni", vecchia)
+		}
 	}
 	firmatario, err := firmatarioToken()
 	if err != nil {
@@ -62,13 +58,11 @@ func esegui() error {
 	}
 
 	cfg := server.Config{
-		MaxTentativi:            maxTentativi,
-		GiorniVisibilitaCliente: giorniCliente,
-		Firmatario:              firmatario,
-		Postino:                 postino(),
-		LinkRecuperoPassword:    valore("LINK_RECUPERO_PASSWORD", "http://localhost:8080/reimposta-password"),
-		AmmettiHeaderID:         ammettiHeaderID,
-		CORS:                    cors,
+		Firmatario:           firmatario,
+		Postino:              postino(),
+		LinkRecuperoPassword: valore("LINK_RECUPERO_PASSWORD", "http://localhost:8080/reimposta-password"),
+		AmmettiHeaderID:      ammettiHeaderID,
+		CORS:                 cors,
 	}
 	srv := &http.Server{
 		Addr:              indirizzo,

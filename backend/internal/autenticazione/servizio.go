@@ -16,6 +16,7 @@ const (
 	maxRecuperiPerOra     = 3
 	messaggioCredenziali  = "email o password non corrette"
 	messaggioSoloMittente = "accesso riservato ai clienti destinatari: non risulta nessuna spedizione destinata a te"
+	messaggioDisattivato  = "account disattivato: contattare l'amministratore"
 	oggettoMailRecupero   = "Recupero password LastMileDelivery"
 )
 
@@ -71,6 +72,10 @@ func (s *Servizio) Login(ctx context.Context, email, password, ruolo *string) (S
 	}
 	if !passwordCorretta(acc.PwdHash, *password) || len(acc.Ruoli) == 0 {
 		return Sessione{}, &errori.NonAutenticato{Messaggio: messaggioCredenziali}
+	}
+	// lo si dice solo dopo la password giusta, per non rivelare quali email sono registrate
+	if !acc.Attivo {
+		return Sessione{}, &errori.NonAutorizzato{Messaggio: messaggioDisattivato}
 	}
 
 	scelto, err := scegliRuolo(acc.Ruoli, ruolo)
@@ -155,6 +160,10 @@ func (s *Servizio) RichiediRecupero(ctx context.Context, email *string) error {
 	acc, trovato, err := s.archivio.PerEmail(ctx, strings.TrimSpace(*email))
 	if err != nil || !trovato {
 		return err
+	}
+	if !acc.Attivo {
+		log.Printf("recupero password: l'utente %d è disattivato, mail non inviata", acc.IDUtente)
+		return nil
 	}
 	recenti, err := s.archivio.RecuperiRecenti(ctx, acc.IDUtente, s.adesso().Add(-time.Hour))
 	if err != nil {

@@ -2,7 +2,7 @@ openapi: 3.0.3
 
 info:
   title: LastMileDelivery API
-  version: "0.28.0"
+  version: "0.29.0"
   description: |
     API per la gestione delle spedizioni di Veloce24.
 
@@ -28,13 +28,22 @@ info:
     `CORS_ORIGIN` (obbligatoria: origini del frontend web ammesse dal browser, separate da
     virgola, senza percorso né barra finale, es. `http://localhost:5173`; `*` = tutte, solo
     sviluppo; le richieste senza `Origin`, come quelle delle app mobile, non ne dipendono),
-    `LISTEN_ADDR` (predefinito `127.0.0.1:8080`), `MAX_TENTATIVI` (predefinito 3),
-    `GIORNI_VISIBILITA_CLIENTE` (predefinito 30), `JWT_SEGRETO` (almeno 32 caratteri; se
+    `LISTEN_ADDR` (predefinito `127.0.0.1:8080`), `JWT_SEGRETO` (almeno 32 caratteri; se
     manca se ne genera uno casuale a ogni avvio), `DURATA_TOKEN` (predefinito `8h`),
     `IDENTITA_HEADER_SVILUPPO` (`attiva` o `disattiva`), `LINK_RECUPERO_PASSWORD` (pagina a
     cui punta il link della mail), `SMTP_HOST`, `SMTP_PORT` (predefinito 587),
     `SMTP_UTENTE`, `SMTP_PASSWORD`, `SMTP_MITTENTE`. Senza `SMTP_HOST` le mail non vengono
     inviate ma scritte nel log del server.
+
+    **Parametri dell'amministratore.** Tentativi massimi di ritiro e di consegna, giorni di
+    visibilità del cliente, intervallo della posizione e motivi non sono variabili d'ambiente:
+    stanno nelle tabelle `impostazioni` e `motivi` e li modifica l'amministratore
+    (`/api/impostazioni`). Valgono dalla richiesta successiva. Le tabelle qui sotto usano i
+    valori predefiniti (3 tentativi).
+
+    **Utenti disattivati.** L'amministratore può disattivare corrieri e operatori
+    (`PATCH /api/utenti/{id}`): il login risponde 403, i token già emessi ricevono 403 a ogni
+    richiesta e a un corriere disattivato non si assegnano spedizioni.
 
     **Ciclo di vita** (stati del tipo `stato_spedizione` del database):
 
@@ -52,7 +61,7 @@ info:
     | in consegna | ritirata | solo operatore | `PATCH /stato` |
     | ritirata, in consegna | persa (`motivo` e `nota` obbligatori) | operatore | `PATCH /stato` |
 
-    Tentativi (`MAX_TENTATIVI`, predefinito 3):
+    Tentativi (`max_tentativi_ritiro` e `max_tentativi_consegna` di `/api/impostazioni`, predefinito 3):
     - ritiro: la spedizione resta `assegnata`; dopo il terzo il corriere non può più
       registrare tentativi né ritirarla, non si può riassegnare e la annulla l'operatore,
       senza dover ripetere `motivo` e `nota` (ci sono già quelli dei 3 tentativi);
@@ -62,8 +71,9 @@ info:
       passa da sola a `non consegnata`.
 
     Ogni tentativo (ritiro e consegna) richiede `motivo` e `nota`, e così i cambi di stato
-    in `annullata` e `persa`. La `nota` è testo libero; il `motivo` è un valore dell'elenco
-    unico `Motivo` (lo stesso di `GET /api/motivi`), non filtrato per stato o tipo di tentativo.
+    in `annullata` e `persa`. La `nota` è testo libero; il `motivo` è uno dei motivi attivi
+    di `GET /api/motivi` (elenco unico gestito dall'amministratore), non filtrato per stato o
+    tipo di tentativo.
 
     Metodi: `POST` per gli endpoint che creano qualcosa (spedizione, assegnazione,
     tentativo, nota), `PATCH` per quelli che modificano la spedizione (dati e stato).
@@ -98,6 +108,8 @@ tags:
   - name: spedizioni
   - name: posizioni
     description: Posizione simulata dei corrieri (RF16) e intervallo di invio
+  - name: amministrazione
+    description: Parametri della gestione delle spedizioni, motivi e utenti (corrieri e operatori), solo per l'amministratore
   - name: anagrafiche
     description: |
       Clienti e indirizzi, per creare una spedizione dall'interfaccia: l'operatore cerca o
@@ -119,6 +131,7 @@ paths:
         cliente che è solo mittente, o che non ha ancora spedizioni in arrivo, riceve 403
         anche con le credenziali giuste.
         Se l'utente ha più ruoli (per esempio corriere e cliente) va indicato `ruolo`.
+        Un utente disattivato dall'amministratore riceve 403, ma solo se la password è giusta.
       operationId: login
       security: []
       requestBody:
@@ -154,8 +167,9 @@ paths:
               example: { errore: email o password non corrette }
         '403':
           description: |
-            `ruolo` indicato che l'utente non ha, oppure cliente che non è destinatario di
-            nessuna spedizione (solo mittente o senza spedizioni in arrivo)
+            `ruolo` indicato che l'utente non ha, cliente che non è destinatario di
+            nessuna spedizione (solo mittente o senza spedizioni in arrivo), oppure utente
+            disattivato dall'amministratore
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Errore' }
@@ -265,7 +279,7 @@ paths:
         | :-- | :-- | :-- | :-- |
         | operatore, amministratore | tutte, in tutti gli stati | tutte | sì |
         | corriere | solo quelle assegnate a lui, finché non sono concluse (`assegnata`, `ritirata`, `in consegna`) | tutte | no |
-        | cliente | solo quelle di cui è destinatario: quelle in corso sempre, quelle chiuse (consegnata, non consegnata, persa, annullata) fino a `GIORNI_VISIBILITA_CLIENTE` giorni dalla chiusura (predefinito 30) | solo il `motivo` (e la data) delle note pubbliche | no |
+        | cliente | solo quelle di cui è destinatario: quelle in corso sempre, quelle chiuse (consegnata, non consegnata, persa, annullata) fino a `giorni_visibilita_cliente` giorni dalla chiusura (impostati dall'amministratore, predefinito 30) | solo il `motivo` (e la data) delle note pubbliche | no |
 
         La data di chiusura (`conclusa_il`) è quella in cui la spedizione è entrata nello
         stato finale, presa dallo storico.
@@ -420,7 +434,7 @@ paths:
         | :-- | :-- |
         | operatore, amministratore | qualsiasi spedizione, con corriere, note interne e autori delle note |
         | corriere | solo le spedizioni assegnate a lui in `assegnata`, `ritirata`, `in consegna`, con note interne |
-        | cliente | solo quelle di cui è destinatario, fino a `GIORNI_VISIBILITA_CLIENTE` giorni dalla chiusura; senza corriere; delle note vede solo il `motivo` di quelle pubbliche (tentativi, annullata, persa) |
+        | cliente | solo quelle di cui è destinatario, fino a `giorni_visibilita_cliente` giorni dalla chiusura (impostati dall'amministratore); senza corriere; delle note vede solo il `motivo` di quelle pubbliche (tentativi, annullata, persa) |
 
         Una spedizione che il richiedente non può vedere risponde 404, come se non esistesse.
       operationId: dettaglioSpedizione
@@ -810,10 +824,10 @@ paths:
       tags: [spedizioni]
       summary: Motivi pubblici ammessi
       description: |
-        Elenco unico dei motivi che il cliente vede: i client lo mostrano in un menu a tendina.
+        Elenco unico dei motivi attivi che il cliente vede: i client lo mostrano in un menu a tendina.
         Sono gli unici valori accettati nel campo `motivo` di `POST /api/spedizioni/{id}/tentativi`
         e `PATCH /api/spedizioni/{id}/stato`; l'elenco non dipende dallo stato né dal tipo di
-        tentativo.
+        tentativo. Lo gestisce l'amministratore con `/api/impostazioni/motivi`.
       operationId: elencoMotivi
       security:
         - operatore: []
@@ -914,8 +928,9 @@ paths:
       tags: [anagrafiche]
       summary: Elenco dei corrieri
       description: |
-        Operatori e amministratori: tutti i corrieri, anche quelli senza spedizioni, per
+        Operatori e amministratori: i corrieri attivi, anche quelli senza spedizioni, per
         scegliere a chi assegnare una spedizione o per il filtro `id_corriere` dell'elenco.
+        I corrieri disattivati non compaiono: l'amministratore li trova con `GET /api/utenti`.
         `q` cerca, senza distinguere maiuscole e minuscole, in nome e cognome, email e
         telefono; vuoto = tutti. Ordinati per cognome e nome.
       operationId: elencaCorrieri
@@ -1141,6 +1156,285 @@ paths:
               schema: { $ref: '#/components/schemas/Errore' }
         '401': { $ref: '#/components/responses/NonIdentificato' }
         '403': { $ref: '#/components/responses/NonAutorizzato' }
+        '415': { $ref: '#/components/responses/NonJSON' }
+        '500': { $ref: '#/components/responses/ErroreInterno' }
+        '503': { $ref: '#/components/responses/NonDisponibile' }
+
+  /api/impostazioni:
+    get:
+      tags: [amministrazione]
+      summary: Parametri della gestione delle spedizioni
+      operationId: leggiImpostazioni
+      security:
+        - amministratore: []
+      responses:
+        '200':
+          description: Impostazioni attuali
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Impostazioni' }
+        '401': { $ref: '#/components/responses/NonIdentificato' }
+        '403': { $ref: '#/components/responses/NonAutorizzato' }
+        '500': { $ref: '#/components/responses/ErroreInterno' }
+        '503': { $ref: '#/components/responses/NonDisponibile' }
+    patch:
+      tags: [amministrazione]
+      summary: Modifica uno o più parametri
+      description: |
+        Solo i campi presenti cambiano; la modifica registra l'amministratore e l'ora. I nuovi
+        valori valgono dalla richiesta successiva, anche per le spedizioni già aperte: per
+        esempio, abbassando `max_tentativi_consegna` una spedizione arriva prima a `non consegnata`.
+        `intervallo_posizione_sec` è lo stesso valore di `/api/impostazioni/intervallo-posizione`.
+      operationId: modificaImpostazioni
+      security:
+        - amministratore: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ModificaImpostazioni' }
+            example: { max_tentativi_consegna: 2, giorni_visibilita_cliente: 60 }
+      responses:
+        '200':
+          description: Impostazioni aggiornate
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Impostazioni' }
+        '400':
+          description: Corpo senza campi, campo sconosciuto o valore fuori limite
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+        '401': { $ref: '#/components/responses/NonIdentificato' }
+        '403': { $ref: '#/components/responses/NonAutorizzato' }
+        '415': { $ref: '#/components/responses/NonJSON' }
+        '500': { $ref: '#/components/responses/ErroreInterno' }
+        '503': { $ref: '#/components/responses/NonDisponibile' }
+
+  /api/impostazioni/motivi:
+    get:
+      tags: [amministrazione]
+      summary: Tutti i motivi, anche quelli disattivati
+      operationId: elencoMotiviAmministratore
+      security:
+        - amministratore: []
+      responses:
+        '200':
+          description: Motivi in ordine di creazione
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ListaMotivi' }
+        '401': { $ref: '#/components/responses/NonIdentificato' }
+        '403': { $ref: '#/components/responses/NonAutorizzato' }
+        '500': { $ref: '#/components/responses/ErroreInterno' }
+        '503': { $ref: '#/components/responses/NonDisponibile' }
+    post:
+      tags: [amministrazione]
+      summary: Aggiunge un motivo
+      description: |
+        Il motivo nasce attivo e compare subito in `GET /api/motivi`. Gli spazi in più nella
+        descrizione vengono tolti. Una descrizione già presente (maiuscole e minuscole non contano)
+        dà 409: se quel motivo è disattivato, si riattiva con `PATCH /api/impostazioni/motivi/{id}`.
+      operationId: creaMotivo
+      security:
+        - amministratore: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NuovoMotivo' }
+            example: { descrizione: cliente in ferie }
+      responses:
+        '201':
+          description: Motivo creato
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MotivoGestito' }
+        '400':
+          description: Descrizione mancante, vuota o più lunga di 100 caratteri
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+        '401': { $ref: '#/components/responses/NonIdentificato' }
+        '403': { $ref: '#/components/responses/NonAutorizzato' }
+        '409':
+          description: Esiste già un motivo con questa descrizione
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+        '415': { $ref: '#/components/responses/NonJSON' }
+        '500': { $ref: '#/components/responses/ErroreInterno' }
+        '503': { $ref: '#/components/responses/NonDisponibile' }
+
+  /api/impostazioni/motivi/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: integer, format: int32, minimum: 1 } }
+    patch:
+      tags: [amministrazione]
+      summary: Attiva o disattiva un motivo
+      description: |
+        Un motivo non si cancella né si rinomina: si disattiva. Da quel momento non è più
+        accettato nei tentativi e nei cambi di stato; le note che lo usano restano come sono.
+        Deve restare almeno un motivo attivo.
+      operationId: modificaMotivo
+      security:
+        - amministratore: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StatoAttivo' }
+            example: { attivo: false }
+      responses:
+        '200':
+          description: Motivo aggiornato
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MotivoGestito' }
+        '400':
+          description: '`attivo` mancante o id non valido'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+        '401': { $ref: '#/components/responses/NonIdentificato' }
+        '403': { $ref: '#/components/responses/NonAutorizzato' }
+        '404':
+          description: Motivo inesistente
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+        '409':
+          description: È l'ultimo motivo attivo
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+        '415': { $ref: '#/components/responses/NonJSON' }
+        '500': { $ref: '#/components/responses/ErroreInterno' }
+        '503': { $ref: '#/components/responses/NonDisponibile' }
+
+  /api/utenti:
+    get:
+      tags: [amministrazione]
+      summary: Corrieri e operatori
+      description: |
+        Attivi e disattivati. `q` cerca come in `GET /api/clienti`; `ruolo` e `attivo` filtrano.
+        Ordinati per cognome e nome.
+      operationId: cercaUtenti
+      security:
+        - amministratore: []
+      parameters:
+        - { name: q, in: query, required: false, schema: { type: string, maxLength: 100 } }
+        - { name: ruolo, in: query, required: false, schema: { type: string, enum: [corriere, operatore] } }
+        - { name: attivo, in: query, required: false, schema: { type: boolean } }
+        - { name: pagina, in: query, required: false, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: per_pagina, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        '200':
+          description: Utenti trovati
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ListaUtenti' }
+        '400':
+          description: Parametri non validi
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+        '401': { $ref: '#/components/responses/NonIdentificato' }
+        '403': { $ref: '#/components/responses/NonAutorizzato' }
+        '500': { $ref: '#/components/responses/ErroreInterno' }
+        '503': { $ref: '#/components/responses/NonDisponibile' }
+    post:
+      tags: [amministrazione]
+      summary: Crea un corriere o un operatore
+      description: |
+        Crea l'utente con la `password` scelta dall'amministratore (salvata come hash) e gli
+        invia una mail con email e password; `mail_inviata` dice se la mail è partita. Per i
+        dati valgono le regole di `POST /api/clienti`, compresa l'email unica tra tutti i ruoli.
+        I clienti destinatari li crea l'operatore con `POST /api/clienti`.
+      operationId: creaUtente
+      security:
+        - amministratore: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NuovoUtente' }
+            example: { ruolo: corriere, nome: Carlo, cognome: Rossi, prefisso: '+39', nr_telefono: '3331234567', email: carlo.rossi@veloce24.it, password: PasswordIniziale1 }
+      responses:
+        '201':
+          description: Utente creato, attivo
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EsitoUtente' }
+        '400':
+          description: Campi mancanti o non validi, `ruolo` diverso da corriere e operatore
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+        '401': { $ref: '#/components/responses/NonIdentificato' }
+        '403': { $ref: '#/components/responses/NonAutorizzato' }
+        '409':
+          description: Email già usata da un altro utente (con qualsiasi ruolo), oppure numero di telefono già usato
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+        '415': { $ref: '#/components/responses/NonJSON' }
+        '500': { $ref: '#/components/responses/ErroreInterno' }
+        '503': { $ref: '#/components/responses/NonDisponibile' }
+
+  /api/utenti/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Id dell'utente (campo `id` di `Utente`, non `id_ruolo`)
+        schema: { type: integer, format: int32, minimum: 1 }
+    patch:
+      tags: [amministrazione]
+      summary: Abilita o disattiva un corriere o un operatore
+      description: |
+        Un utente disattivato non può fare il login (403), i token che aveva ricevono 403 a
+        ogni richiesta e non riceve mail di recupero password. Un corriere disattivato non
+        compare in `GET /api/corrieri` e non gli si assegnano spedizioni (409); quelle che
+        aveva restano sue finché l'operatore non le riassegna. Con `attivo: true` torna
+        tutto come prima.
+      operationId: modificaUtente
+      security:
+        - amministratore: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StatoAttivo' }
+            example: { attivo: false }
+      responses:
+        '200':
+          description: Utente aggiornato
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Utente' }
+        '400':
+          description: '`attivo` mancante o id non valido'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+        '401': { $ref: '#/components/responses/NonIdentificato' }
+        '403': { $ref: '#/components/responses/NonAutorizzato' }
+        '404':
+          description: Nessun corriere o operatore con questo id utente
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
         '415': { $ref: '#/components/responses/NonJSON' }
         '500': { $ref: '#/components/responses/ErroreInterno' }
         '503': { $ref: '#/components/responses/NonDisponibile' }
@@ -1378,23 +1672,15 @@ components:
 
     Motivo:
       type: string
-      description: Elenco unico dei motivi pubblici, valido per tentativi e cambi di stato
-      enum:
-        - mittente assente
-        - pacco non pronto
-        - indirizzo di ritiro errato
-        - destinatario assente
-        - indirizzo errato
-        - rifiutata dal destinatario
-        - accesso impossibile
-        - richiesta del mittente
-        - richiesta del destinatario
-        - dati della spedizione errati
-        - ritiro non riuscito
-        - smarrita in deposito
-        - smarrita durante il trasporto
-        - furto
-        - altro
+      maxLength: 100
+      description: |
+        Uno dei motivi attivi di `GET /api/motivi`, valido per tentativi e cambi di stato.
+        L'elenco lo gestisce l'amministratore; all'inizio contiene: mittente assente, pacco non
+        pronto, indirizzo di ritiro errato, destinatario assente, indirizzo errato, rifiutata dal
+        destinatario, accesso impossibile, richiesta del mittente, richiesta del destinatario,
+        dati della spedizione errati, ritiro non riuscito, smarrita in deposito, smarrita durante
+        il trasporto, furto, altro.
+      example: destinatario assente
 
     Spedizione:
       type: object
@@ -1842,6 +2128,107 @@ components:
       required: [messaggio]
       properties:
         messaggio: { type: string }
+
+    Impostazioni:
+      type: object
+      required: [giorni_visibilita_cliente, max_tentativi_ritiro, max_tentativi_consegna, intervallo_posizione_sec, modificate_il, id_amministratore_modifica]
+      properties:
+        giorni_visibilita_cliente: { type: integer, minimum: 1, maximum: 365, example: 30, description: Per quanti giorni dalla chiusura il cliente destinatario vede una spedizione }
+        max_tentativi_ritiro: { type: integer, minimum: 1, maximum: 10, example: 3, description: Ritiri falliti dopo i quali la spedizione va annullata }
+        max_tentativi_consegna: { type: integer, minimum: 1, maximum: 10, example: 3, description: Consegne fallite dopo le quali la spedizione diventa non consegnata }
+        intervallo_posizione_sec: { type: integer, minimum: 5, maximum: 3600, example: 30, description: Ogni quanti secondi il corriere invia la posizione e la mappa degli operatori si aggiorna }
+        modificate_il: { type: string, format: date-time }
+        id_amministratore_modifica: { type: integer, format: int32, nullable: true, description: Ultimo amministratore che le ha modificate }
+
+    ModificaImpostazioni:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        giorni_visibilita_cliente: { type: integer, minimum: 1, maximum: 365 }
+        max_tentativi_ritiro: { type: integer, minimum: 1, maximum: 10 }
+        max_tentativi_consegna: { type: integer, minimum: 1, maximum: 10 }
+        intervallo_posizione_sec: { type: integer, minimum: 5, maximum: 3600 }
+
+    NuovoMotivo:
+      type: object
+      additionalProperties: false
+      required: [descrizione]
+      properties:
+        descrizione: { type: string, minLength: 1, maxLength: 100 }
+
+    MotivoGestito:
+      type: object
+      required: [id, descrizione, attivo, creato_il]
+      properties:
+        id: { type: integer, format: int32 }
+        descrizione: { type: string }
+        attivo: { type: boolean, description: Solo i motivi attivi sono in GET /api/motivi e sono accettati }
+        creato_il: { type: string, format: date-time }
+
+    ListaMotivi:
+      type: object
+      required: [dati]
+      properties:
+        dati:
+          type: array
+          items: { $ref: '#/components/schemas/MotivoGestito' }
+
+    StatoAttivo:
+      type: object
+      additionalProperties: false
+      required: [attivo]
+      properties:
+        attivo: { type: boolean }
+
+    NuovoUtente:
+      type: object
+      additionalProperties: false
+      required: [ruolo, nome, cognome, prefisso, nr_telefono, email, password]
+      properties:
+        ruolo: { type: string, enum: [corriere, operatore] }
+        nome: { type: string, maxLength: 100 }
+        cognome: { type: string, maxLength: 100 }
+        prefisso: { type: string, pattern: '^\+[0-9]{1,4}$', example: '+39' }
+        nr_telefono: { type: string, pattern: '^[0-9]{4,15}$' }
+        email: { type: string, format: email, maxLength: 254 }
+        password:
+          type: string
+          minLength: 8
+          description: Scelta dall'amministratore, viene inviata per mail al nuovo utente
+
+    Utente:
+      type: object
+      required: [id, ruolo, id_ruolo, nome, cognome, email, prefisso, nr_telefono, attivo]
+      properties:
+        id: { type: integer, format: int32, description: "Id nella tabella utenti, da usare in /api/utenti/{id}" }
+        ruolo: { type: string, enum: [corriere, operatore] }
+        id_ruolo: { type: integer, format: int32, description: 'Id nella tabella corrieri o operatori_logistici, quello usato nelle spedizioni (es. id_corriere)' }
+        nome: { type: string }
+        cognome: { type: string }
+        email: { type: string }
+        prefisso: { type: string }
+        nr_telefono: { type: string }
+        attivo: { type: boolean }
+
+    EsitoUtente:
+      type: object
+      required: [utente, mail_inviata]
+      properties:
+        utente: { $ref: '#/components/schemas/Utente' }
+        mail_inviata: { type: boolean, description: true se la mail con le credenziali è partita }
+
+    ListaUtenti:
+      type: object
+      required: [dati, pagina, per_pagina, totale_elementi, totale_pagine]
+      properties:
+        dati:
+          type: array
+          items: { $ref: '#/components/schemas/Utente' }
+        pagina: { type: integer }
+        per_pagina: { type: integer }
+        totale_elementi: { type: integer, minimum: 0, description: Elementi che rispettano i filtri, su tutte le pagine }
+        totale_pagine: { type: integer, minimum: 0 }
 
     Errore:
       type: object
