@@ -80,9 +80,19 @@ type indirizzoDTO struct {
 }
 
 type pagina[T any] struct {
-	Dati      []T `json:"dati"`
-	Pagina    int `json:"pagina"`
-	PerPagina int `json:"per_pagina"`
+	Dati           []T `json:"dati"`
+	Pagina         int `json:"pagina"`
+	PerPagina      int `json:"per_pagina"`
+	TotaleElementi int `json:"totale_elementi"`
+	TotalePagine   int `json:"totale_pagine"`
+}
+
+func nuovaPagina[T any](n int, ric Ricerca, totale int) pagina[T] {
+	pagine := 0
+	if totale > 0 && ric.PerPagina > 0 {
+		pagine = (totale + ric.PerPagina - 1) / ric.PerPagina
+	}
+	return pagina[T]{Dati: make([]T, n), Pagina: ric.Pagina, PerPagina: ric.PerPagina, TotaleElementi: totale, TotalePagine: pagine}
 }
 
 func versoClienteDTO(c Cliente) clienteDTO {
@@ -123,12 +133,12 @@ func (h *Handler) cercaClienti(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	clienti, err := h.servizio.CercaClienti(r.Context(), identita.DalContesto(r.Context()), ric)
+	clienti, totale, err := h.servizio.CercaClienti(r.Context(), identita.DalContesto(r.Context()), ric)
 	if err != nil {
 		httpx.RispondiErrore(w, r, err)
 		return
 	}
-	risposta := pagina[clienteDTO]{Dati: make([]clienteDTO, len(clienti)), Pagina: ric.Pagina, PerPagina: ric.PerPagina}
+	risposta := nuovaPagina[clienteDTO](len(clienti), ric, totale)
 	for i, c := range clienti {
 		risposta.Dati[i] = versoClienteDTO(c)
 	}
@@ -158,12 +168,12 @@ func (h *Handler) cercaCorrieri(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	corrieri, err := h.servizio.CercaCorrieri(r.Context(), identita.DalContesto(r.Context()), ric)
+	corrieri, totale, err := h.servizio.CercaCorrieri(r.Context(), identita.DalContesto(r.Context()), ric)
 	if err != nil {
 		httpx.RispondiErrore(w, r, err)
 		return
 	}
-	risposta := pagina[corriereDTO]{Dati: make([]corriereDTO, len(corrieri)), Pagina: ric.Pagina, PerPagina: ric.PerPagina}
+	risposta := nuovaPagina[corriereDTO](len(corrieri), ric, totale)
 	for i, c := range corrieri {
 		risposta.Dati[i] = corriereDTO{ID: c.ID, IDUtente: c.IDUtente, Nome: c.Nome, Cognome: c.Cognome,
 			Email: c.Email, Prefisso: c.Prefisso, NrTelefono: c.NrTelefono}
@@ -176,12 +186,12 @@ func (h *Handler) cercaIndirizzi(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	indirizzi, err := h.servizio.CercaIndirizzi(r.Context(), identita.DalContesto(r.Context()), ric)
+	indirizzi, totale, err := h.servizio.CercaIndirizzi(r.Context(), identita.DalContesto(r.Context()), ric)
 	if err != nil {
 		httpx.RispondiErrore(w, r, err)
 		return
 	}
-	risposta := pagina[indirizzoDTO]{Dati: make([]indirizzoDTO, len(indirizzi)), Pagina: ric.Pagina, PerPagina: ric.PerPagina}
+	risposta := nuovaPagina[indirizzoDTO](len(indirizzi), ric, totale)
 	for i, ind := range indirizzi {
 		risposta.Dati[i] = versoIndirizzoDTO(ind)
 	}

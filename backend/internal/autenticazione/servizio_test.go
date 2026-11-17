@@ -12,15 +12,20 @@ import (
 )
 
 type archivioFinto struct {
-	account   map[string]Account
-	recuperi  map[string]int32
-	recenti   int
-	nuovoHash string
+	destinatari map[int32]bool // clienti con almeno una spedizione in arrivo
+	account     map[string]Account
+	recuperi    map[string]int32
+	recenti     int
+	nuovoHash   string
 }
 
 func (a *archivioFinto) PerEmail(_ context.Context, email string) (Account, bool, error) {
 	acc, ok := a.account[strings.ToLower(email)]
 	return acc, ok, nil
+}
+
+func (a *archivioFinto) DestinatarioDiSpedizioni(_ context.Context, idCliente int32) (bool, error) {
+	return a.destinatari[idCliente], nil
 }
 
 func (a *archivioFinto) PerRuolo(_ context.Context, r identita.Richiedente) (Account, error) {
@@ -111,8 +116,10 @@ func servizioDiProva(t *testing.T) (*Servizio, *archivioFinto, *postinoFinto) {
 			"destinatario@test.it": {IDUtente: 11, Nome: "Dora", Email: "destinatario@test.it", PwdHash: hash, Ruoli: []identita.Richiedente{cliente}},
 			"doppio@test.it":       {IDUtente: 12, Nome: "Carlo", Email: "doppio@test.it", PwdHash: hash, Ruoli: []identita.Richiedente{corriere, {Ruolo: identita.Cliente, ID: 8}}},
 			"bloccato@test.it":     {IDUtente: 13, Nome: "Bloccato", Email: "bloccato@test.it", PwdHash: "!", Ruoli: []identita.Richiedente{{Ruolo: identita.Cliente, ID: 9}}},
+			"mittente@test.it":     {IDUtente: 14, Nome: "Marco", Email: "mittente@test.it", PwdHash: hash, Ruoli: []identita.Richiedente{{Ruolo: identita.Cliente, ID: 20}}},
 		},
-		recuperi: map[string]int32{},
+		destinatari: map[int32]bool{cliente.ID: true},
+		recuperi:    map[string]int32{},
 	}
 	postino := &postinoFinto{}
 	s := NuovoServizio(a, firmatarioDiProva(time.Now()), postino, "https://app.test/reimposta")
@@ -149,6 +156,25 @@ func TestLogin(t *testing.T) {
 		if _, err := s.Login(ctx, c[0], c[1], nil); tipoErrore(err) != "400" {
 			t.Errorf("%s: atteso 400, ottenuto %v", nome, err)
 		}
+	}
+}
+
+func TestLoginSoloClientiDestinatari(t *testing.T) {
+	ctx := context.Background()
+	s, a, _ := servizioDiProva(t)
+
+	// credenziali giuste, ma nessuna spedizione in arrivo: è solo un mittente
+	if _, err := s.Login(ctx, p("mittente@test.it"), p("Password123"), nil); tipoErrore(err) != "403" {
+		t.Fatalf("il cliente solo mittente non entra: atteso 403, ottenuto %v", err)
+	}
+	// la password sbagliata resta 401: non si rivela nulla a chi non conosce le credenziali
+	if _, err := s.Login(ctx, p("mittente@test.it"), p("Sbagliata1"), nil); tipoErrore(err) != "401" {
+		t.Fatalf("password sbagliata: atteso 401, ottenuto %v", err)
+	}
+	// dalla prima spedizione in arrivo il cliente può entrare
+	a.destinatari[20] = true
+	if sess, err := s.Login(ctx, p("mittente@test.it"), p("Password123"), nil); err != nil || sess.Ruolo.Ruolo != identita.Cliente {
+		t.Fatalf("il cliente diventato destinatario entra: %+v %v", sess, err)
 	}
 }
 

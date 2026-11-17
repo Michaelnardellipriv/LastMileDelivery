@@ -50,7 +50,8 @@ func TestCreazioneSpedizioneDaGUI(t *testing.T) {
 		if cliente["email"] != email || cliente["nome"] != "Giulia" {
 			t.Fatalf("dati del cliente: %s", r.grezzo)
 		}
-		f.login(t, map[string]any{"email": email, "password": "PasswordGiulia1"}, 200)
+		// la password funziona, ma finché non ha una spedizione in arrivo il cliente non entra
+		f.login(t, map[string]any{"email": email, "password": "PasswordGiulia1"}, 403)
 
 		r = f.chiama(t, http.MethodPost, "/api/clienti", nuovoCliente(strings.ToUpper(email), "PasswordGiulia1"), op)
 		if r.stato != http.StatusConflict || !contiene(campiInErrore(r), "email") {
@@ -201,6 +202,8 @@ func TestCreazioneSpedizioneDaGUI(t *testing.T) {
 			int(d["mittente"].(map[string]any)["id"].(float64)) != idMittente {
 			t.Fatalf("il dettaglio mostra i dati inseriti: %v", d)
 		}
+		// ora Giulia è destinataria di una spedizione: può fare il login
+		f.login(t, map[string]any{"email": "giulia." + f.suffisso + "@test.it", "password": "PasswordGiulia1"}, 200)
 	})
 
 	t.Run("spedizione_con_corriere_gia_assegnato", func(t *testing.T) {

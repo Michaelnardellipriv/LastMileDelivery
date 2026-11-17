@@ -5,6 +5,7 @@ import 'api.dart';
 String due(int n) => n.toString().padLeft(2, '0');
 String fmtData(DateTime d) => '${due(d.day)}/${due(d.month)}/${d.year}';
 String fmtDataOra(DateTime d) => '${fmtData(d)} ${due(d.hour)}:${due(d.minute)}';
+String fmtOra(DateTime d) => '${due(d.hour)}:${due(d.minute)}:${due(d.second)}';
 
 Color coloreStato(String s) => switch (s) {
       'consegnata' => Colors.green,
@@ -94,6 +95,58 @@ class Riga extends StatelessWidget {
         ]),
       );
 }
+
+/// Barra delle pagine: "Pagina 2 di 14 · 21–40 di 271", con prima, precedente,
+/// successiva e ultima. I pulsanti si spengono ai bordi: niente pagine vuote oltre la fine.
+class BarraPagine extends StatelessWidget {
+  final Pagina<Object?> pagina;
+  final bool attesa;
+  final void Function(int pagina) vaiA;
+  const BarraPagine({super.key, required this.pagina, required this.attesa, required this.vaiA});
+
+  @override
+  Widget build(BuildContext context) {
+    final p = pagina;
+    final stile = Theme.of(context).textTheme.bodySmall;
+    final elementi = p.totaleElementi == 0
+        ? 'nessun elemento'
+        : '${p.da}–${p.a} di ${p.totaleElementi} ${p.totaleElementi == 1 ? 'elemento' : 'elementi'}';
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+        IconButton(
+          tooltip: 'Prima pagina',
+          onPressed: attesa || !p.haPrecedente ? null : () => vaiA(1),
+          icon: const Icon(Icons.first_page),
+        ),
+        IconButton(
+          tooltip: 'Pagina precedente',
+          onPressed: attesa || !p.haPrecedente ? null : () => vaiA(p.pagina - 1),
+          icon: const Icon(Icons.chevron_left),
+        ),
+        Flexible(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text(p.totalePagine == 0 ? 'Nessuna pagina' : 'Pagina ${p.pagina} di ${p.totalePagine}', textAlign: TextAlign.center),
+            Text(elementi, style: stile, textAlign: TextAlign.center),
+          ]),
+        ),
+        IconButton(
+          tooltip: 'Pagina successiva',
+          onPressed: attesa || !p.haSuccessiva ? null : () => vaiA(p.pagina + 1),
+          icon: const Icon(Icons.chevron_right),
+        ),
+        IconButton(
+          tooltip: 'Ultima pagina',
+          onPressed: attesa || !p.haSuccessiva ? null : () => vaiA(p.totalePagine),
+          icon: const Icon(Icons.last_page),
+        ),
+      ]),
+    );
+  }
+}
+
+/// Persona con l'id, per chi ha fatto un'azione: "Oscar Operatore (id 1)".
+String nomeConId(Persona? p) => p == null ? '—' : '${p.nomeCompleto}${p.id == null ? '' : ' (id ${p.id})'}';
 
 String descriviPersona(Persona? p) {
   if (p == null) return '—';
