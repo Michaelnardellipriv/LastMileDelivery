@@ -326,13 +326,34 @@ func (r *Repository) Dettaglio(ctx context.Context, v Visibilita, id int32) (Det
 	}, nil
 }
 
-func (r *Repository) elenca(ctx context.Context, v Visibilita, f FiltroElenco, id *int32) ([]VoceElenco, error) {
-	var args []any
-	arg := func(x any) string {
-		args = append(args, x)
-		return "$" + strconv.Itoa(len(args))
-	}
+// parametri raccoglie gli argomenti di una query costruita a pezzi ($1, $2, ...).
+type parametri struct{ args []any }
 
+func (p *parametri) arg(x any) string {
+	p.args = append(p.args, x)
+	return "$" + strconv.Itoa(len(p.args))
+}
+
+// Join che servono alle condizioni dell'elenco (corriere assegnato, data di chiusura).
+const joinCondizioniElenco = `
+		LEFT JOIN assegnazioni a ON a.id = s.id_assegnazione_corrente
+		LEFT JOIN LATERAL (
+		    SELECT max(c.modificato_il) AS conclusa_il
+		    FROM cambiamenti_spedizioni c
+		    WHERE c.id_spedizione = s.id AND c.valore_nuovo ->> 'stato' = s.stato::text
+		) ch ON s.stato IN ('consegnata', 'non consegnata', 'persa', 'annullata')`
+
+// Conta le spedizioni visibili che rispettano i filtri, su tutte le pagine.
+func (r *Repository) Conta(ctx context.Context, v Visibilita, f FiltroElenco) (int, error) {
+	p := &parametri{}
+	dove := condizioniElenco(p, v, f, nil)
+	var n int
+	err := r.db.QueryRow(ctx, `SELECT count(*) FROM spedizioni s`+joinCondizioniElenco+` WHERE `+dove, p.args...).Scan(&n)
+	return n, err
+}
+
+func condizioniElenco(p *parametri, v Visibilita, f FiltroElenco, id *int32) string {
+	arg := p.arg
 	condizioni := []string{"TRUE"}
 	if id != nil {
 		condizioni = append(condizioni, "s.id = "+arg(*id))
@@ -368,6 +389,13 @@ func (r *Repository) elenca(ctx context.Context, v Visibilita, f FiltroElenco, i
 	if f.CodOrdine != nil {
 		condizioni = append(condizioni, "position(lower("+arg(*f.CodOrdine)+") in lower(s.cod_ordine)) > 0")
 	}
+	return strings.Join(condizioni, " AND ")
+}
+
+func (r *Repository) elenca(ctx context.Context, v Visibilita, f FiltroElenco, id *int32) ([]VoceElenco, error) {
+	p := &parametri{}
+	arg := p.arg
+	dove := condizioniElenco(p, v, f, id)
 	filtroNote := ""
 	if v.SoloNotePubbliche {
 		filtroNote = "AND NOT n.is_interna"
@@ -381,7 +409,8 @@ func (r *Repository) elenca(ctx context.Context, v Visibilita, f FiltroElenco, i
 		       isp.via, isp.civico, cisp.nome, cisp.cod_postale, cisp.regione, cisp.nazione,
 		       um.nome, um.cognome, um.email, um.prefisso || ' ' || um.nr_telefono,
 		       ud.nome, ud.cognome, ud.email, ud.prefisso || ' ' || ud.nr_telefono,
-		       a.id_corriere, uc.nome, uc.cognome, uc.prefisso || ' ' || uc.nr_telefono,
+		       a.id_corriere, uc.nome, uc.cognome, uc.email, uc.prefisso || ' ' || uc.nr_telefono,
+		       a.id_operatore, ua.nome, ua.cognome, ua.email, ua.prefisso || ' ' || ua.nr_telefono,
 		       ch.conclusa_il,
 		       COALESCE((
 		           SELECT json_agg(json_build_object(
@@ -404,9 +433,11 @@ func (r *Repository) elenca(ctx context.Context, v Visibilita, f FiltroElenco, i
 		JOIN utenti um     ON um.id  = cm.id_utente
 		JOIN clienti cd    ON cd.id  = s.id_cliente_destinatario
 		JOIN utenti ud     ON ud.id  = cd.id_utente
-		LEFT JOIN assegnazioni a ON a.id = s.id_assegnazione_corrente
+		%s
 		LEFT JOIN corrieri co    ON co.id = a.id_corriere
 		LEFT JOIN utenti uc      ON uc.id = co.id_utente
+		LEFT JOIN operatori_logistici oa ON oa.id = a.id_operatore
+		LEFT JOIN utenti ua              ON ua.id = oa.id_utente
 		LEFT JOIN LATERAL (
 		    SELECT ci.nome, ci.cod_postale, re.nome AS regione, na.nome AS nazione
 		    FROM indirizzi_in_citta ic
@@ -425,17 +456,12 @@ func (r *Repository) elenca(ctx context.Context, v Visibilita, f FiltroElenco, i
 		    WHERE ic.id_indirizzo = isp.id
 		    ORDER BY ci.id LIMIT 1
 		) cisp ON TRUE
-		LEFT JOIN LATERAL (
-		    SELECT max(c.modificato_il) AS conclusa_il
-		    FROM cambiamenti_spedizioni c
-		    WHERE c.id_spedizione = s.id AND c.valore_nuovo ->> 'stato' = s.stato::text
-		) ch ON s.stato IN ('consegnata', 'non consegnata', 'persa', 'annullata')
 		WHERE %s
 		ORDER BY s.creata_il DESC, s.id DESC
 		LIMIT %s OFFSET %s`,
-		filtroNote, strings.Join(condizioni, " AND "), arg(f.PerPagina), arg((f.Pagina-1)*f.PerPagina))
+		filtroNote, joinCondizioniElenco, dove, arg(f.PerPagina), arg((f.Pagina-1)*f.PerPagina))
 
-	righe, err := r.db.Query(ctx, query, args...)
+	righe, err := r.db.Query(ctx, query, p.args...)
 	if err != nil {
 		return nil, err
 	}
@@ -446,8 +472,10 @@ func (r *Repository) elenca(ctx context.Context, v Visibilita, f FiltroElenco, i
 		var voce VoceElenco
 		var stato string
 		var note []byte
-		var corriere, mitt Persona
+		var corriere, mitt, assegnante Persona
 		var nomeCorriere, cognomeCorriere *string
+		var idAssegnante *int32
+		var nomeAssegnante, cognomeAssegnante *string
 		ritiro, consegna := &voce.IndirizzoRitiro, &voce.IndirizzoSpedizione
 		dest := &voce.Destinatario
 		if err := righe.Scan(&voce.ID, &voce.CodOrdine, &stato, &voce.IsReso, &voce.CreataIl,
@@ -457,7 +485,8 @@ func (r *Repository) elenca(ctx context.Context, v Visibilita, f FiltroElenco, i
 			&consegna.Via, &consegna.Civico, &consegna.Citta, &consegna.CAP, &consegna.Regione, &consegna.Nazione,
 			&mitt.Nome, &mitt.Cognome, &mitt.Email, &mitt.Telefono,
 			&dest.Nome, &dest.Cognome, &dest.Email, &dest.Telefono,
-			&voce.IDCorriere, &nomeCorriere, &cognomeCorriere, &corriere.Telefono,
+			&voce.IDCorriere, &nomeCorriere, &cognomeCorriere, &corriere.Email, &corriere.Telefono,
+			&idAssegnante, &nomeAssegnante, &cognomeAssegnante, &assegnante.Email, &assegnante.Telefono,
 			&voce.ConclusaIl, &note); err != nil {
 			return nil, err
 		}
@@ -467,6 +496,10 @@ func (r *Repository) elenca(ctx context.Context, v Visibilita, f FiltroElenco, i
 		if voce.IDCorriere != nil && nomeCorriere != nil && cognomeCorriere != nil {
 			corriere.ID, corriere.Nome, corriere.Cognome = *voce.IDCorriere, *nomeCorriere, *cognomeCorriere
 			voce.Corriere = &corriere
+		}
+		if idAssegnante != nil && nomeAssegnante != nil && cognomeAssegnante != nil {
+			assegnante.ID, assegnante.Nome, assegnante.Cognome = *idAssegnante, *nomeAssegnante, *cognomeAssegnante
+			voce.AssegnataDa = &assegnante
 		}
 		if voce.Note, err = leggiNote(note); err != nil {
 			return nil, err

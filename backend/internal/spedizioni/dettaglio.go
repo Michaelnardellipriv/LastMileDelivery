@@ -31,6 +31,9 @@ func nascondi(vis Visibilita, v *VoceElenco) {
 	if !vis.MostraCorriere {
 		v.IDCorriere, v.Corriere = nil, nil
 	}
+	if vis.NascondiAssegnante {
+		v.AssegnataDa = nil
+	}
 	if vis.NascondiIDMittente && v.Mittente != nil {
 		v.Mittente.ID = 0
 	}

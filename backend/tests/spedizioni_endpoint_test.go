@@ -260,7 +260,7 @@ func (f *fixture) corpoValido(codice string) map[string]any {
 		"cod_ordine":                   codice + "-" + f.suffisso,
 		"id_cliente_mittente":          f.idMittente,
 		"id_cliente_destinatario":      f.idDestinatario,
-		"dataora_richiesta_spedizione": time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339),
+		"dataora_richiesta_spedizione": time.Now().Add(-time.Hour).UTC().Format(time.RFC3339),
 		"id_indirizzo_ritiro":          f.idRitiro,
 		"id_indirizzo_spedizione":      f.idConsegna,
 	}
@@ -397,6 +397,18 @@ func TestCreaSpedizione(t *testing.T) {
 		}
 	})
 
+	t.Run("data_richiesta_nel_futuro_400", func(t *testing.T) {
+		corpo := f.corpoValido("FUTURO")
+		corpo["dataora_richiesta_spedizione"] = time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339)
+		r := f.chiama(t, http.MethodPost, "/api/spedizioni", corpo, comeOperatore(f))
+		if r.stato != http.StatusBadRequest || !contiene(campiInErrore(r), "dataora_richiesta_spedizione") {
+			t.Fatalf("la spedizione non può essere richiesta nel futuro: atteso 400 sul campo, ottenuto %d %s", r.stato, r.grezzo)
+		}
+		if n := f.conta(t, `SELECT count(*) FROM spedizioni WHERE cod_ordine = $1`, "FUTURO-"+f.suffisso); n != 0 {
+			t.Fatal("la spedizione rifiutata non deve essere stata salvata")
+		}
+	})
+
 	t.Run("campo_non_previsto_400", func(t *testing.T) {
 		corpo := f.corpoValido("Y")
 		corpo["stato"] = "consegnata"
@@ -477,7 +489,7 @@ func TestModificaDati(t *testing.T) {
 
 	t.Run("modifica_prima_del_ritiro_200_e_storico", func(t *testing.T) {
 		id := f.nuovaSpedizione(t, "MOD")
-		data := time.Now().Add(72 * time.Hour).UTC().Truncate(time.Second)
+		data := time.Now().Add(-72 * time.Hour).UTC().Truncate(time.Second)
 		corpo := map[string]any{"id_indirizzo_spedizione": f.idAltro, "dataora_richiesta_spedizione": data.Format(time.RFC3339)}
 		r := f.modifica(t, id, op, corpo, 200)
 		if int32(r.corpo["id_indirizzo_spedizione"].(float64)) != corpo["id_indirizzo_spedizione"] ||
@@ -540,6 +552,7 @@ func TestModificaDati(t *testing.T) {
 		f.modifica(t, id, op, map[string]any{"stato": "consegnata"}, 400)
 		f.modifica(t, id, op, map[string]any{"id_indirizzo_spedizione": f.idRitiro}, 400)
 		f.modifica(t, id, op, map[string]any{"dataora_richiesta_spedizione": "domani"}, 400)
+		f.modifica(t, id, op, map[string]any{"dataora_richiesta_spedizione": time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339)}, 400)
 		f.modifica(t, id, op, map[string]any{"ritirata_il": "2026-12-01T09:00:00Z"}, 400)
 		r := f.modifica(t, id, op, map[string]any{"id_cliente_destinatario": 999999999}, 400)
 		if !contiene(campiInErrore(r), "id_cliente_destinatario") {
@@ -677,6 +690,30 @@ func TestTentativi(t *testing.T) {
 		f.stato(t, id, c1, map[string]any{"stato": "in consegna"}, 409)
 		if r := f.modifica(t, id, comeOperatore(f), map[string]any{"is_reso": true}, 200); r.corpo["is_reso"] != true {
 			t.Fatalf("reso su spedizione non consegnata: %s", r.grezzo)
+		}
+	})
+
+	t.Run("dopo_un_tentativo_fallito_niente_consegna_nella_stessa_uscita_409", func(t *testing.T) {
+		id := f.nuovaSpedizione(t, "TENT-CONS")
+		f.assegna(t, id, f.idCorriere1, 201)
+		f.stato(t, id, c1, map[string]any{"stato": "ritirata"}, 200)
+		f.stato(t, id, c1, map[string]any{"stato": "in consegna"}, 200)
+		f.tentativo(t, id, c1, consegnaFallita, 201)
+
+		// l'uscita è finita con un tentativo fallito: il corriere non può segnarla consegnata
+		r := f.stato(t, id, c1, map[string]any{"stato": "consegnata"}, 409)
+		if msg, _ := r.corpo["errore"].(string); !strings.Contains(msg, "tentativo di consegna fallito") {
+			t.Fatalf("il messaggio spiega perché: %s", r.grezzo)
+		}
+		if d := f.dettaglio(t, id, op, 200); d.corpo["stato"] != "in consegna" {
+			t.Fatalf("lo stato resta in consegna: %s", d.grezzo)
+		}
+
+		// l'operatore la riporta in ritirata, il corriere esce di nuovo e stavolta consegna
+		f.stato(t, id, op, map[string]any{"stato": "ritirata"}, 200)
+		f.stato(t, id, c1, map[string]any{"stato": "in consegna"}, 200)
+		if r := f.stato(t, id, c1, map[string]any{"stato": "consegnata"}, 200); r.corpo["stato"] != "consegnata" {
+			t.Fatalf("consegna alla nuova uscita: %s", r.grezzo)
 		}
 	})
 

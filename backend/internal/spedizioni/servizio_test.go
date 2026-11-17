@@ -341,6 +341,60 @@ func TestRegoleNuova(t *testing.T) {
 	}
 }
 
+func TestDataRichiestaMaiNelFuturo(t *testing.T) {
+	s := servizioTest()
+	valida := func(quando time.Time) bool {
+		n := NuovaSpedizione{CodOrdine: "ORD-1", IDClienteMittente: 1, IDClienteDestinatario: 2,
+			IDIndirizzoRitiro: 1, IDIndirizzoSpedizione: 2, DataoraRichiesta: quando}
+		for _, e := range s.RegoleNuova(n) {
+			if e.Campo == "dataora_richiesta_spedizione" {
+				return false
+			}
+		}
+		return true
+	}
+	for nome, c := range map[string]struct {
+		quando  time.Time
+		ammessa bool
+	}{
+		"adesso":                      {s.adesso(), true},
+		"ieri":                        {s.adesso().Add(-24 * time.Hour), true},
+		"due minuti avanti (orologi)": {s.adesso().Add(2 * time.Minute), true},
+		"tra un'ora":                  {s.adesso().Add(time.Hour), false},
+		"domani":                      {s.adesso().Add(24 * time.Hour), false},
+	} {
+		if valida(c.quando) != c.ammessa {
+			t.Errorf("%s: ammessa=%v atteso %v", nome, !c.ammessa, c.ammessa)
+		}
+	}
+	// vale anche quando l'operatore la modifica
+	domani := s.adesso().Add(24 * time.Hour)
+	if tipoErrore(s.validaDati(DatiSpedizione{DataoraRichiesta: &domani})) != "400" {
+		t.Error("modifica con data richiesta nel futuro: atteso 400")
+	}
+}
+
+func TestNienteConsegnaDopoUnTentativoFallitoNellaStessaUscita(t *testing.T) {
+	s := servizioTest()
+	consegna := CambioStato{Stato: Consegnata}
+
+	// prima uscita, tentativo fallito: l'uscita è chiusa, non si può consegnare
+	attuale := inStato(InConsegna)
+	attuale.UsciteInConsegna, attuale.TentativiConsegnaFalliti = 1, 1
+	if _, err := s.decidiStato(corriere1, attuale, consegna); tipoErrore(err) != "409" {
+		t.Fatalf("consegna dopo un tentativo fallito nella stessa uscita: atteso 409, ottenuto %v", err)
+	}
+	// l'operatore la riporta in ritirata e il corriere la rimette in consegna: nuova uscita
+	attuale.UsciteInConsegna = 2
+	if m, err := s.decidiStato(corriere1, attuale, consegna); err != nil || m.NuovoStato != Consegnata {
+		t.Fatalf("nella nuova uscita la consegna è ammessa: %+v %v", m, err)
+	}
+	// senza tentativi falliti si consegna normalmente
+	if m, err := s.decidiStato(corriere1, inStato(InConsegna), consegna); err != nil || m.NuovoStato != Consegnata {
+		t.Fatalf("consegna alla prima uscita: %+v %v", m, err)
+	}
+}
+
 func TestResoSoloNegliStatiAmmessi(t *testing.T) {
 	reso := DatiSpedizione{IsReso: p(true)}
 	for _, stato := range []Stato{Annullata, Persa, NonConsegnata} {

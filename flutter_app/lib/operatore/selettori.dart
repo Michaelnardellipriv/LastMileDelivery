@@ -3,10 +3,9 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import 'api.dart';
-import 'comuni.dart';
+import '../comune/comuni.dart';
 
 Future<Persona?> scegliCorriere(BuildContext context, ApiOperatore api) => showDialog<Persona>(
       context: context,
@@ -44,7 +43,7 @@ Future<Indirizzo?> scegliIndirizzo(BuildContext context, ApiOperatore api, Strin
 
 class _DialogoRicerca<T> extends StatefulWidget {
   final String titolo;
-  final Future<List<T>> Function(String q) cerca;
+  final Future<Pagina<T>> Function(String q) cerca;
   final String Function(T) titoloVoce;
   final String Function(T) sottotitoloVoce;
   final String? etichettaNuovo;
@@ -65,6 +64,7 @@ class _DialogoRicerca<T> extends StatefulWidget {
 class _DialogoRicercaState<T> extends State<_DialogoRicerca<T>> {
   Timer? _ritardo;
   List<T> _risultati = [];
+  int _totale = 0;
   Object? _errore;
   bool _attesa = false;
   int _richiesta = 0;
@@ -88,7 +88,8 @@ class _DialogoRicercaState<T> extends State<_DialogoRicerca<T>> {
       final r = await widget.cerca(q);
       if (mounted && n == _richiesta)
         setState(() {
-          _risultati = r;
+          _risultati = r.dati;
+          _totale = r.totaleElementi;
           _errore = null;
         });
     } catch (e) {
@@ -115,6 +116,12 @@ class _DialogoRicercaState<T> extends State<_DialogoRicerca<T>> {
             ),
             const SizedBox(height: 8),
             if (_attesa) const LinearProgressIndicator(),
+            if (!_attesa && _errore == null && _totale > _risultati.length)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text('Mostrati ${_risultati.length} di $_totale: scrivi per restringere la ricerca',
+                    style: Theme.of(context).textTheme.bodySmall),
+              ),
             Expanded(
               child: _errore != null
                   ? Center(child: Text(testoErrore(_errore!)))
@@ -156,13 +163,12 @@ class _Campi {
   _Campi(List<String> nomi) : c = {for (final n in nomi) n: TextEditingController()};
   String operator [](String n) => c[n]!.text;
   Widget campo(String nome, String etichetta, Object? errore,
-          {bool password = false, String? suggerimento, double larghezza = 240, List<TextInputFormatter>? formati, TextInputType? tastiera}) =>
+          {bool password = false, String? suggerimento, double larghezza = 240, TextInputType? tastiera}) =>
       SizedBox(
         width: larghezza,
         child: TextField(
           controller: c[nome],
           obscureText: password,
-          inputFormatters: formati,
           keyboardType: tastiera,
           decoration: InputDecoration(
             labelText: etichetta,
@@ -236,11 +242,9 @@ class _NuovoClienteState extends State<_NuovoCliente> {
             child: Wrap(spacing: 12, runSpacing: 12, children: [
               _campi.campo('nome', 'Nome', _errore),
               _campi.campo('cognome', 'Cognome', _errore),
-              _campi.campo('prefisso', 'Prefisso', _errore,
-                  larghezza: 90, tastiera: TextInputType.phone, formati: [FilteringTextInputFormatter.allow(RegExp(r'[+0-9]'))]),
-              // si possono scrivere solo cifre; il formato completo lo controlla comunque il backend
-              _campi.campo('nr_telefono', 'Telefono', _errore,
-                  larghezza: 390, tastiera: TextInputType.phone, formati: [FilteringTextInputFormatter.digitsOnly]),
+              // nessun filtro su ciò che si scrive: prefisso e telefono li controlla il backend
+              _campi.campo('prefisso', 'Prefisso', _errore, larghezza: 90, tastiera: TextInputType.phone),
+              _campi.campo('nr_telefono', 'Telefono', _errore, larghezza: 390, tastiera: TextInputType.phone),
               _campi.campo('email', 'Email', _errore, larghezza: 492),
               _campi.campo('password', 'Password iniziale', _errore,
                   password: true, larghezza: 492, suggerimento: 'Almeno 8 caratteri: verrà inviata al cliente per mail'),

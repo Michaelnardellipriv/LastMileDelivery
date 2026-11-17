@@ -12,10 +12,11 @@ import (
 )
 
 const (
-	durataRecupero       = 30 * time.Minute
-	maxRecuperiPerOra    = 3
-	messaggioCredenziali = "email o password non corrette"
-	oggettoMailRecupero  = "Recupero password LastMileDelivery"
+	durataRecupero        = 30 * time.Minute
+	maxRecuperiPerOra     = 3
+	messaggioCredenziali  = "email o password non corrette"
+	messaggioSoloMittente = "accesso riservato ai clienti destinatari: non risulta nessuna spedizione destinata a te"
+	oggettoMailRecupero   = "Recupero password LastMileDelivery"
 )
 
 type archivio interface {
@@ -25,6 +26,8 @@ type archivio interface {
 	RecuperiRecenti(ctx context.Context, idUtente int32, dal time.Time) (int, error)
 	CreaRecupero(ctx context.Context, idUtente int32, tokenHash string, scadenza time.Time) error
 	UsaRecupero(ctx context.Context, tokenHash, nuovoHash string) (bool, error)
+	// DestinatarioDiSpedizioni dice se il cliente è (o è stato) destinatario di almeno una spedizione.
+	DestinatarioDiSpedizioni(ctx context.Context, idCliente int32) (bool, error)
 }
 
 type Servizio struct {
@@ -73,6 +76,17 @@ func (s *Servizio) Login(ctx context.Context, email, password, ruolo *string) (S
 	scelto, err := scegliRuolo(acc.Ruoli, ruolo)
 	if err != nil {
 		return Sessione{}, err
+	}
+	// Il sistema è per i clienti destinatari: chi è solo mittente (o non ha ancora avuto
+	// spedizioni in arrivo) non entra.
+	if scelto.Ruolo == identita.Cliente {
+		destinatario, err := s.archivio.DestinatarioDiSpedizioni(ctx, scelto.ID)
+		if err != nil {
+			return Sessione{}, err
+		}
+		if !destinatario {
+			return Sessione{}, &errori.NonAutorizzato{Messaggio: messaggioSoloMittente}
+		}
 	}
 	token, scadenza, err := s.firmatario.Firma(acc.IDUtente, scelto)
 	if err != nil {
