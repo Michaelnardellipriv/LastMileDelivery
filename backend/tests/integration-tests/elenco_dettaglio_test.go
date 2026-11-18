@@ -292,5 +292,24 @@ func TestDettaglioSpedizione(t *testing.T) {
 		if r := f.chiama(t, http.MethodGet, "/api/spedizioni/"+strconv.Itoa(id), nil, nil); r.stato != http.StatusUnauthorized {
 			t.Errorf("senza identità: atteso 401, ottenuto %d", r.stato)
 		}
-	})
+	})}
+// Regressione bug-report-01: un corriere vedeva le spedizioni assegnate a un collega.
+	func TestElencoFiltratoPerCorriere(t *testing.T) {
+	f := preparaFixture(t)
+	c1, c2 := comeCorriere(f.idCorriere1), comeCorriere(f.idCorriere2)
+
+
+	id := f.nuovaSpedizione(t, "BUG01")
+	f.assegna(t, id, f.idCorriere1, 201)
+
+
+	voci, _ := f.elenco(t, c2, "per_pagina=100", 200)
+	if _, visibile := voci[id]; visibile {
+		t.Fatalf("il corriere 2 non deve vedere la spedizione %d assegnata al corriere 1", id)
+	}
+	voci, _ = f.elenco(t, c1, "per_pagina=100", 200)
+	if _, visibile := voci[id]; !visibile {
+		t.Fatalf("il corriere 1 deve vedere la sua spedizione %d", id)
+	}
+	f.dettaglio(t, id, c2, 404)
 }
