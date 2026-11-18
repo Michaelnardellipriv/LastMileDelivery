@@ -74,6 +74,17 @@ type Visibilita struct {
 
 var statiVisibiliAlCorriere = []Stato{Assegnata, Ritirata, InConsegna}
 
+func (s *Servizio) visibilita(ctx context.Context, r identita.Richiedente) (Visibilita, error) {
+	if r.Ruolo != identita.Cliente {
+		return visibilitaPer(r, 0, s.adesso())
+	}
+	reg, err := s.regole.Regole(ctx)
+	if err != nil {
+		return Visibilita{}, err
+	}
+	return visibilitaPer(r, reg.GiorniVisibilitaCliente, s.adesso())
+}
+
 func visibilitaPer(r identita.Richiedente, giorniCliente int, adesso time.Time) (Visibilita, error) {
 	switch r.Ruolo {
 	case identita.Operatore, identita.Amministratore:
@@ -114,7 +125,7 @@ func validaFiltro(f FiltroElenco) error {
 }
 
 func (s *Servizio) Elenca(ctx context.Context, r identita.Richiedente, f FiltroElenco) ([]VoceElenco, error) {
-	vis, err := visibilitaPer(r, s.giorniCliente, s.adesso())
+	vis, err := s.visibilita(ctx, r)
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +152,7 @@ func (s *Servizio) ElencaPagina(ctx context.Context, r identita.Richiedente, f F
 	if err != nil {
 		return nil, 0, err
 	}
-	vis, err := visibilitaPer(r, s.giorniCliente, s.adesso())
+	vis, err := s.visibilita(ctx, r)
 	if err != nil {
 		return nil, 0, err
 	}

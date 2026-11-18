@@ -7,5 +7,3 @@ metadata:
 data:
   LISTEN_ADDR: "0.0.0.0:8080"
   CORS_ORIGIN: "http://lastmile.test"
-  MAX_TENTATIVI: "3"
-  GIORNI_VISIBILITA_CLIENTE: "30"

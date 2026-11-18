@@ -10,8 +10,10 @@ import (
 )
 
 type verificaUtente interface {
-	Esiste(ctx context.Context, ruolo Ruolo, id int32) (bool, error)
+	Stato(ctx context.Context, ruolo Ruolo, id int32) (esiste, attivo bool, err error)
 }
+
+const messaggioDisattivato = "account disattivato: contattare l'amministratore"
 
 type verificaToken interface {
 	Verifica(token string) (Richiedente, error)
@@ -44,6 +46,11 @@ func Richiedi(utenti verificaUtente, token verificaToken, ammettiHeaderID bool) 
 				rich, err := token.Verifica(strings.TrimSpace(valore))
 				if err != nil {
 					nonAutenticato(w, "token non valido o scaduto: rifare il login")
+					return
+				}
+				// il token resta valido fino alla scadenza: se nel frattempo l'amministratore
+				// ha disattivato l'utente, lo si blocca qui
+				if !utenteAttivo(w, r, utenti, rich) {
 					return
 				}
 				next.ServeHTTP(w, r.WithContext(NelContesto(r.Context(), rich)))
@@ -80,17 +87,24 @@ func Richiedi(utenti verificaUtente, token verificaToken, ammettiHeaderID bool) 
 			}
 			rich.ID = int32(id)
 
-			ok, err := utenti.Esiste(r.Context(), rich.Ruolo, rich.ID)
-			if err != nil {
-				httpx.RispondiErrore(w, r, err)
-				return
-			}
-			if !ok {
-				nonAutenticato(w, "utente non riconosciuto")
+			if !utenteAttivo(w, r, utenti, rich) {
 				return
 			}
 
 			next.ServeHTTP(w, r.WithContext(NelContesto(r.Context(), rich)))
 		})
 	}
+}
+
+func utenteAttivo(w http.ResponseWriter, r *http.Request, utenti verificaUtente, rich Richiedente) bool {
+	esiste, attivo, err := utenti.Stato(r.Context(), rich.Ruolo, rich.ID)
+	switch {
+	case err != nil:
+		httpx.RispondiErrore(w, r, err)
+	case !esiste:
+		nonAutenticato(w, "utente non riconosciuto")
+	case !attivo:
+		httpx.ScriviErrore(w, http.StatusForbidden, messaggioDisattivato)
+	}
+	return err == nil && esiste && attivo
 }

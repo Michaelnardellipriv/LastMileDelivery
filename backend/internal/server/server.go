@@ -7,6 +7,7 @@ import (
 
 	"lastmiledelivery/backend/internal/anagrafiche"
 	"lastmiledelivery/backend/internal/autenticazione"
+	"lastmiledelivery/backend/internal/configurazione"
 	"lastmiledelivery/backend/internal/httpx"
 	"lastmiledelivery/backend/internal/idempotenza"
 	"lastmiledelivery/backend/internal/identita"
@@ -15,13 +16,11 @@ import (
 )
 
 type Config struct {
-	MaxTentativi            int
-	GiorniVisibilitaCliente int
-	Firmatario              *autenticazione.Firmatario
-	Postino                 autenticazione.Postino
-	LinkRecuperoPassword    string
-	AmmettiHeaderID         bool
-	CORS                    *httpx.CORS
+	Firmatario           *autenticazione.Firmatario
+	Postino              autenticazione.Postino
+	LinkRecuperoPassword string
+	AmmettiHeaderID      bool
+	CORS                 *httpx.CORS
 }
 
 func Nuovo(db *pgxpool.Pool, cfg Config) http.Handler {
@@ -33,7 +32,11 @@ func Nuovo(db *pgxpool.Pool, cfg Config) http.Handler {
 	servizioAutenticazione := autenticazione.NuovoServizio(autenticazione.NuovoRepository(db), cfg.Firmatario, cfg.Postino, cfg.LinkRecuperoPassword)
 	autenticazione.NuovoHandler(servizioAutenticazione).Registra(rotte, richiediUtente)
 
-	servizioSpedizioni := spedizioni.NuovoServizio(spedizioni.NuovoRepository(db), cfg.MaxTentativi, cfg.GiorniVisibilitaCliente)
+	// tentativi, giorni di visibilità e motivi li sceglie l'amministratore (tabelle impostazioni e motivi)
+	repositoryConfigurazione := configurazione.NuovoRepository(db)
+	configurazione.NuovoHandler(configurazione.NuovoServizio(repositoryConfigurazione)).Registra(rotte, richiediUtente, idempotente)
+
+	servizioSpedizioni := spedizioni.NuovoServizio(spedizioni.NuovoRepository(db), repositoryConfigurazione)
 	spedizioni.NuovoHandler(servizioSpedizioni).Registra(rotte, richiediUtente, idempotente)
 
 	servizioAnagrafiche := anagrafiche.NuovoServizio(anagrafiche.NuovoRepository(db), cfg.Postino)

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"lastmiledelivery/backend/internal/configurazione"
 	"lastmiledelivery/backend/internal/errori"
 	"lastmiledelivery/backend/internal/identita"
 )
@@ -18,8 +19,25 @@ var (
 
 func p[T any](v T) *T { return &v }
 
+// regoleTest sono i valori predefiniti della tabella impostazioni e i motivi iniziali.
+var regoleTest = configurazione.Regole{
+	Impostazioni: configurazione.Impostazioni{GiorniVisibilitaCliente: 30, MaxTentativiRitiro: 3, MaxTentativiConsegna: 3},
+	Motivi: []string{
+		"mittente assente", "pacco non pronto", "indirizzo di ritiro errato",
+		"destinatario assente", "indirizzo errato", "rifiutata dal destinatario", "accesso impossibile",
+		"richiesta del mittente", "richiesta del destinatario", "dati della spedizione errati", "ritiro non riuscito",
+		"smarrita in deposito", "smarrita durante il trasporto", "furto", "altro",
+	},
+}
+
+type regoleFisse configurazione.Regole
+
+func (r regoleFisse) Regole(context.Context) (configurazione.Regole, error) {
+	return configurazione.Regole(r), nil
+}
+
 func servizioTest() *Servizio {
-	s := NuovoServizio(nil, 3, 30)
+	s := NuovoServizio(nil, regoleFisse(regoleTest))
 	s.adesso = func() time.Time { return time.Date(2026, 10, 27, 10, 0, 0, 0, time.UTC) }
 	return s
 }
@@ -89,7 +107,7 @@ func TestCambioStato(t *testing.T) {
 	}
 	for _, c := range casi {
 		t.Run(c.nome, func(t *testing.T) {
-			m, err := servizioTest().decidiStato(c.chi, inStato(c.da), c.cambio)
+			m, err := decidiStato(regoleTest, c.chi, inStato(c.da), c.cambio)
 			if got := tipoErrore(err); got != c.esito {
 				t.Fatalf("atteso %s, ottenuto %s (%v)", c.esito, got, err)
 			}
@@ -102,26 +120,25 @@ func TestCambioStato(t *testing.T) {
 
 func TestStatiDaAltriEndpoint(t *testing.T) {
 	for _, stato := range []Stato{Creata, Assegnata, NonConsegnata, "smarrita"} {
-		if tipoErrore(validaCambio(CambioStato{Stato: stato})) != "400" {
+		if tipoErrore(validaCambio(regoleTest, CambioStato{Stato: stato})) != "400" {
 			t.Errorf("%q non deve essere accettato da /stato", stato)
 		}
 	}
 }
 
 func TestRipetereLoStessoStato(t *testing.T) {
-	s := servizioTest()
-	m, err := s.decidiStato(corriere1, inStato(Ritirata), CambioStato{Stato: Ritirata})
+	m, err := decidiStato(regoleTest, corriere1, inStato(Ritirata), CambioStato{Stato: Ritirata})
 	if err != nil || !m.NessunaModifica {
 		t.Fatalf("ripetere 'ritirata' deve essere senza effetto: %+v %v", m, err)
 	}
-	m, err = s.decidiStato(operatore, inStato(Annullata), CambioStato{Stato: Annullata})
+	m, err = decidiStato(regoleTest, operatore, inStato(Annullata), CambioStato{Stato: Annullata})
 	if err != nil || !m.NessunaModifica {
 		t.Fatalf("ripetere 'annullata' deve essere senza effetto: %+v %v", m, err)
 	}
-	if _, err := s.decidiStato(corriere2, inStato(Ritirata), CambioStato{Stato: Ritirata}); tipoErrore(err) != "403" {
+	if _, err := decidiStato(regoleTest, corriere2, inStato(Ritirata), CambioStato{Stato: Ritirata}); tipoErrore(err) != "403" {
 		t.Fatalf("un altro corriere non può ripetere la richiesta: %v", err)
 	}
-	if _, err := s.decidiStato(operatore, inStato(Consegnata), CambioStato{Stato: Consegnata}); tipoErrore(err) != "403" {
+	if _, err := decidiStato(regoleTest, operatore, inStato(Consegnata), CambioStato{Stato: Consegnata}); tipoErrore(err) != "403" {
 		t.Fatalf("l'operatore non può impostare 'consegnata': %v", err)
 	}
 }
@@ -137,25 +154,25 @@ func TestAssegnazione(t *testing.T) {
 		if c.da == Ritirata {
 			attuale.TentativiConsegnaFalliti, attuale.UsciteInConsegna = 1, 1
 		}
-		m, err := s.decidiAssegnazione(attuale, p(int32(2)))
+		m, err := decidiAssegnazione(regoleTest, attuale, p(int32(2)))
 		if err != nil || m.NuovoStato != c.atteso || *m.NuovoCorriere != 2 {
 			t.Fatalf("assegnazione da %q: %+v %v", c.da, m, err)
 		}
 	}
-	if m, _ := s.decidiAssegnazione(inStato(Assegnata), p(int32(1))); !m.NessunaModifica {
+	if m, _ := decidiAssegnazione(regoleTest, inStato(Assegnata), p(int32(1))); !m.NessunaModifica {
 		t.Fatal("riassegnare allo stesso corriere deve essere senza effetto")
 	}
 	for _, stato := range []Stato{InConsegna, Consegnata, Annullata, Persa} {
-		if _, err := s.decidiAssegnazione(inStato(stato), p(int32(2))); tipoErrore(err) != "409" {
+		if _, err := decidiAssegnazione(regoleTest, inStato(stato), p(int32(2))); tipoErrore(err) != "409" {
 			t.Errorf("assegnazione in %q: atteso 409, ottenuto %v", stato, err)
 		}
 	}
 	esauriti := inStato(Assegnata)
 	esauriti.TentativiRitiroFalliti = 3
-	if _, err := s.decidiAssegnazione(esauriti, p(int32(2))); tipoErrore(err) != "409" {
+	if _, err := decidiAssegnazione(regoleTest, esauriti, p(int32(2))); tipoErrore(err) != "409" {
 		t.Fatalf("dopo 3 ritiri falliti non si riassegna: %v", err)
 	}
-	if _, err := s.decidiAssegnazione(inStato(Ritirata), p(int32(2))); tipoErrore(err) != "409" {
+	if _, err := decidiAssegnazione(regoleTest, inStato(Ritirata), p(int32(2))); tipoErrore(err) != "409" {
 		t.Fatalf("ritirata senza tentativi di consegna falliti: non si riassegna: %v", err)
 	}
 	if _, _, err := s.Assegna(context.Background(), corriere1, 10, p(int32(2))); tipoErrore(err) != "403" {
@@ -167,54 +184,52 @@ func TestAssegnazione(t *testing.T) {
 }
 
 func TestTentativiDiRitiro(t *testing.T) {
-	s := servizioTest()
 	tentativo := TentativoFallito{Tipo: TentativoRitiro, Nota: p("cancello chiuso"), Motivo: p("accesso impossibile")}
 	attuale := inStato(Assegnata)
 
 	for falliti := 0; falliti < 3; falliti++ {
 		attuale.TentativiRitiroFalliti = falliti
-		m, err := s.decidiTentativo(corriere1, attuale, tentativo)
+		m, err := decidiTentativo(regoleTest, corriere1, attuale, tentativo)
 		if err != nil || m.Tentativo != TentativoRitiro || m.NuovoStato != Assegnata || m.Nota == nil {
 			t.Fatalf("tentativo di ritiro %d: %+v %v", falliti+1, m, err)
 		}
 	}
 
 	attuale.TentativiRitiroFalliti = 3
-	if _, err := s.decidiTentativo(corriere1, attuale, tentativo); tipoErrore(err) != "409" {
+	if _, err := decidiTentativo(regoleTest, corriere1, attuale, tentativo); tipoErrore(err) != "409" {
 		t.Fatalf("dopo 3 ritiri falliti il corriere non può registrarne altri: %v", err)
 	}
-	if _, err := s.decidiStato(corriere1, attuale, CambioStato{Stato: Ritirata}); tipoErrore(err) != "409" {
+	if _, err := decidiStato(regoleTest, corriere1, attuale, CambioStato{Stato: Ritirata}); tipoErrore(err) != "409" {
 		t.Fatalf("dopo 3 ritiri falliti il corriere non può più ritirare: %v", err)
 	}
-	if m, err := s.decidiStato(operatore, attuale, CambioStato{Stato: Annullata}); err != nil || !m.Annulla || m.Nota != nil {
+	if m, err := decidiStato(regoleTest, operatore, attuale, CambioStato{Stato: Annullata}); err != nil || !m.Annulla || m.Nota != nil {
 		t.Fatalf("dopo 3 ritiri falliti l'operatore annulla senza motivo né nota: %+v %v", m, err)
 	}
 	conMotivo := CambioStato{Stato: Annullata, Motivo: p("ritiro non riuscito"), Nota: p("negozio chiuso")}
-	if m, err := s.decidiStato(operatore, attuale, conMotivo); err != nil || m.Nota == nil || !m.Nota.Pubblica {
+	if m, err := decidiStato(regoleTest, operatore, attuale, conMotivo); err != nil || m.Nota == nil || !m.Nota.Pubblica {
 		t.Fatalf("dopo 3 ritiri falliti motivo e nota restano facoltativi: %+v %v", m, err)
 	}
 	for _, c := range []CambioStato{
 		{Stato: Annullata, Motivo: p("ritiro non riuscito")},
 		{Stato: Annullata, Nota: p("negozio chiuso")},
 	} {
-		if _, err := s.decidiStato(operatore, attuale, c); tipoErrore(err) != "400" {
+		if _, err := decidiStato(regoleTest, operatore, attuale, c); tipoErrore(err) != "400" {
 			t.Errorf("motivo e nota vanno insieme: %+v %v", c, err)
 		}
 	}
 	attuale.TentativiRitiroFalliti = 2
-	if _, err := s.decidiStato(operatore, attuale, CambioStato{Stato: Annullata}); tipoErrore(err) != "400" {
+	if _, err := decidiStato(regoleTest, operatore, attuale, CambioStato{Stato: Annullata}); tipoErrore(err) != "400" {
 		t.Fatalf("prima del 3° ritiro fallito motivo e nota sono obbligatori: %v", err)
 	}
-	if _, err := s.decidiTentativo(corriere1, inStato(Ritirata), tentativo); tipoErrore(err) != "409" {
+	if _, err := decidiTentativo(regoleTest, corriere1, inStato(Ritirata), tentativo); tipoErrore(err) != "409" {
 		t.Fatalf("ritiro fallito su una spedizione già ritirata: %v", err)
 	}
-	if _, err := s.decidiTentativo(corriere2, inStato(Assegnata), tentativo); tipoErrore(err) != "403" {
+	if _, err := decidiTentativo(regoleTest, corriere2, inStato(Assegnata), tentativo); tipoErrore(err) != "403" {
 		t.Fatalf("corriere non assegnato: %v", err)
 	}
 }
 
 func TestTentativiDiConsegna(t *testing.T) {
-	s := servizioTest()
 	tentativo := TentativoFallito{Tipo: TentativoConsegna, Nota: p("nessuno in casa"), Motivo: p("destinatario assente")}
 	attuale := inStato(InConsegna)
 
@@ -222,7 +237,7 @@ func TestTentativiDiConsegna(t *testing.T) {
 	for falliti, atteso := range attese {
 		attuale.TentativiConsegnaFalliti = falliti
 		attuale.UsciteInConsegna = falliti + 1
-		m, err := s.decidiTentativo(corriere1, attuale, tentativo)
+		m, err := decidiTentativo(regoleTest, corriere1, attuale, tentativo)
 		if err != nil || m.NuovoStato != atteso || m.Tentativo != TentativoConsegna || *m.Nota.Motivo != "destinatario assente" {
 			t.Fatalf("tentativo di consegna %d: atteso %q, ottenuto %+v %v", falliti+1, atteso, m, err)
 		}
@@ -230,11 +245,11 @@ func TestTentativiDiConsegna(t *testing.T) {
 
 	stessaUscita := inStato(InConsegna)
 	stessaUscita.TentativiConsegnaFalliti = 1
-	if _, err := s.decidiTentativo(corriere1, stessaUscita, tentativo); tipoErrore(err) != "409" {
+	if _, err := decidiTentativo(regoleTest, corriere1, stessaUscita, tentativo); tipoErrore(err) != "409" {
 		t.Fatalf("un secondo tentativo nella stessa uscita va rifiutato: %v", err)
 	}
 
-	if _, err := s.decidiTentativo(corriere1, inStato(Ritirata), tentativo); tipoErrore(err) != "409" {
+	if _, err := decidiTentativo(regoleTest, corriere1, inStato(Ritirata), tentativo); tipoErrore(err) != "409" {
 		t.Fatalf("consegna fallita su una spedizione non in consegna: %v", err)
 	}
 }
@@ -251,7 +266,7 @@ func TestValidaTentativo(t *testing.T) {
 	}
 	for nome, c := range casi {
 		t.Run(nome, func(t *testing.T) {
-			if tipoErrore(validaTentativo(c)) != "400" {
+			if tipoErrore(validaTentativo(regoleTest, c)) != "400" {
 				t.Fatal("atteso errore di validazione")
 			}
 		})
@@ -264,7 +279,7 @@ func TestValidaTentativo(t *testing.T) {
 		"motivo di ritiro su consegna": {Tipo: TentativoConsegna, Nota: p("x"), Motivo: p("mittente assente")},
 		"motivo di consegna su ritiro": {Tipo: TentativoRitiro, Nota: p("x"), Motivo: p("destinatario assente")},
 	} {
-		if err := validaTentativo(c); err != nil {
+		if err := validaTentativo(regoleTest, c); err != nil {
 			t.Errorf("%s: deve essere valido, ottenuto %v", nome, err)
 		}
 	}
@@ -375,22 +390,21 @@ func TestDataRichiestaMaiNelFuturo(t *testing.T) {
 }
 
 func TestNienteConsegnaDopoUnTentativoFallitoNellaStessaUscita(t *testing.T) {
-	s := servizioTest()
 	consegna := CambioStato{Stato: Consegnata}
 
 	// prima uscita, tentativo fallito: l'uscita è chiusa, non si può consegnare
 	attuale := inStato(InConsegna)
 	attuale.UsciteInConsegna, attuale.TentativiConsegnaFalliti = 1, 1
-	if _, err := s.decidiStato(corriere1, attuale, consegna); tipoErrore(err) != "409" {
+	if _, err := decidiStato(regoleTest, corriere1, attuale, consegna); tipoErrore(err) != "409" {
 		t.Fatalf("consegna dopo un tentativo fallito nella stessa uscita: atteso 409, ottenuto %v", err)
 	}
 	// l'operatore la riporta in ritirata e il corriere la rimette in consegna: nuova uscita
 	attuale.UsciteInConsegna = 2
-	if m, err := s.decidiStato(corriere1, attuale, consegna); err != nil || m.NuovoStato != Consegnata {
+	if m, err := decidiStato(regoleTest, corriere1, attuale, consegna); err != nil || m.NuovoStato != Consegnata {
 		t.Fatalf("nella nuova uscita la consegna è ammessa: %+v %v", m, err)
 	}
 	// senza tentativi falliti si consegna normalmente
-	if m, err := s.decidiStato(corriere1, inStato(InConsegna), consegna); err != nil || m.NuovoStato != Consegnata {
+	if m, err := decidiStato(regoleTest, corriere1, inStato(InConsegna), consegna); err != nil || m.NuovoStato != Consegnata {
 		t.Fatalf("consegna alla prima uscita: %+v %v", m, err)
 	}
 }
@@ -420,10 +434,9 @@ func TestResoSoloNegliStatiAmmessi(t *testing.T) {
 		t.Fatalf("un corriere non imposta il reso: %v", err)
 	}
 
-	s := servizioTest()
 	for _, m := range []Modifica{
-		must(s.decidiStato(operatore, inStato(Assegnata), CambioStato{Stato: Annullata, Motivo: p("altro"), Nota: p("x")})),
-		must(s.decidiStato(operatore, inStato(InConsegna), CambioStato{Stato: Persa, Motivo: p("furto"), Nota: p("x")})),
+		must(decidiStato(regoleTest, operatore, inStato(Assegnata), CambioStato{Stato: Annullata, Motivo: p("altro"), Nota: p("x")})),
+		must(decidiStato(regoleTest, operatore, inStato(InConsegna), CambioStato{Stato: Persa, Motivo: p("furto"), Nota: p("x")})),
 	} {
 		if m.Dati != nil {
 			t.Fatal("il cambio di stato non deve toccare is_reso")
@@ -455,13 +468,13 @@ func TestMotivoObbligatorio(t *testing.T) {
 	}
 	for _, c := range casi {
 		t.Run(c.nome, func(t *testing.T) {
-			if got := tipoErrore(validaCambio(c.cambio)); got != c.esito {
+			if got := tipoErrore(validaCambio(regoleTest, c.cambio)); got != c.esito {
 				t.Fatalf("atteso %s, ottenuto %s", c.esito, got)
 			}
 		})
 	}
 
-	m, _ := servizioTest().decidiStato(operatore, inStato(Ritirata), CambioStato{Stato: Persa, Motivo: p("smarrita durante il trasporto"), Nota: p("non è nel furgone")})
+	m, _ := decidiStato(regoleTest, operatore, inStato(Ritirata), CambioStato{Stato: Persa, Motivo: p("smarrita durante il trasporto"), Nota: p("non è nel furgone")})
 	if m.Nota.Testo != "non è nel furgone" || *m.Nota.Motivo != "smarrita durante il trasporto" {
 		t.Fatalf("nota e motivo vanno salvati insieme: %+v", m.Nota)
 	}

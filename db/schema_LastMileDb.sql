@@ -5,6 +5,7 @@ BEGIN;
 DROP TABLE IF EXISTS recuperi_password      CASCADE;
 DROP TABLE IF EXISTS posizioni_corrieri     CASCADE;
 DROP TABLE IF EXISTS impostazioni           CASCADE;
+DROP TABLE IF EXISTS motivi                 CASCADE;
 DROP TABLE IF EXISTS cambiamenti_spedizioni CASCADE;
 DROP TABLE IF EXISTS tentativi              CASCADE;
 DROP TABLE IF EXISTS note                   CASCADE;
@@ -61,6 +62,8 @@ CREATE TABLE utenti (
     email        VARCHAR(254) NOT NULL,
     -- hash bcrypt della password, obbligatorio: ogni utente nasce con la sua password
     pwd_hash     VARCHAR(255) NOT NULL,
+    -- l'amministratore può disattivare un utente: non entra più e i suoi token non valgono
+    attivo       BOOLEAN      NOT NULL DEFAULT TRUE,
     CONSTRAINT uq_utenti_email    UNIQUE (email),
     CONSTRAINT uq_utenti_telefono UNIQUE (prefisso, nr_telefono),
     CONSTRAINT ck_utenti_prefisso CHECK (prefisso ~ '^\+[0-9]{1,4}$'),
@@ -429,23 +432,66 @@ EXECUTE FUNCTION fn_blocca_modifica_storico();
 
 
 
--- ===== Posizione dei corrieri (RF16) =====
+-- ===== Configurazione dell'amministratore =====
 
 -- Impostazioni globali dell'applicazione, modificabili dall'amministratore.
 -- La tabella ha sempre UNA sola riga: la chiave è un booleano che può
 -- valere solo TRUE, quindi una seconda riga violerebbe la PRIMARY KEY.
 CREATE TABLE impostazioni (
     id                          BOOLEAN PRIMARY KEY DEFAULT TRUE,
+    -- ogni quanti secondi il corriere invia la posizione (RF16)
     intervallo_posizione_sec    INTEGER NOT NULL DEFAULT 30,
+    -- per quanti giorni il cliente destinatario vede una spedizione chiusa
+    giorni_visibilita_cliente   INTEGER NOT NULL DEFAULT 30,
+    -- tentativi falliti oltre i quali la spedizione va annullata (ritiro)
+    -- o diventa 'non consegnata' (consegna)
+    max_tentativi_ritiro        INTEGER NOT NULL DEFAULT 3,
+    max_tentativi_consegna      INTEGER NOT NULL DEFAULT 3,
     modificate_il               TIMESTAMPTZ NOT NULL DEFAULT now(),
     id_amministratore_modifica  INTEGER NULL
                                 REFERENCES amministratori (id) ON UPDATE CASCADE ON DELETE SET NULL,
     CONSTRAINT ck_impostazioni_riga_unica CHECK (id),
     -- sotto i 5 secondi il database si riempie, sopra l'ora la posizione non serve più
-    CONSTRAINT ck_impostazioni_intervallo CHECK (intervallo_posizione_sec BETWEEN 5 AND 3600)
+    CONSTRAINT ck_impostazioni_intervallo CHECK (intervallo_posizione_sec BETWEEN 5 AND 3600),
+    CONSTRAINT ck_impostazioni_giorni     CHECK (giorni_visibilita_cliente BETWEEN 1 AND 365),
+    CONSTRAINT ck_impostazioni_ritiro     CHECK (max_tentativi_ritiro BETWEEN 1 AND 10),
+    CONSTRAINT ck_impostazioni_consegna   CHECK (max_tentativi_consegna BETWEEN 1 AND 10)
 );
 
 INSERT INTO impostazioni DEFAULT VALUES;
+
+-- Elenco dei motivi pubblici di tentativi falliti, annullamenti e perdite.
+-- Un motivo non si cancella né si rinomina: si disattiva, così le note che lo
+-- usano restano leggibili. Le note salvano il testo del motivo (note.motivo).
+CREATE TABLE motivi (
+    id           INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    descrizione  VARCHAR(100) NOT NULL,
+    attivo       BOOLEAN      NOT NULL DEFAULT TRUE,
+    creato_il    TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    CONSTRAINT ck_motivi_descrizione CHECK (btrim(descrizione) <> '')
+);
+
+CREATE UNIQUE INDEX uq_motivi_descrizione ON motivi (lower(descrizione));
+
+INSERT INTO motivi (descrizione) VALUES
+    ('mittente assente'),
+    ('pacco non pronto'),
+    ('indirizzo di ritiro errato'),
+    ('destinatario assente'),
+    ('indirizzo errato'),
+    ('rifiutata dal destinatario'),
+    ('accesso impossibile'),
+    ('richiesta del mittente'),
+    ('richiesta del destinatario'),
+    ('dati della spedizione errati'),
+    ('ritiro non riuscito'),
+    ('smarrita in deposito'),
+    ('smarrita durante il trasporto'),
+    ('furto'),
+    ('altro');
+
+
+-- ===== Posizione dei corrieri (RF16) =====
 
 -- Storico delle posizioni (simulate) inviate dai corrieri.
 -- L'ultima posizione di un corriere è la riga con rilevata_il più recente.
