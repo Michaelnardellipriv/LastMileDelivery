@@ -15,7 +15,7 @@ type DettaglioSpedizione struct {
 }
 
 func (s *Servizio) Dettaglio(ctx context.Context, r identita.Richiedente, id int32) (DettaglioSpedizione, error) {
-	vis, err := visibilitaPer(r, s.giorniCliente, s.adesso())
+	vis, err := s.visibilita(ctx, r)
 	if err != nil {
 		return DettaglioSpedizione{}, err
 	}

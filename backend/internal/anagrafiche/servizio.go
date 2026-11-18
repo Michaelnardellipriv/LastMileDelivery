@@ -92,11 +92,15 @@ type Ricerca struct {
 
 type archivio interface {
 	CercaClienti(ctx context.Context, r Ricerca) ([]Cliente, int, error)
-	EmailUsata(ctx context.Context, email string) (bool, error)
+	// EmailUsata dice se l'email è già di un utente diverso da escludi (0 = nessuno escluso).
+	EmailUsata(ctx context.Context, email string, escludi int32) (bool, error)
 	CreaCliente(ctx context.Context, c Cliente, pwdHash string) (Cliente, error)
 	CercaCorrieri(ctx context.Context, r Ricerca) ([]Corriere, int, error)
 	CercaIndirizzi(ctx context.Context, r Ricerca) ([]Indirizzo, int, error)
 	TrovaOCreaIndirizzo(ctx context.Context, i Indirizzo) (Indirizzo, bool, error)
+	CercaUtenti(ctx context.Context, r RicercaUtenti) ([]Utente, int, error)
+	CreaUtente(ctx context.Context, ruolo identita.Ruolo, c Cliente, pwdHash string) (Utente, error)
+	ModificaUtente(ctx context.Context, idUtente int32, d DatiUtente) (Utente, error)
 }
 
 type Servizio struct {
@@ -164,6 +168,25 @@ func (s *Servizio) CreaCliente(ctx context.Context, r identita.Richiedente, n Nu
 		return EsitoCliente{}, err
 	}
 	e := &errori.Validazione{}
+	c := validaPersona(e, n)
+	if err := e.Err(); err != nil {
+		return EsitoCliente{}, err
+	}
+	hash, err := s.preparaCredenziali(ctx, c.Email, *n.Password)
+	if err != nil {
+		return EsitoCliente{}, err
+	}
+	creato, err := s.archivio.CreaCliente(ctx, c, hash)
+	if err != nil {
+		return EsitoCliente{}, err
+	}
+	mail := s.inviaCredenziali(ctx, creato.Nome, creato.Email, *n.Password,
+		"Veloce24 ha creato il tuo account per seguire le spedizioni a te destinate.")
+	return EsitoCliente{Cliente: creato, MailInviata: mail}, nil
+}
+
+// validaPersona controlla i dati anagrafici e la password di un nuovo utente.
+func validaPersona(e *errori.Validazione, n NuovoCliente) Cliente {
 	c := Cliente{
 		Nome:       testo(e, "nome", n.Nome, 100),
 		Cognome:    testo(e, "cognome", n.Cognome, 100),
@@ -171,6 +194,13 @@ func (s *Servizio) CreaCliente(ctx context.Context, r identita.Richiedente, n Nu
 		NrTelefono: testo(e, "nr_telefono", n.NrTelefono, 15),
 		Email:      testo(e, "email", n.Email, 254),
 	}
+	controllaFormati(e, c)
+	autenticazione.ControllaPassword(e, "password", n.Password)
+	return c
+}
+
+// controllaFormati verifica il formato dei campi presenti (quelli vuoti li segnala testo).
+func controllaFormati(e *errori.Validazione, c Cliente) {
 	if c.Prefisso != "" && !formatoPrefisso.MatchString(c.Prefisso) {
 		e.Aggiungi("prefisso", "formato non valido: + seguito da 1 a 4 cifre, es. +39")
 	}
@@ -180,27 +210,18 @@ func (s *Servizio) CreaCliente(ctx context.Context, r identita.Richiedente, n Nu
 	if c.Email != "" && !formatoEmail.MatchString(c.Email) {
 		e.Aggiungi("email", "formato non valido")
 	}
-	autenticazione.ControllaPassword(e, "password", n.Password)
-	if err := e.Err(); err != nil {
-		return EsitoCliente{}, err
-	}
+}
 
-	usata, err := s.archivio.EmailUsata(ctx, c.Email)
+// preparaCredenziali verifica che l'email sia libera e restituisce l'hash della password.
+func (s *Servizio) preparaCredenziali(ctx context.Context, email, password string) (string, error) {
+	usata, err := s.archivio.EmailUsata(ctx, email, 0)
 	if err != nil {
-		return EsitoCliente{}, err
+		return "", err
 	}
 	if usata {
-		return EsitoCliente{}, errEmailUsata
+		return "", errEmailUsata
 	}
-	hash, err := autenticazione.HashPassword(*n.Password)
-	if err != nil {
-		return EsitoCliente{}, err
-	}
-	creato, err := s.archivio.CreaCliente(ctx, c, hash)
-	if err != nil {
-		return EsitoCliente{}, err
-	}
-	return EsitoCliente{Cliente: creato, MailInviata: s.inviaCredenziali(ctx, creato, *n.Password)}, nil
+	return autenticazione.HashPassword(password)
 }
 
 var errEmailUsata = &errori.Conflitto{
@@ -219,14 +240,14 @@ func (s *Servizio) CercaCorrieri(ctx context.Context, r identita.Richiedente, ri
 	return s.archivio.CercaCorrieri(ctx, ric)
 }
 
-func (s *Servizio) inviaCredenziali(ctx context.Context, c Cliente, password string) bool {
-	testo := "Ciao " + c.Nome + ",\n\n" +
-		"Veloce24 ha creato il tuo account per seguire le spedizioni a te destinate.\n\n" +
-		"Email: " + c.Email + "\n" +
+func (s *Servizio) inviaCredenziali(ctx context.Context, nome, email, password, presentazione string) bool {
+	testo := "Ciao " + nome + ",\n\n" +
+		presentazione + "\n\n" +
+		"Email: " + email + "\n" +
 		"Password: " + password + "\n\n" +
 		"Ti consigliamo di cambiare la password dopo il primo accesso.\n"
-	if err := s.postino.Invia(ctx, c.Email, oggettoMailAccount, testo); err != nil {
-		log.Printf("nuovo cliente %d: invio della mail con le credenziali fallito: %v", c.ID, err)
+	if err := s.postino.Invia(ctx, email, oggettoMailAccount, testo); err != nil {
+		log.Printf("nuovo account %s: invio della mail con le credenziali fallito: %v", email, err)
 		return false
 	}
 	return true

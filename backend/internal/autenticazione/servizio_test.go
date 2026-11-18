@@ -112,11 +112,12 @@ func servizioDiProva(t *testing.T) (*Servizio, *archivioFinto, *postinoFinto) {
 	}
 	a := &archivioFinto{
 		account: map[string]Account{
-			"operatore@test.it":    {IDUtente: 10, Nome: "Oscar", Email: "operatore@test.it", PwdHash: hash, Ruoli: []identita.Richiedente{operatore}},
-			"destinatario@test.it": {IDUtente: 11, Nome: "Dora", Email: "destinatario@test.it", PwdHash: hash, Ruoli: []identita.Richiedente{cliente}},
-			"doppio@test.it":       {IDUtente: 12, Nome: "Carlo", Email: "doppio@test.it", PwdHash: hash, Ruoli: []identita.Richiedente{corriere, {Ruolo: identita.Cliente, ID: 8}}},
-			"bloccato@test.it":     {IDUtente: 13, Nome: "Bloccato", Email: "bloccato@test.it", PwdHash: "!", Ruoli: []identita.Richiedente{{Ruolo: identita.Cliente, ID: 9}}},
-			"mittente@test.it":     {IDUtente: 14, Nome: "Marco", Email: "mittente@test.it", PwdHash: hash, Ruoli: []identita.Richiedente{{Ruolo: identita.Cliente, ID: 20}}},
+			"operatore@test.it":    {IDUtente: 10, Nome: "Oscar", Email: "operatore@test.it", PwdHash: hash, Attivo: true, Ruoli: []identita.Richiedente{operatore}},
+			"destinatario@test.it": {IDUtente: 11, Nome: "Dora", Email: "destinatario@test.it", PwdHash: hash, Attivo: true, Ruoli: []identita.Richiedente{cliente}},
+			"doppio@test.it":       {IDUtente: 12, Nome: "Carlo", Email: "doppio@test.it", PwdHash: hash, Attivo: true, Ruoli: []identita.Richiedente{corriere, {Ruolo: identita.Cliente, ID: 8}}},
+			"bloccato@test.it":     {IDUtente: 13, Nome: "Bloccato", Email: "bloccato@test.it", PwdHash: "!", Attivo: true, Ruoli: []identita.Richiedente{{Ruolo: identita.Cliente, ID: 9}}},
+			"disattivato@test.it":  {IDUtente: 15, Nome: "Dario", Email: "disattivato@test.it", PwdHash: hash, Ruoli: []identita.Richiedente{{Ruolo: identita.Corriere, ID: 30}}},
+			"mittente@test.it":     {IDUtente: 14, Nome: "Marco", Email: "mittente@test.it", PwdHash: hash, Attivo: true, Ruoli: []identita.Richiedente{{Ruolo: identita.Cliente, ID: 20}}},
 		},
 		destinatari: map[int32]bool{cliente.ID: true},
 		recuperi:    map[string]int32{},
@@ -175,6 +176,22 @@ func TestLoginSoloClientiDestinatari(t *testing.T) {
 	a.destinatari[20] = true
 	if sess, err := s.Login(ctx, p("mittente@test.it"), p("Password123"), nil); err != nil || sess.Ruolo.Ruolo != identita.Cliente {
 		t.Fatalf("il cliente diventato destinatario entra: %+v %v", sess, err)
+	}
+}
+
+func TestUtenteDisattivato(t *testing.T) {
+	ctx := context.Background()
+	s, _, postino := servizioDiProva(t)
+
+	if _, err := s.Login(ctx, p("disattivato@test.it"), p("Password123"), nil); tipoErrore(err) != "403" {
+		t.Fatalf("l'utente disattivato non entra: atteso 403, ottenuto %v", err)
+	}
+	// con la password sbagliata resta 401: chi non conosce le credenziali non scopre che l'account esiste
+	if _, err := s.Login(ctx, p("disattivato@test.it"), p("Sbagliata1"), nil); tipoErrore(err) != "401" {
+		t.Fatalf("password sbagliata: atteso 401, ottenuto %v", err)
+	}
+	if err := s.RichiediRecupero(ctx, p("disattivato@test.it")); err != nil || postino.destinatario != "" {
+		t.Fatalf("all'utente disattivato non parte la mail di recupero: %v %q", err, postino.destinatario)
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 
 	"lastmiledelivery/backend/internal/database"
 	"lastmiledelivery/backend/internal/errori"
+	"lastmiledelivery/backend/internal/identita"
 )
 
 type Repository struct {
@@ -29,12 +30,14 @@ func scansionaCliente(riga pgx.CollectableRow) (Cliente, error) {
 	return c, err
 }
 
-// Ricerca per nome, cognome, email o telefono (clienti e corrieri).
-const filtroPersona = `
-		WHERE $1 = ''
+// Ricerca per nome, cognome, email o telefono (clienti, corrieri e operatori).
+const condizionePersona = `($1 = ''
 		   OR position(lower($1) in lower(u.nome || ' ' || u.cognome || ' ' || u.cognome || ' ' || u.nome)) > 0
 		   OR position(lower($1) in lower(u.email)) > 0
-		   OR position($1 in u.nr_telefono) > 0`
+		   OR position($1 in u.nr_telefono) > 0)`
+
+const filtroPersona = `
+		WHERE ` + condizionePersona
 
 // conta restituisce quante righe trova la ricerca, su tutte le pagine.
 func (r *Repository) conta(ctx context.Context, daDove string, testo string) (int, error) {
@@ -59,9 +62,10 @@ func (r *Repository) CercaClienti(ctx context.Context, ric Ricerca) ([]Cliente, 
 	return clienti, totale, err
 }
 
-func (r *Repository) EmailUsata(ctx context.Context, email string) (bool, error) {
+func (r *Repository) EmailUsata(ctx context.Context, email string, escludi int32) (bool, error) {
 	var usata bool
-	err := r.db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM utenti WHERE lower(email) = lower($1))`, email).Scan(&usata)
+	err := r.db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM utenti WHERE lower(email) = lower($1) AND id <> $2)`,
+		email, escludi).Scan(&usata)
 	return usata, err
 }
 
@@ -93,8 +97,10 @@ func (r *Repository) CreaCliente(ctx context.Context, c Cliente, pwdHash string)
 	return creato, tx.Commit(ctx)
 }
 
+// CercaCorrieri elenca solo i corrieri attivi: è l'elenco da cui l'operatore sceglie
+// a chi assegnare una spedizione.
 func (r *Repository) CercaCorrieri(ctx context.Context, ric Ricerca) ([]Corriere, int, error) {
-	const daDove = `FROM corrieri co JOIN utenti u ON u.id = co.id_utente` + filtroPersona
+	const daDove = `FROM corrieri co JOIN utenti u ON u.id = co.id_utente AND u.attivo` + filtroPersona
 	totale, err := r.conta(ctx, daDove, ric.Testo)
 	if err != nil {
 		return nil, 0, err
@@ -112,6 +118,122 @@ func (r *Repository) CercaCorrieri(ctx context.Context, ric Ricerca) ([]Corriere
 		return c, err
 	})
 	return corrieri, totale, err
+}
+
+// Corrieri e operatori in un'unica tabella, con il ruolo e l'id nella tabella del ruolo.
+const selezioneUtente = `
+	SELECT u.id, g.ruolo, g.id_ruolo, u.nome, u.cognome, u.email, u.prefisso, u.nr_telefono, u.attivo
+	FROM (
+		SELECT id_utente, 'corriere' AS ruolo, id AS id_ruolo FROM corrieri
+		UNION ALL
+		SELECT id_utente, 'operatore', id FROM operatori_logistici
+	) AS g
+	JOIN utenti u ON u.id = g.id_utente`
+
+func scansionaUtente(riga pgx.CollectableRow) (Utente, error) {
+	var u Utente
+	var ruolo string
+	err := riga.Scan(&u.ID, &ruolo, &u.IDRuolo, &u.Nome, &u.Cognome, &u.Email, &u.Prefisso, &u.NrTelefono, &u.Attivo)
+	u.Ruolo = identita.Ruolo(ruolo)
+	return u, err
+}
+
+func (r *Repository) CercaUtenti(ctx context.Context, ric RicercaUtenti) ([]Utente, int, error) {
+	const filtro = `
+		WHERE ` + condizionePersona + `
+		  AND ($2::text IS NULL OR g.ruolo = $2)
+		  AND ($3::boolean IS NULL OR u.attivo = $3)`
+	var ruolo *string
+	if ric.Ruolo != nil {
+		ruolo = (*string)(ric.Ruolo)
+	}
+	var totale int
+	if err := r.db.QueryRow(ctx, `SELECT count(*) FROM (`+selezioneUtente+filtro+`) AS trovati`,
+		ric.Testo, ruolo, ric.Attivo).Scan(&totale); err != nil {
+		return nil, 0, err
+	}
+	righe, err := r.db.Query(ctx, selezioneUtente+filtro+`
+		ORDER BY u.cognome, u.nome, u.id
+		LIMIT $4 OFFSET $5`, ric.Testo, ruolo, ric.Attivo, ric.PerPagina, (ric.Pagina-1)*ric.PerPagina)
+	if err != nil {
+		return nil, 0, err
+	}
+	utenti, err := pgx.CollectRows(righe, scansionaUtente)
+	return utenti, totale, err
+}
+
+var tabellaDelRuolo = map[identita.Ruolo]string{
+	identita.Corriere:  "corrieri",
+	identita.Operatore: "operatori_logistici",
+}
+
+func (r *Repository) CreaUtente(ctx context.Context, ruolo identita.Ruolo, c Cliente, pwdHash string) (Utente, error) {
+	tabella, ok := tabellaDelRuolo[ruolo]
+	if !ok {
+		return Utente{}, errors.New("ruolo non gestito: " + string(ruolo))
+	}
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return Utente{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	var idUtente int32
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO utenti (nome, cognome, prefisso, nr_telefono, email, pwd_hash)
+		VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+		c.Nome, c.Cognome, c.Prefisso, c.NrTelefono, c.Email, pwdHash).Scan(&idUtente); err != nil {
+		return Utente{}, traduciErrore(err)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO `+tabella+` (id_utente) VALUES ($1)`, idUtente); err != nil {
+		return Utente{}, traduciErrore(err)
+	}
+	righe, err := tx.Query(ctx, selezioneUtente+` WHERE u.id = $1`, idUtente)
+	if err != nil {
+		return Utente{}, err
+	}
+	creato, err := pgx.CollectExactlyOneRow(righe, scansionaUtente)
+	if err != nil {
+		return Utente{}, err
+	}
+	return creato, tx.Commit(ctx)
+}
+
+// ModificaUtente cambia solo i campi presenti, e solo se l'utente è un corriere o un operatore.
+func (r *Repository) ModificaUtente(ctx context.Context, idUtente int32, d DatiUtente) (Utente, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return Utente{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	tag, err := tx.Exec(ctx, `
+		UPDATE utenti SET
+			nome        = COALESCE($2, nome),
+			cognome     = COALESCE($3, cognome),
+			prefisso    = COALESCE($4, prefisso),
+			nr_telefono = COALESCE($5, nr_telefono),
+			email       = COALESCE($6, email),
+			pwd_hash    = COALESCE($7, pwd_hash),
+			attivo      = COALESCE($8, attivo)
+		WHERE id = $1
+		  AND id IN (SELECT id_utente FROM corrieri UNION ALL SELECT id_utente FROM operatori_logistici)`,
+		idUtente, d.Nome, d.Cognome, d.Prefisso, d.NrTelefono, d.Email, d.PwdHash, d.Attivo)
+	if err != nil {
+		return Utente{}, traduciErrore(err)
+	}
+	if tag.RowsAffected() == 0 {
+		return Utente{}, &errori.NonTrovato{Messaggio: "nessun corriere o operatore con questo id utente"}
+	}
+	righe, err := tx.Query(ctx, selezioneUtente+` WHERE u.id = $1`, idUtente)
+	if err != nil {
+		return Utente{}, err
+	}
+	u, err := pgx.CollectExactlyOneRow(righe, scansionaUtente)
+	if err != nil {
+		return Utente{}, err
+	}
+	return u, tx.Commit(ctx)
 }
 
 func traduciErrore(err error) error {

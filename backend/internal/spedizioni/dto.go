@@ -321,10 +321,6 @@ type voceStoricoDTO struct {
 	Autore        autoreDTO      `json:"autore"`
 }
 
-type rispostaMotivi struct {
-	Dati []Motivo `json:"dati"`
-}
-
 type rispostaStorico struct {
 	Dati []voceStoricoDTO `json:"dati"`
 }
