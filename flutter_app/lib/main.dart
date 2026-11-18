@@ -1,8 +1,25 @@
-import 'package:flutter/material.dart';
-import 'backend_page.dart';
+import 'package:material_ui/material_ui.dart';
+import './auth/forgot_password_page.dart';
+import './auth/home_per_ruolo.dart';
+import './auth/login_page.dart';
+import './auth/profile_page.dart';
 import 'store.dart';
 
-void main() => runApp(const App());
+/// Token di recupero password preso dal link della mail (`LINK_RECUPERO_PASSWORD?token=<token>`):
+/// su web, se LINK_RECUPERO_PASSWORD punta all'app, la pagina si apre già al passo "nuova password".
+/// Resta null quando l'app si apre normalmente.
+final tokenRecuperoDaLink = ValueNotifier<String?>(_leggiTokenDalLink());
+
+String? _leggiTokenDalLink() {
+  final t = Uri.base.queryParameters['token']?.trim();
+  return (t == null || t.isEmpty) ? null : t;
+}
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await store.ripristina(); // se c'è un JWT valido salvato, si entra senza rifare il login
+  runApp(const App());
+}
 
 const _seed = Color(0xFF0B5FFF);
 
@@ -10,15 +27,33 @@ class App extends StatelessWidget {
   const App({super.key});
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-        listenable: store,
+        listenable: Listenable.merge([store, tokenRecuperoDaLink]),
         builder: (_, __) => MaterialApp(
           title: 'Veloce24',
           debugShowCheckedModeBanner: false,
           theme: ThemeData(colorSchemeSeed: _seed, useMaterial3: true),
           darkTheme: ThemeData(colorSchemeSeed: _seed, brightness: Brightness.dark, useMaterial3: true),
-          home: store.me == null ? const LoginPage() : const Shell(),
+          home: _home(),
         ),
       );
+
+  /// Schermata iniziale: demo locale → Shell; sessione col backend (JWT) → home del suo ruolo;
+  /// altrimenti login.
+  Widget _home() {
+    if (store.me != null) return const Shell();
+    final s = store.sessione;
+    if (s != null) return HomePerRuolo(key: ValueKey(s.token), sessione: s); // routing per ruolo del backend
+    // ── Link di recupero password aperto dalla mail: POST /api/auth/reimposta-password ──
+    final token = tokenRecuperoDaLink.value;
+    if (token != null) {
+      return ForgotPasswordPage(
+        key: const ValueKey('reset-da-link'),
+        tokenIniziale: token,
+        onConcluso: () => tokenRecuperoDaLink.value = null, // finito: si torna al login
+      );
+    }
+    return const LoginPage();
+  }
 }
 
 void toast(BuildContext c, String m) => ScaffoldMessenger.of(c).showSnackBar(SnackBar(content: Text(m)));
@@ -46,42 +81,6 @@ class StatoChip extends StatelessWidget {
   }
 }
 
-// ───────── Login ─────────
-class LoginPage extends StatelessWidget {
-  const LoginPage({super.key});
-  @override
-  Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('Veloce24')),
-        body: ListView(padding: const EdgeInsets.all(16), children: [
-          if (apiBase.isNotEmpty)
-            Card(
-              color: Theme.of(context).colorScheme.primaryContainer,
-              child: ListTile(
-                leading: const Icon(Icons.cloud_done_outlined),
-                title: const Text('Dati reali dal backend'),
-                subtitle: Text('GET /api/spedizioni su $apiBase'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const BackendAccessoPage(apiBase: apiBase)),
-                ),
-              ),
-            ),
-          Text('Accedi', style: Theme.of(context).textTheme.headlineSmall),
-          const Text('Il backend non ha ancora un endpoint di login: scegli un utente di prova.'),
-          for (final r in Ruolo.values) ...[
-            Padding(
-              padding: const EdgeInsets.only(top: 16, bottom: 4),
-              child: Text(ruoloNome[r]!, style: Theme.of(context).textTheme.titleSmall),
-            ),
-            for (final u in store.utenti.where((u) => u.ruolo == r))
-              Card(child: ListTile(leading: const Icon(Icons.person), title: Text(u.nomeCompleto), onTap: () => store.login(u.id))),
-          ],
-          const SizedBox(height: 16),
-          Text(apiBase.isEmpty ? 'Modalità demo: dati locali.' : 'Backend: $apiBase', style: Theme.of(context).textTheme.bodySmall),
-        ]),
-      );
-}
-
 // ───────── Shell con navigazione per ruolo ─────────
 class Shell extends StatefulWidget {
   const Shell({super.key});
@@ -91,6 +90,12 @@ class Shell extends StatefulWidget {
 
 class _ShellState extends State<Shell> {
   int i = 0;
+
+  void _esci() {
+    Navigator.of(context).popUntil((r) => r.isFirst);
+    store.esci();
+  }
+
   @override
   Widget build(BuildContext context) {
     final u = store.me!;
@@ -105,13 +110,13 @@ class _ShellState extends State<Shell> {
         title: Text('${u.nomeCompleto} · ${ruoloNome[u.ruolo]}', style: const TextStyle(fontSize: 15)),
         actions: [
           IconButton(
-            tooltip: 'Esci',
-            icon: const Icon(Icons.logout),
-            onPressed: () {
-              Navigator.of(context).popUntil((r) => r.isFirst);
-              store.login(null);
-            },
+            tooltip: 'Il mio profilo',
+            icon: const Icon(Icons.account_circle_outlined),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => ProfilePage.demo(utente: u, onLogout: _esci)),
+            ),
           ),
+          IconButton(tooltip: 'Esci', icon: const Icon(Icons.logout), onPressed: _esci),
         ],
       ),
       body: voci[i].$3,
@@ -253,7 +258,7 @@ class _DettaglioState extends State<DettaglioPage> {
                 Text('Cambia stato', style: st.titleMedium),
                 const SizedBox(height: 8),
                 DropdownButtonFormField<String>(
-                  value: nuovo,
+                  initialValue: nuovo,
                   decoration: const InputDecoration(labelText: 'Nuovo stato', border: OutlineInputBorder()),
                   items: [for (final a in next) DropdownMenuItem(value: a, child: Text(a))],
                   onChanged: (v) => setState(() => nuovo = v),
@@ -261,7 +266,7 @@ class _DettaglioState extends State<DettaglioPage> {
                 if (nuovo == 'assegnata') ...[
                   const SizedBox(height: 12),
                   DropdownButtonFormField<int>(
-                    value: corriere,
+                    initialValue: corriere,
                     decoration: const InputDecoration(labelText: 'Corriere', border: OutlineInputBorder()),
                     items: [for (final x in cour) DropdownMenuItem(value: x.id, child: Text(x.nomeCompleto))],
                     onChanged: (v) => setState(() => corriere = v),
@@ -342,7 +347,7 @@ class _NuovaState extends State<NuovaPage> {
   Widget drop<T>(String label, T? v, List<DropdownMenuItem<T>> items, void Function(T?) f) => Padding(
         padding: const EdgeInsets.only(top: 12),
         child: DropdownButtonFormField<T>(
-          value: v,
+          initialValue: v,
           items: items,
           onChanged: f,
           validator: (x) => x == null ? 'Obbligatorio' : null,

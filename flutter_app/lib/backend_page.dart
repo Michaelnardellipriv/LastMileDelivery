@@ -1,6 +1,6 @@
 // Viste collegate al backend Go vero (non allo store demo in memoria).
 // Avvio: flutter run -d chrome --web-port 5173 --dart-define=API_BASE=http://localhost:8080
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'api.dart';
 
 String _data(DateTime d) {
@@ -31,7 +31,8 @@ class _ChipStato extends StatelessWidget {
   }
 }
 
-/// Scelta dell'identità da mandare negli header X-Id-* (il backend non ha ancora il login).
+/// Solo sviluppo: identità negli header X-Id-* (accettati dal backend finché IDENTITA_HEADER_SVILUPPO=attiva;
+/// l'ID è quello della tabella del ruolo). Con il login reale si usa il JWT.
 class BackendAccessoPage extends StatefulWidget {
   final String apiBase;
   const BackendAccessoPage({super.key, required this.apiBase});
@@ -49,7 +50,7 @@ class _BackendAccessoState extends State<BackendAccessoPage> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("L'ID deve essere un numero intero positivo")));
       return;
     }
-    final api = ApiClient(base: widget.apiBase, ruolo: ruolo, idUtente: n);
+    final api = ApiClient(base: widget.apiBase, ruolo: ruolo, idRuolo: n);
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => BackendElencoPage(api: api)));
   }
 
@@ -84,7 +85,9 @@ class _BackendAccessoState extends State<BackendAccessoPage> {
 /// Elenco spedizioni da GET /api/spedizioni, con filtro per stato.
 class BackendElencoPage extends StatefulWidget {
   final ApiClient api;
-  const BackendElencoPage({super.key, required this.api});
+  final VoidCallback? onLogout; // presente solo se l'utente è entrato col login (JWT)
+  final VoidCallback? onProfilo; // apre l'area personale (solo con login JWT)
+  const BackendElencoPage({super.key, required this.api, this.onLogout, this.onProfilo});
   @override
   State<BackendElencoPage> createState() => _BackendElencoState();
 }
@@ -110,8 +113,13 @@ class _BackendElencoState extends State<BackendElencoPage> {
   @override
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(
-          title: Text('${widget.api.ruolo.nome} #${widget.api.idUtente}', style: const TextStyle(fontSize: 15)),
-          actions: [IconButton(tooltip: 'Aggiorna', icon: const Icon(Icons.refresh), onPressed: _ricarica)],
+          title: Text('${widget.api.ruolo.nome} #${widget.api.idRuolo}', style: const TextStyle(fontSize: 15)),
+          actions: [
+            IconButton(tooltip: 'Aggiorna', icon: const Icon(Icons.refresh), onPressed: _ricarica),
+            if (widget.onProfilo != null)
+              IconButton(tooltip: 'Il mio profilo', icon: const Icon(Icons.account_circle_outlined), onPressed: widget.onProfilo),
+            if (widget.onLogout != null) IconButton(tooltip: 'Esci', icon: const Icon(Icons.logout), onPressed: widget.onLogout),
+          ],
         ),
         body: Column(children: [
           Padding(
