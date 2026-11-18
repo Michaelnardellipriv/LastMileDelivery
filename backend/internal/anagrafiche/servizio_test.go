@@ -19,7 +19,9 @@ type archivioFinto struct {
 	ricerca    Ricerca
 	indirizzo  Indirizzo
 	utenti     RicercaUtenti
-	attivo     *bool
+	modifica   *DatiUtente
+	// proprietari: di chi è un'email di emailUsate, per la modifica dell'utente stesso
+	proprietari map[string]int32
 }
 
 func (a *archivioFinto) CercaClienti(_ context.Context, r Ricerca) ([]Cliente, int, error) {
@@ -27,7 +29,10 @@ func (a *archivioFinto) CercaClienti(_ context.Context, r Ricerca) ([]Cliente, i
 	return []Cliente{{ID: 1}}, 1, nil
 }
 
-func (a *archivioFinto) EmailUsata(_ context.Context, email string) (bool, error) {
+func (a *archivioFinto) EmailUsata(_ context.Context, email string, escludi int32) (bool, error) {
+	if proprietario, ok := a.proprietari[strings.ToLower(email)]; ok && proprietario == escludi {
+		return false, nil
+	}
 	return a.emailUsate[strings.ToLower(email)], nil
 }
 
@@ -66,9 +71,19 @@ func (a *archivioFinto) CreaUtente(_ context.Context, ruolo identita.Ruolo, c Cl
 		Prefisso: c.Prefisso, NrTelefono: c.NrTelefono, Attivo: true}, nil
 }
 
-func (a *archivioFinto) ImpostaUtenteAttivo(_ context.Context, idUtente int32, attivo bool) (Utente, error) {
-	a.attivo = &attivo
-	return Utente{ID: idUtente, Ruolo: identita.Corriere, Attivo: attivo}, nil
+func (a *archivioFinto) ModificaUtente(_ context.Context, idUtente int32, d DatiUtente) (Utente, error) {
+	a.modifica = &d
+	u := Utente{ID: idUtente, Ruolo: identita.Corriere, Nome: "Carlo", Email: "carlo@test.it", Attivo: true}
+	if d.Nome != nil {
+		u.Nome = *d.Nome
+	}
+	if d.Email != nil {
+		u.Email = *d.Email
+	}
+	if d.Attivo != nil {
+		u.Attivo = *d.Attivo
+	}
+	return u, nil
 }
 
 type postinoFinto struct {

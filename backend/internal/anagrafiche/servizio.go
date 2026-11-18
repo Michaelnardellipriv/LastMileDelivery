@@ -92,14 +92,15 @@ type Ricerca struct {
 
 type archivio interface {
 	CercaClienti(ctx context.Context, r Ricerca) ([]Cliente, int, error)
-	EmailUsata(ctx context.Context, email string) (bool, error)
+	// EmailUsata dice se l'email è già di un utente diverso da escludi (0 = nessuno escluso).
+	EmailUsata(ctx context.Context, email string, escludi int32) (bool, error)
 	CreaCliente(ctx context.Context, c Cliente, pwdHash string) (Cliente, error)
 	CercaCorrieri(ctx context.Context, r Ricerca) ([]Corriere, int, error)
 	CercaIndirizzi(ctx context.Context, r Ricerca) ([]Indirizzo, int, error)
 	TrovaOCreaIndirizzo(ctx context.Context, i Indirizzo) (Indirizzo, bool, error)
 	CercaUtenti(ctx context.Context, r RicercaUtenti) ([]Utente, int, error)
 	CreaUtente(ctx context.Context, ruolo identita.Ruolo, c Cliente, pwdHash string) (Utente, error)
-	ImpostaUtenteAttivo(ctx context.Context, idUtente int32, attivo bool) (Utente, error)
+	ModificaUtente(ctx context.Context, idUtente int32, d DatiUtente) (Utente, error)
 }
 
 type Servizio struct {
@@ -193,6 +194,13 @@ func validaPersona(e *errori.Validazione, n NuovoCliente) Cliente {
 		NrTelefono: testo(e, "nr_telefono", n.NrTelefono, 15),
 		Email:      testo(e, "email", n.Email, 254),
 	}
+	controllaFormati(e, c)
+	autenticazione.ControllaPassword(e, "password", n.Password)
+	return c
+}
+
+// controllaFormati verifica il formato dei campi presenti (quelli vuoti li segnala testo).
+func controllaFormati(e *errori.Validazione, c Cliente) {
 	if c.Prefisso != "" && !formatoPrefisso.MatchString(c.Prefisso) {
 		e.Aggiungi("prefisso", "formato non valido: + seguito da 1 a 4 cifre, es. +39")
 	}
@@ -202,13 +210,11 @@ func validaPersona(e *errori.Validazione, n NuovoCliente) Cliente {
 	if c.Email != "" && !formatoEmail.MatchString(c.Email) {
 		e.Aggiungi("email", "formato non valido")
 	}
-	autenticazione.ControllaPassword(e, "password", n.Password)
-	return c
 }
 
 // preparaCredenziali verifica che l'email sia libera e restituisce l'hash della password.
 func (s *Servizio) preparaCredenziali(ctx context.Context, email, password string) (string, error) {
-	usata, err := s.archivio.EmailUsata(ctx, email)
+	usata, err := s.archivio.EmailUsata(ctx, email, 0)
 	if err != nil {
 		return "", err
 	}
