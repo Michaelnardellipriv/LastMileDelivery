@@ -2,6 +2,8 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'api.dart';
+import './auth/session.dart';
 
 /// Avvio con: flutter run --dart-define=API_BASE=http://localhost:8080
 /// (emulatore Android: http://10.0.2.2:8080). Vuoto = solo dati demo locali.
@@ -107,7 +109,14 @@ class Store extends ChangeNotifier {
   final tent = <Tentativo>[];
   final camb = <Cambiamento>[];
 
-  Store() {
+  // ───────── Sessione di login (JWT) ─────────
+  // `sessione` != null  → utente autenticato sul backend reale (token in memoria + storage sicuro).
+  // `meId` != null      → utente della demo locale (nessun token).
+  final SessioneStorage _storage;
+  Sessione? sessione;
+  String? avviso; // messaggio da mostrare una volta nel login (es. "sessione scaduta")
+
+  Store({SessioneStorage? storage}) : _storage = storage ?? SecureSessioneStorage() {
     utenti.addAll([
       Utente(1, 'Giulia', 'Admin', Ruolo.admin), Utente(2, 'Olga', 'Operatore', Ruolo.operatore),
       Utente(3, 'Marco', 'Bianchi', Ruolo.corriere), Utente(4, 'Sara', 'Neri', Ruolo.corriere),
@@ -156,7 +165,39 @@ class Store extends ChangeNotifier {
   Spedizione? byId(int id) => sped.where((s) => s.id == id).firstOrNull;
   int? corriereDi(Spedizione s) => ass.where((a) => a.id == s.idAssegnazione).firstOrNull?.idCorriere;
 
+  /// Accesso alla demo locale (nessuna rete, nessun token).
   void login(int? id) { meId = id; notifyListeners(); }
+
+  /// Dati dell'utente loggato dal backend (id_utente, id del ruolo, ruolo, nome, cognome, email):
+  /// sono quelli del login, perché il backend non ha un GET /api/auth/me.
+  Sessione? get utenteBackend => sessione;
+
+  /// All'avvio: recupera il JWT salvato, scartandolo se è già scaduto (`scade_il`).
+  Future<void> ripristina() async {
+    if (apiBase.isEmpty) return;
+    final s = await _storage.leggi();
+    if (s == null) return;
+    if (s.scaduta) return _storage.cancella();
+    sessione = s;
+  }
+
+  /// Dopo un login riuscito (risposta di POST /api/auth/login): tiene la sessione in memoria,
+  /// la salva cifrata e fa rifare la home dell'app (routing per `ruolo`).
+  Future<void> avviaSessione(Sessione s) async {
+    await _storage.salva(s);
+    sessione = s;
+    avviso = null;
+    notifyListeners();
+  }
+
+  /// Logout (demo o backend): azzera lo stato e cancella il token dal dispositivo.
+  Future<void> esci({String? avviso}) async {
+    meId = null;
+    sessione = null;
+    this.avviso = avviso;
+    notifyListeners();
+    await _storage.cancella();
+  }
 
   List<Spedizione> visibili(Utente u) => sped.where((s) {
         if (u.ruolo == Ruolo.corriere) return corriereDi(s) == u.id;
@@ -218,7 +259,11 @@ class Store extends ChangeNotifier {
       try {
         final r = await http
             .post(Uri.parse('$apiBase/api/spedizioni'),
-                headers: {'Content-Type': 'application/json'},
+                headers: {
+                  'Content-Type': 'application/json',
+                  // ── JWT: con il login reale la rotta protetta vuole `Authorization: Bearer <token>` ──
+                  if (sessione != null) 'Authorization': 'Bearer ${sessione!.token}',
+                },
                 body: jsonEncode({
                   'cod_ordine': cod, 'is_reso': reso, 'id_cliente_mittente': mittente,
                   'id_cliente_destinatario': destinatario,
