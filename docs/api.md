@@ -3,8 +3,8 @@
 |  |  |
 | :---- | :---- |
 | **Team** | GLS |
-| **Versione** | v0.29 (allineata a `backend/api/openapi.yaml` 0.29.0) |
-| **Data** | 17/11/2026 |
+| **Versione** | v0.30 (allineata a `backend/api/openapi.yaml` 0.30.0) |
+| **Data** | 18/11/2026 |
 | **Base URL (sviluppo)** | `http://localhost:8080` |
 | **Contratto formale** | [`backend/api/openapi.yaml`](../backend/api/openapi.yaml) |
 
@@ -31,7 +31,7 @@ Questo documento riassume il contratto per chi sviluppa l'app Flutter o prova le
 | `PATCH` | `/api/impostazioni/motivi/{id}` | amministratore | attiva o disattiva un motivo |
 | `GET` | `/api/utenti` | amministratore | corrieri e operatori, attivi e disattivati |
 | `POST` | `/api/utenti` | amministratore | crea un corriere o un operatore |
-| `PATCH` | `/api/utenti/{id}` | amministratore | abilita o disattiva un corriere o un operatore |
+| `PATCH` | `/api/utenti/{id}` | amministratore | modifica i dati, la password o lo stato (attivo) di un corriere o di un operatore |
 
 `POST` per gli endpoint che creano qualcosa (spedizione, assegnazione, tentativo, nota), `PATCH` per quelli che modificano la spedizione. Non esistono endpoint di eliminazione: le spedizioni e lo storico non si cancellano.
 
@@ -381,7 +381,7 @@ I nuovi limiti valgono per le azioni successive anche sulle spedizioni già aper
 
 ### Utenti
 
-L'amministratore crea, abilita e disattiva **corrieri** e **operatori**. I clienti destinatari li crea l'operatore con `POST /api/clienti`.
+L'amministratore crea, modifica, abilita e disattiva **corrieri** e **operatori**. I clienti destinatari li crea l'operatore con `POST /api/clienti`.
 
 `POST /api/utenti`, tutti i campi obbligatori:
 
@@ -410,7 +410,13 @@ Un utente nelle risposte:
 
 `GET /api/utenti` è paginato come `/api/clienti` (`q`, `pagina`, `per_pagina`), con i filtri facoltativi `ruolo` (`corriere`, `operatore`) e `attivo` (`true`, `false`).
 
-`PATCH /api/utenti/{id}` con `{ "attivo": false }` disattiva l'utente, `{ "attivo": true }` lo riabilita; risposta 200 con l'utente. 404 se l'id non è di un corriere o di un operatore. Un utente disattivato:
+`PATCH /api/utenti/{id}` cambia solo i campi indicati, uno o più tra `nome`, `cognome`, `prefisso`, `nr_telefono`, `email`, `password` e `attivo`; il ruolo non si cambia (400). Valgono le regole di `POST /api/utenti`, e l'email non può essere di un altro utente (409; la propria, anche con maiuscole diverse, va bene). Con una nuova `password` l'utente la riceve per mail; con una nuova `email` il login si fa con quella. Risposta 200 con l'utente; corpo vuoto: 400; 404 se l'id non è di un corriere o di un operatore.
+
+```json
+{ "cognome": "Bianchi", "nr_telefono": "3339998877", "email": "carlo.bianchi@veloce24.it" }
+```
+
+`{ "attivo": false }` disattiva l'utente, `{ "attivo": true }` lo riabilita. Un utente disattivato:
 
 - non può fare il login (403, solo se la password è giusta; altrimenti resta 401);  
 - i token che aveva già ricevono 403 a ogni richiesta;  

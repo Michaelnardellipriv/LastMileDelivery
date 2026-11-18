@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -277,6 +278,54 @@ func TestUtentiAmministratore(t *testing.T) {
 			"email": f.emailDi("clientedioperatore"), "password": "PasswordLia1"}
 		if r := f.chiama(t, http.MethodPost, "/api/clienti", cliente, token); r.stato != http.StatusCreated {
 			t.Fatalf("il nuovo operatore crea un cliente destinatario: %d %s", r.stato, r.grezzo)
+		}
+	})
+
+	t.Run("modifica_dati_e_password", func(t *testing.T) {
+		r := f.chiama(t, http.MethodPost, percorsoUtenti, nuovo("operatore", "damodificare"), admin)
+		if r.stato != http.StatusCreated {
+			t.Fatalf("nuovo operatore: %d %s", r.stato, r.grezzo)
+		}
+		percorso := percorsoUtenti + "/" + strconv.Itoa(int(r.corpo["utente"].(map[string]any)["id"].(float64)))
+		telefono := telefonoUnico()
+
+		m := f.chiama(t, http.MethodPatch, percorso, map[string]any{
+			"cognome": "Modificato", "nr_telefono": telefono, "email": f.emailDi("modificato"),
+		}, admin)
+		if m.stato != http.StatusOK || m.corpo["cognome"] != "Modificato" || m.corpo["nr_telefono"] != telefono ||
+			m.corpo["email"] != f.emailDi("modificato") || m.corpo["nome"] != "damodificare" || m.corpo["attivo"] != true {
+			t.Fatalf("modifica: si cambiano solo i campi indicati: %d %s", m.stato, m.grezzo)
+		}
+		f.login(t, map[string]any{"email": f.emailDi("damodificare"), "password": "PasswordNuova1"}, 401)
+		f.login(t, map[string]any{"email": f.emailDi("modificato"), "password": "PasswordNuova1"}, 200)
+
+		if p := f.chiama(t, http.MethodPatch, percorso, map[string]any{"password": "PasswordCambiata2"}, admin); p.stato != http.StatusOK {
+			t.Fatalf("nuova password: %d %s", p.stato, p.grezzo)
+		}
+		f.login(t, map[string]any{"email": f.emailDi("modificato"), "password": "PasswordNuova1"}, 401)
+		f.login(t, map[string]any{"email": f.emailDi("modificato"), "password": "PasswordCambiata2"}, 200)
+
+		// la propria email con maiuscole diverse va bene, quella di un altro no
+		if r := f.chiama(t, http.MethodPatch, percorso, map[string]any{"email": strings.ToUpper(f.emailDi("modificato"))}, admin); r.stato != http.StatusOK {
+			t.Errorf("la propria email: atteso 200, ottenuto %d %s", r.stato, r.grezzo)
+		}
+		if r := f.chiama(t, http.MethodPatch, percorso, map[string]any{"email": f.emailDi("operatore")}, admin); r.stato != 409 || !contiene(campiInErrore(r), "email") {
+			t.Errorf("email di un altro utente: atteso 409, ottenuto %d %s", r.stato, r.grezzo)
+		}
+		var telefonoAltrui string
+		if err := f.db.QueryRow(t.Context(), `SELECT nr_telefono FROM utenti WHERE email = $1`, f.emailDi("operatore")).Scan(&telefonoAltrui); err != nil {
+			t.Fatal(err)
+		}
+		if r := f.chiama(t, http.MethodPatch, percorso, map[string]any{"nr_telefono": telefonoAltrui}, admin); r.stato != 409 || !contiene(campiInErrore(r), "nr_telefono") {
+			t.Errorf("telefono di un altro utente: atteso 409, ottenuto %d %s", r.stato, r.grezzo)
+		}
+		for _, corpo := range []map[string]any{{}, {"nome": ""}, {"prefisso": "39"}, {"password": "corta"}, {"ruolo": "corriere"}} {
+			if r := f.chiama(t, http.MethodPatch, percorso, corpo, admin); r.stato != http.StatusBadRequest {
+				t.Errorf("%v: atteso 400, ottenuto %d %s", corpo, r.stato, r.grezzo)
+			}
+		}
+		if r := f.chiama(t, http.MethodPatch, percorso, map[string]any{"nome": "Vietato"}, op); r.stato != http.StatusForbidden {
+			t.Errorf("l'operatore non modifica gli utenti: %d", r.stato)
 		}
 	})
 

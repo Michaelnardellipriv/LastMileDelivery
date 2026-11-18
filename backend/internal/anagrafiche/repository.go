@@ -62,9 +62,10 @@ func (r *Repository) CercaClienti(ctx context.Context, ric Ricerca) ([]Cliente, 
 	return clienti, totale, err
 }
 
-func (r *Repository) EmailUsata(ctx context.Context, email string) (bool, error) {
+func (r *Repository) EmailUsata(ctx context.Context, email string, escludi int32) (bool, error) {
 	var usata bool
-	err := r.db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM utenti WHERE lower(email) = lower($1))`, email).Scan(&usata)
+	err := r.db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM utenti WHERE lower(email) = lower($1) AND id <> $2)`,
+		email, escludi).Scan(&usata)
 	return usata, err
 }
 
@@ -198,7 +199,8 @@ func (r *Repository) CreaUtente(ctx context.Context, ruolo identita.Ruolo, c Cli
 	return creato, tx.Commit(ctx)
 }
 
-func (r *Repository) ImpostaUtenteAttivo(ctx context.Context, idUtente int32, attivo bool) (Utente, error) {
+// ModificaUtente cambia solo i campi presenti, e solo se l'utente è un corriere o un operatore.
+func (r *Repository) ModificaUtente(ctx context.Context, idUtente int32, d DatiUtente) (Utente, error) {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return Utente{}, err
@@ -206,12 +208,19 @@ func (r *Repository) ImpostaUtenteAttivo(ctx context.Context, idUtente int32, at
 	defer tx.Rollback(ctx)
 
 	tag, err := tx.Exec(ctx, `
-		UPDATE utenti SET attivo = $2
+		UPDATE utenti SET
+			nome        = COALESCE($2, nome),
+			cognome     = COALESCE($3, cognome),
+			prefisso    = COALESCE($4, prefisso),
+			nr_telefono = COALESCE($5, nr_telefono),
+			email       = COALESCE($6, email),
+			pwd_hash    = COALESCE($7, pwd_hash),
+			attivo      = COALESCE($8, attivo)
 		WHERE id = $1
 		  AND id IN (SELECT id_utente FROM corrieri UNION ALL SELECT id_utente FROM operatori_logistici)`,
-		idUtente, attivo)
+		idUtente, d.Nome, d.Cognome, d.Prefisso, d.NrTelefono, d.Email, d.PwdHash, d.Attivo)
 	if err != nil {
-		return Utente{}, err
+		return Utente{}, traduciErrore(err)
 	}
 	if tag.RowsAffected() == 0 {
 		return Utente{}, &errori.NonTrovato{Messaggio: "nessun corriere o operatore con questo id utente"}

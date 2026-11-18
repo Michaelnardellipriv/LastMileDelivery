@@ -3,6 +3,7 @@ package anagrafiche
 import (
 	"context"
 
+	"lastmiledelivery/backend/internal/autenticazione"
 	"lastmiledelivery/backend/internal/errori"
 	"lastmiledelivery/backend/internal/identita"
 )
@@ -30,6 +31,33 @@ type NuovoUtente struct {
 type EsitoUtente struct {
 	Utente      Utente
 	MailInviata bool
+}
+
+// ModificaUtente contiene i campi da cambiare (nil = invariato).
+type ModificaUtente struct {
+	Nome       *string
+	Cognome    *string
+	Prefisso   *string
+	NrTelefono *string
+	Email      *string
+	Password   *string
+	Attivo     *bool
+}
+
+func (m ModificaUtente) vuota() bool {
+	return m.Nome == nil && m.Cognome == nil && m.Prefisso == nil && m.NrTelefono == nil &&
+		m.Email == nil && m.Password == nil && m.Attivo == nil
+}
+
+// DatiUtente sono i campi già validati da salvare; la password è già l'hash.
+type DatiUtente struct {
+	Nome       *string
+	Cognome    *string
+	Prefisso   *string
+	NrTelefono *string
+	Email      *string
+	PwdHash    *string
+	Attivo     *bool
 }
 
 type RicercaUtenti struct {
@@ -106,17 +134,71 @@ func (s *Servizio) CreaUtente(ctx context.Context, r identita.Richiedente, n Nuo
 	return EsitoUtente{Utente: creato, MailInviata: mail}, nil
 }
 
-// ImpostaUtenteAttivo abilita o disattiva un corriere o un operatore. L'utente
-// disattivato non entra più e i token che ha già smettono di valere; un corriere
-// disattivato non riceve nuove spedizioni.
-func (s *Servizio) ImpostaUtenteAttivo(ctx context.Context, r identita.Richiedente, idUtente int32, attivo *bool) (Utente, error) {
-	if err := soloAmministratore(r, "abilitare o disattivare gli utenti"); err != nil {
+// ModificaUtente cambia i dati di un corriere o di un operatore: solo i campi presenti.
+// Con attivo=false l'utente non entra più e i token che ha già smettono di valere; un
+// corriere disattivato non riceve nuove spedizioni. Con una nuova password, l'utente la
+// riceve per mail.
+func (s *Servizio) ModificaUtente(ctx context.Context, r identita.Richiedente, idUtente int32, m ModificaUtente) (Utente, error) {
+	if err := soloAmministratore(r, "modificare corrieri e operatori"); err != nil {
 		return Utente{}, err
 	}
-	if attivo == nil {
-		e := &errori.Validazione{}
-		e.Aggiungi("attivo", "obbligatorio")
+	e := &errori.Validazione{}
+	if m.vuota() {
+		e.Aggiungi("corpo", "indicare almeno un campo da modificare")
 		return Utente{}, e
 	}
-	return s.archivio.ImpostaUtenteAttivo(ctx, idUtente, *attivo)
+	campo := func(nome string, v *string, massimo int) *string {
+		if v == nil {
+			return nil
+		}
+		t := testo(e, nome, v, massimo)
+		return &t
+	}
+	d := DatiUtente{
+		Nome:       campo("nome", m.Nome, 100),
+		Cognome:    campo("cognome", m.Cognome, 100),
+		Prefisso:   campo("prefisso", m.Prefisso, 5),
+		NrTelefono: campo("nr_telefono", m.NrTelefono, 15),
+		Email:      campo("email", m.Email, 254),
+		Attivo:     m.Attivo,
+	}
+	valore := func(v *string) string {
+		if v == nil {
+			return ""
+		}
+		return *v
+	}
+	controllaFormati(e, Cliente{Prefisso: valore(d.Prefisso), NrTelefono: valore(d.NrTelefono), Email: valore(d.Email)})
+	if m.Password != nil {
+		autenticazione.ControllaPassword(e, "password", m.Password)
+	}
+	if err := e.Err(); err != nil {
+		return Utente{}, err
+	}
+
+	if d.Email != nil {
+		usata, err := s.archivio.EmailUsata(ctx, *d.Email, idUtente)
+		if err != nil {
+			return Utente{}, err
+		}
+		if usata {
+			return Utente{}, errEmailUsata
+		}
+	}
+	if m.Password != nil {
+		hash, err := autenticazione.HashPassword(*m.Password)
+		if err != nil {
+			return Utente{}, err
+		}
+		d.PwdHash = &hash
+	}
+	u, err := s.archivio.ModificaUtente(ctx, idUtente, d)
+	if err != nil {
+		return Utente{}, err
+	}
+	if m.Password != nil {
+		s.inviaCredenziali(ctx, u.Nome, u.Email, *m.Password,
+			"L'amministratore di Veloce24 ha reimpostato la password del tuo account da "+ruoliGestiti[u.Ruolo]+".")
+	}
+	return u, nil
 }

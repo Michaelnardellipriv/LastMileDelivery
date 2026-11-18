@@ -2,7 +2,7 @@ openapi: 3.0.3
 
 info:
   title: LastMileDelivery API
-  version: "0.29.0"
+  version: "0.30.0"
   description: |
     API per la gestione delle spedizioni di Veloce24.
 
@@ -1399,9 +1399,13 @@ paths:
         schema: { type: integer, format: int32, minimum: 1 }
     patch:
       tags: [amministrazione]
-      summary: Abilita o disattiva un corriere o un operatore
+      summary: Modifica, abilita o disattiva un corriere o un operatore
       description: |
-        Un utente disattivato non può fare il login (403), i token che aveva ricevono 403 a
+        Cambia solo i campi presenti (almeno uno); il ruolo non si cambia. Per i dati valgono
+        le regole di `POST /api/utenti`; l'email non può essere di un altro utente (409), la
+        propria con maiuscole diverse sì. Con una nuova `password` l'utente la riceve per mail.
+
+        Un utente disattivato (`attivo: false`) non può fare il login (403), i token che aveva ricevono 403 a
         ogni richiesta e non riceve mail di recupero password. Un corriere disattivato non
         compare in `GET /api/corrieri` e non gli si assegnano spedizioni (409); quelle che
         aveva restano sue finché l'operatore non le riassegna. Con `attivo: true` torna
@@ -1415,8 +1419,8 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/StatoAttivo' }
-            example: { attivo: false }
+            schema: { $ref: '#/components/schemas/ModificaUtente' }
+            example: { cognome: Bianchi, nr_telefono: '3339998877' }
       responses:
         '200':
           description: Utente aggiornato
@@ -1424,7 +1428,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Utente' }
         '400':
-          description: '`attivo` mancante o id non valido'
+          description: Corpo vuoto, campo non valido o sconosciuto (anche `ruolo`), id non valido
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Errore' }
@@ -1432,6 +1436,11 @@ paths:
         '403': { $ref: '#/components/responses/NonAutorizzato' }
         '404':
           description: Nessun corriere o operatore con questo id utente
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+        '409':
+          description: Email già usata da un altro utente, oppure numero di telefono già usato
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Errore' }
@@ -2180,6 +2189,19 @@ components:
       required: [attivo]
       properties:
         attivo: { type: boolean }
+
+    ModificaUtente:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        nome: { type: string, maxLength: 100 }
+        cognome: { type: string, maxLength: 100 }
+        prefisso: { type: string, pattern: '^\+[0-9]{1,4}$', example: '+39' }
+        nr_telefono: { type: string, pattern: '^[0-9]{4,15}$' }
+        email: { type: string, format: email, maxLength: 254 }
+        password: { type: string, minLength: 8, description: Nuova password, inviata per mail all'utente }
+        attivo: { type: boolean, description: false disattiva l'utente, true lo riabilita }
 
     NuovoUtente:
       type: object

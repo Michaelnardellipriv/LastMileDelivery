@@ -43,7 +43,8 @@ type richiestaUtente struct {
 	richiestaCliente
 }
 
-type richiestaStatoUtente struct {
+type richiestaModificaUtente struct {
+	richiestaCliente
 	Attivo *bool `json:"attivo"`
 }
 
@@ -306,11 +307,14 @@ func (h *Handler) modificaUtente(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var req richiestaStatoUtente
+	var req richiestaModificaUtente
 	if !httpx.LeggiCorpo(w, r, &req) {
 		return
 	}
-	u, err := h.servizio.ImpostaUtenteAttivo(r.Context(), identita.DalContesto(r.Context()), id, req.Attivo)
+	u, err := h.servizio.ModificaUtente(r.Context(), identita.DalContesto(r.Context()), id, ModificaUtente{
+		Nome: req.Nome, Cognome: req.Cognome, Prefisso: req.Prefisso, NrTelefono: req.NrTelefono,
+		Email: req.Email, Password: req.Password, Attivo: req.Attivo,
+	})
 	if err != nil {
 		httpx.RispondiErrore(w, r, err)
 		return
