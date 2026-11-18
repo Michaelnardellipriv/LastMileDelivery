@@ -2,3 +2,9 @@ env
 .env
 .exe
 *.exe
+
+.dart_tool/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+config

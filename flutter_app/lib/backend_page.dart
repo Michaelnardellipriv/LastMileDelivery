@@ -2,13 +2,14 @@
 // Avvio: flutter run -d chrome --web-port 5173 --dart-define=API_BASE=http://localhost:8080
 import 'package:flutter/material.dart';
 import 'api.dart';
+import 'tracking_page.dart';
 
-String _data(DateTime d) {
+String dataOra(DateTime d) {
   String p(int n) => n.toString().padLeft(2, '0');
   return '${p(d.day)}/${p(d.month)}/${d.year} ${p(d.hour)}:${p(d.minute)}';
 }
 
-Color _colore(String s) => switch (s) {
+Color coloreStato(String s) => switch (s) {
       'consegnata' => Colors.green,
       'non consegnata' || 'persa' => Colors.red,
       'ritirata' || 'in consegna' => Colors.orange,
@@ -16,12 +17,12 @@ Color _colore(String s) => switch (s) {
       _ => Colors.grey,
     };
 
-class _ChipStato extends StatelessWidget {
+class ChipStato extends StatelessWidget {
   final String stato;
-  const _ChipStato(this.stato);
+  const ChipStato(this.stato, {super.key});
   @override
   Widget build(BuildContext context) {
-    final c = _colore(stato);
+    final c = coloreStato(stato);
     return Chip(
       label: Text(stato, style: TextStyle(color: c, fontWeight: FontWeight.w600, fontSize: 12)),
       backgroundColor: c.withValues(alpha: .15),
@@ -50,7 +51,10 @@ class _BackendAccessoState extends State<BackendAccessoPage> {
       return;
     }
     final api = ApiClient(base: widget.apiBase, ruolo: ruolo, idUtente: n);
-    Navigator.of(context).push(MaterialPageRoute(builder: (_) => BackendElencoPage(api: api)));
+    // Il cliente destinatario ha la sua pagina di tracking, senza dati del corriere.
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => ruolo == RuoloApi.cliente ? TrackingClientePage(api: api) : BackendElencoPage(api: api),
+    ));
   }
 
   @override
@@ -89,7 +93,7 @@ class BackendElencoPage extends StatefulWidget {
   State<BackendElencoPage> createState() => _BackendElencoState();
 }
 
-const _stati = ['creata', 'assegnata', 'ritirata', 'in consegna', 'consegnata', 'non consegnata', 'persa', 'annullata'];
+const statiSpedizione = ['creata', 'assegnata', 'ritirata', 'in consegna', 'consegnata', 'non consegnata', 'persa', 'annullata'];
 
 class _BackendElencoState extends State<BackendElencoPage> {
   String? stato;
@@ -121,7 +125,7 @@ class _BackendElencoState extends State<BackendElencoPage> {
               decoration: const InputDecoration(labelText: 'Stato', border: OutlineInputBorder(), isDense: true),
               items: [
                 const DropdownMenuItem(value: null, child: Text('Tutti')),
-                for (final s in _stati) DropdownMenuItem(value: s, child: Text(s)),
+                for (final s in statiSpedizione) DropdownMenuItem(value: s, child: Text(s)),
               ],
               onChanged: (v) {
                 stato = v;
@@ -163,9 +167,9 @@ class _BackendElencoState extends State<BackendElencoPage> {
                       final s = l[i];
                       return ListTile(
                         title: Text('${s.codOrdine}${s.isReso ? ' (reso)' : ''}'),
-                        subtitle: Text('Consegna: ${s.consegna.testo}\nRichiesta: ${_data(s.richiestaIl)}'),
+                        subtitle: Text('Consegna: ${s.consegna.testo}\nRichiesta: ${dataOra(s.richiestaIl)}'),
                         isThreeLine: true,
-                        trailing: _ChipStato(s.stato),
+                        trailing: ChipStato(s.stato),
                         onTap: () => _dettaglio(context, s),
                       );
                     },
@@ -183,14 +187,14 @@ class _BackendElencoState extends State<BackendElencoPage> {
         builder: (_) => ListView(padding: const EdgeInsets.fromLTRB(16, 0, 16, 24), shrinkWrap: true, children: [
           Row(children: [
             Expanded(child: Text(s.codOrdine, style: Theme.of(context).textTheme.titleLarge)),
-            _ChipStato(s.stato),
+            ChipStato(s.stato),
           ]),
           const SizedBox(height: 8),
           Text('Ritiro: ${s.ritiro.testo}'),
           Text('Consegna: ${s.consegna.testo}'),
-          Text('Creata il ${_data(s.creataIl)}'),
+          Text('Creata il ${dataOra(s.creataIl)}'),
           if (s.idCorriere != null) Text('Corriere #${s.idCorriere}'),
-          if (s.conclusaIl != null) Text('Conclusa il ${_data(s.conclusaIl!)}'),
+          if (s.conclusaIl != null) Text('Conclusa il ${dataOra(s.conclusaIl!)}'),
           const SizedBox(height: 12),
           Text('Note', style: Theme.of(context).textTheme.titleSmall),
           if (s.note.isEmpty) const Text('Nessuna nota.'),
@@ -199,7 +203,7 @@ class _BackendElencoState extends State<BackendElencoPage> {
               contentPadding: EdgeInsets.zero,
               leading: Icon(n.interna ? Icons.lock_outline : Icons.chat_bubble_outline),
               title: Text(n.testo),
-              subtitle: Text([_data(n.creataIl), if (n.motivo != null) n.motivo!, if (n.interna) 'interna'].join(' · ')),
+              subtitle: Text([dataOra(n.creataIl), if (n.motivo != null) n.motivo!, if (n.interna) 'interna'].join(' · ')),
             ),
         ]),
       );
