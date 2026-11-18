@@ -104,4 +104,36 @@ func TestCambioStato(t *testing.T) {
 			t.Fatalf("atteso 400, ottenuto %d", r.stato)
 		}
 	})
+	
+	t.Run("corriere_non_assegnato_403", func(t *testing.T) {
+		c2 := comeCorriere(f.idCorriere2)
+		id := f.nuovaSpedizione(t, "ALTRUI")
+		f.assegna(t, id, f.idCorriere1, 201)
+		prima := f.storico(t, id)
+
+		f.stato(t, id, c2, map[string]any{"stato": "ritirata"}, 403)
+
+		if r := f.dettaglio(t, id, op, 200); r.corpo["stato"] != "assegnata" {
+			t.Fatalf("lo stato non deve cambiare: %s", r.grezzo)
+		}
+		if dopo := f.storico(t, id); dopo != prima {
+			t.Fatalf("un cambio rifiutato non deve scrivere nello storico: da %d a %d", prima, dopo)
+		}
+	})
+
+	t.Run("spedizione_chiusa_409", func(t *testing.T) {
+		id := f.nuovaSpedizione(t, "CHIUSA")
+		f.consegnaCompleta(t, id)
+		prima := f.storico(t, id)
+
+		f.stato(t, id, c1, map[string]any{"stato": "in consegna"}, 409)
+		f.stato(t, id, op, map[string]any{"stato": "persa", "motivo": "furto", "nota": "pacco non trovato"}, 409)
+
+		if r := f.dettaglio(t, id, op, 200); r.corpo["stato"] != "consegnata" {
+			t.Fatalf("una spedizione chiusa non deve cambiare stato: %s", r.grezzo)
+		}
+		if dopo := f.storico(t, id); dopo != prima {
+			t.Fatalf("un cambio rifiutato non deve scrivere nello storico: da %d a %d", prima, dopo)
+		}
+	})
 }
