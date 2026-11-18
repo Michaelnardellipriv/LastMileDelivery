@@ -38,3 +38,12 @@ integration test in `backend/tests/integration-tests/cambio_stato_test.go` e `te
   documentata in `openapi.yaml`.
 - Una spedizione che il richiedente non può vedere risponde 404 come se non esistesse:
   da tenere presente quando si scrive il test della riga 3 a livello integration.
+
+
+
+  ### Righe aggiunte dopo un difetto
+
+
+| # | Requisito / vincolo | Caso di test | Input / precondizioni | Risultato atteso | Tipo | Test | Esito |
+|---|---|---|---|---|---|---|---|
+| 12 | il corriere vede solo le spedizioni assegnate a lui (bug-report-01) | permesso mancante in lettura | spedizione assegnata a corriere1, elenco e dettaglio come corriere2 | non in elenco, dettaglio 404 | integration | TestElencoFiltratoPerCorriere | passa (18/11) |
