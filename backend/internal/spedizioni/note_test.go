@@ -74,7 +74,6 @@ func TestAggiungiNota(t *testing.T) {
 }
 
 func TestNotePubbliche(t *testing.T) {
-	s := servizioTest()
 	conMotivo := func(stato Stato, motivo string) CambioStato {
 		return CambioStato{Stato: stato, Motivo: p(motivo), Nota: p("dettaglio interno")}
 	}
@@ -86,29 +85,29 @@ func TestNotePubbliche(t *testing.T) {
 		"annullata": {Assegnata, conMotivo(Annullata, "richiesta del mittente")},
 		"persa":     {Ritirata, conMotivo(Persa, "furto")},
 	} {
-		m, err := s.decidiStato(operatore, inStato(c.da), c.cambio)
+		m, err := decidiStato(regoleTest, operatore, inStato(c.da), c.cambio)
 		if err != nil || m.Nota == nil || !m.Nota.Pubblica {
 			t.Errorf("%s: la nota col motivo è pubblica: %+v %v", nome, m.Nota, err)
 		}
 	}
 
 	for _, stato := range []Stato{Ritirata, InConsegna, Consegnata} {
-		if err := validaCambio(CambioStato{Stato: stato, Nota: p("partito")}); tipoErrore(err) != "400" {
+		if err := validaCambio(regoleTest, CambioStato{Stato: stato, Nota: p("partito")}); tipoErrore(err) != "400" {
 			t.Errorf("%q: la nota si scrive solo con annullata e persa, le interne con POST /note: %v", stato, err)
 		}
 	}
 
 	ritiro := TentativoFallito{Tipo: TentativoRitiro, Nota: p("cancello chiuso"), Motivo: p("mittente assente")}
-	if m, err := s.decidiTentativo(corriere1, inStato(Assegnata), ritiro); err != nil || !m.Nota.Pubblica {
+	if m, err := decidiTentativo(regoleTest, corriere1, inStato(Assegnata), ritiro); err != nil || !m.Nota.Pubblica {
 		t.Errorf("ogni tentativo di ritiro ha la nota pubblica: %+v %v", m, err)
 	}
 	consegna := TentativoFallito{Tipo: TentativoConsegna, Nota: p("nessuno in casa"), Motivo: p("destinatario assente")}
 	inConsegna := inStato(InConsegna)
-	if m, err := s.decidiTentativo(corriere1, inConsegna, consegna); err != nil || m.NuovoStato != InConsegna || !m.Nota.Pubblica {
+	if m, err := decidiTentativo(regoleTest, corriere1, inConsegna, consegna); err != nil || m.NuovoStato != InConsegna || !m.Nota.Pubblica {
 		t.Errorf("il primo tentativo di consegna ha la nota pubblica: %+v %v", m, err)
 	}
 	inConsegna.TentativiConsegnaFalliti, inConsegna.UsciteInConsegna = 2, 3
-	if m, err := s.decidiTentativo(corriere1, inConsegna, consegna); err != nil || m.NuovoStato != NonConsegnata || !m.Nota.Pubblica {
+	if m, err := decidiTentativo(regoleTest, corriere1, inConsegna, consegna); err != nil || m.NuovoStato != NonConsegnata || !m.Nota.Pubblica {
 		t.Errorf("l'ultimo tentativo (non consegnata) ha la nota pubblica: %+v %v", m, err)
 	}
 }

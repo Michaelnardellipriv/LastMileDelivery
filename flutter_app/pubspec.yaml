@@ -7,9 +7,12 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_map: ^8.3.2
   http: ^1.2.0
   flutter_secure_storage: ^9.2.2 # JWT cifrato (Keychain / Keystore)
   material_ui: ^1.11.1
+  latlong2: ^0.10.1
+  web: ^1.1.0
 dev_dependencies:
   flutter_test:
     sdk: flutter

@@ -50,6 +50,10 @@ func (a *archivioElenco) Elenca(_ context.Context, v Visibilita, f FiltroElenco)
 	return a.voci, nil
 }
 
+func (a *archivioElenco) Conta(context.Context, Visibilita, FiltroElenco) (int, error) {
+	return len(a.voci), nil
+}
+
 var (
 	cliente1       = identita.Richiedente{Ruolo: identita.Cliente, ID: 7}
 	amministratore = identita.Richiedente{Ruolo: identita.Amministratore, ID: 1}
@@ -58,7 +62,7 @@ var (
 
 func servizioElenco(voci ...VoceElenco) (*Servizio, *archivioElenco) {
 	a := &archivioElenco{voci: voci}
-	s := NuovoServizio(a, 3, 30)
+	s := NuovoServizio(a, regoleFisse(regoleTest))
 	s.adesso = func() time.Time { return time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC) }
 	return s, a
 }
@@ -98,7 +102,9 @@ func TestVisibilitaPerRuolo(t *testing.T) {
 
 func TestGiorniVisibilitaClienteImpostabili(t *testing.T) {
 	a := &archivioElenco{}
-	s := NuovoServizio(a, 3, 7)
+	regole := regoleTest
+	regole.GiorniVisibilitaCliente = 7
+	s := NuovoServizio(a, regoleFisse(regole))
 	adesso := time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC)
 	s.adesso = func() time.Time { return adesso }
 	s.Elenca(context.Background(), cliente1, filtroBase)

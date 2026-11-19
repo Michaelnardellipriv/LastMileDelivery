@@ -3,6 +3,9 @@ import './auth/forgot_password_page.dart';
 import './auth/home_per_ruolo.dart';
 import './auth/login_page.dart';
 import './auth/profile_page.dart';
+import 'package:flutter/material.dart';
+import 'backend_page.dart';
+import 'area_riservata.dart';
 import 'store.dart';
 
 /// Token di recupero password preso dal link della mail (`LINK_RECUPERO_PASSWORD?token=<token>`):
@@ -79,6 +82,54 @@ class StatoChip extends StatelessWidget {
       visualDensity: VisualDensity.compact,
     );
   }
+}
+
+// ───────── Login ─────────
+class LoginPage extends StatelessWidget {
+  const LoginPage({super.key});
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: const Text('Veloce24')),
+        body: ListView(padding: const EdgeInsets.all(16), children: [
+          if (apiBase.isNotEmpty)
+            Card(
+              color: Theme.of(context).colorScheme.primaryContainer,
+              child: ListTile(
+                leading: const Icon(Icons.cloud_done_outlined),
+                title: const Text('Dati reali dal backend'),
+                subtitle: Text('GET /api/spedizioni su $apiBase'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const BackendAccessoPage(apiBase: apiBase)),
+                ),
+              ),
+            ),
+          if (apiBase.isNotEmpty)
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.lock_outline),
+                title: const Text('Area riservata'),
+                subtitle: const Text('Login con email e password: operatori e corrieri entrano nella loro area'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const AreaRiservata(apiBase: apiBase)),
+                ),
+              ),
+            ),
+          Text('Accedi', style: Theme.of(context).textTheme.headlineSmall),
+          const Text('Il backend non ha ancora un endpoint di login: scegli un utente di prova.'),
+          for (final r in Ruolo.values) ...[
+            Padding(
+              padding: const EdgeInsets.only(top: 16, bottom: 4),
+              child: Text(ruoloNome[r]!, style: Theme.of(context).textTheme.titleSmall),
+            ),
+            for (final u in store.utenti.where((u) => u.ruolo == r))
+              Card(child: ListTile(leading: const Icon(Icons.person), title: Text(u.nomeCompleto), onTap: () => store.login(u.id))),
+          ],
+          const SizedBox(height: 16),
+          Text(apiBase.isEmpty ? 'Modalità demo: dati locali.' : 'Backend: $apiBase', style: Theme.of(context).textTheme.bodySmall),
+        ]),
+      );
 }
 
 // ───────── Shell con navigazione per ruolo ─────────

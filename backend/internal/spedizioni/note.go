@@ -18,6 +18,9 @@ type Nota struct {
 	CreataIl    time.Time
 	IDOperatore *int32
 	IDCorriere  *int32
+	// nome e cognome di chi ha scritto la nota
+	NomeAutore    *string
+	CognomeAutore *string
 }
 
 var statiNoteCorriere = []Stato{Ritirata, InConsegna}

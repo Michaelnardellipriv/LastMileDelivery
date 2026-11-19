@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	PerPaginaPredefinito = 20
+	PerPaginaPredefinito = 10
 	PerPaginaMassimo     = 100
 )
 
@@ -24,8 +24,20 @@ type FiltroElenco struct {
 }
 
 type Indirizzo struct {
-	Via    string
-	Civico string
+	Via     string
+	Civico  string
+	Citta   *string
+	CAP     *string
+	Regione *string
+	Nazione *string
+}
+
+type Persona struct {
+	ID       int32
+	Nome     string
+	Cognome  string
+	Email    *string
+	Telefono *string
 }
 
 type VoceElenco struct {
@@ -35,25 +47,43 @@ type VoceElenco struct {
 	IsReso                bool
 	CreataIl              time.Time
 	DataoraRichiesta      time.Time
+	RitirataIl            *time.Time
 	IDClienteMittente     int32
 	IDClienteDestinatario int32
 	IndirizzoRitiro       Indirizzo
 	IndirizzoSpedizione   Indirizzo
+	Mittente              *Persona
+	Destinatario          Persona
 	IDCorriere            *int32
+	Corriere              *Persona
+	AssegnataDa           *Persona // operatore che ha fatto l'assegnazione attuale
 	ConclusaIl            *time.Time
 	Note                  []Nota
 }
 
 type Visibilita struct {
-	IDCorriere        *int32
-	Stati             []Stato
-	IDDestinatario    *int32
-	ConcluseDal       *time.Time
-	SoloNotePubbliche bool
-	MostraCorriere    bool
+	IDCorriere         *int32
+	Stati              []Stato
+	IDDestinatario     *int32
+	ConcluseDal        *time.Time
+	SoloNotePubbliche  bool
+	MostraCorriere     bool
+	NascondiIDMittente bool
+	NascondiAssegnante bool
 }
 
 var statiVisibiliAlCorriere = []Stato{Assegnata, Ritirata, InConsegna}
+
+func (s *Servizio) visibilita(ctx context.Context, r identita.Richiedente) (Visibilita, error) {
+	if r.Ruolo != identita.Cliente {
+		return visibilitaPer(r, 0, s.adesso())
+	}
+	reg, err := s.regole.Regole(ctx)
+	if err != nil {
+		return Visibilita{}, err
+	}
+	return visibilitaPer(r, reg.GiorniVisibilitaCliente, s.adesso())
+}
 
 func visibilitaPer(r identita.Richiedente, giorniCliente int, adesso time.Time) (Visibilita, error) {
 	switch r.Ruolo {
@@ -65,7 +95,8 @@ func visibilitaPer(r identita.Richiedente, giorniCliente int, adesso time.Time) 
 	case identita.Cliente:
 		id := r.ID
 		dal := adesso.AddDate(0, 0, -giorniCliente)
-		return Visibilita{IDDestinatario: &id, ConcluseDal: &dal, SoloNotePubbliche: true}, nil
+		return Visibilita{IDDestinatario: &id, ConcluseDal: &dal, SoloNotePubbliche: true, NascondiIDMittente: true,
+			NascondiAssegnante: true}, nil
 	}
 	return Visibilita{}, &errori.NonAutorizzato{Messaggio: "ruolo non autorizzato a vedere le spedizioni"}
 }
@@ -94,7 +125,7 @@ func validaFiltro(f FiltroElenco) error {
 }
 
 func (s *Servizio) Elenca(ctx context.Context, r identita.Richiedente, f FiltroElenco) ([]VoceElenco, error) {
-	vis, err := visibilitaPer(r, s.giorniCliente, s.adesso())
+	vis, err := s.visibilita(ctx, r)
 	if err != nil {
 		return nil, err
 	}
@@ -112,4 +143,19 @@ func (s *Servizio) Elenca(ctx context.Context, r identita.Richiedente, f FiltroE
 		nascondi(vis, &voci[i])
 	}
 	return voci, nil
+}
+
+// ElencaPagina è Elenca più il numero totale di spedizioni che rispettano visibilità e
+// filtri, per mostrare "elementi da–a di N" e il numero di pagine.
+func (s *Servizio) ElencaPagina(ctx context.Context, r identita.Richiedente, f FiltroElenco) ([]VoceElenco, int, error) {
+	voci, err := s.Elenca(ctx, r, f)
+	if err != nil {
+		return nil, 0, err
+	}
+	vis, err := s.visibilita(ctx, r)
+	if err != nil {
+		return nil, 0, err
+	}
+	totale, err := s.archivio.Conta(ctx, vis, f)
+	return voci, totale, err
 }
