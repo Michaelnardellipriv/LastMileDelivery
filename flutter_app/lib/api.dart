@@ -96,6 +96,21 @@ class SpedizioneApi {
       );
 }
 
+/// GET /api/spedizioni/{id}: la voce dell'elenco più date e tentativi falliti.
+class DettaglioSpedizioneApi {
+  final SpedizioneApi spedizione;
+  final DateTime? annullataIl;
+  final int tentativiRitiroFalliti, tentativiConsegnaFalliti;
+  DettaglioSpedizioneApi(this.spedizione, this.annullataIl, this.tentativiRitiroFalliti, this.tentativiConsegnaFalliti);
+
+  factory DettaglioSpedizioneApi.daJson(Map<String, dynamic> j) => DettaglioSpedizioneApi(
+        SpedizioneApi.daJson(j),
+        j['annullata_il'] == null ? null : DateTime.parse(j['annullata_il'] as String).toLocal(),
+        j['tentativi_ritiro_falliti'] as int? ?? 0,
+        j['tentativi_consegna_falliti'] as int? ?? 0,
+      );
+}
+
 class PaginaSpedizioni {
   final List<SpedizioneApi> dati;
   final int pagina, perPagina;
@@ -117,10 +132,23 @@ class ApiClient {
         ruolo.header: '$idUtente',
       };
 
-  /// GET /api/spedizioni — il backend filtra già per ruolo (il corriere vede solo le sue).
-  Future<PaginaSpedizioni> elencoSpedizioni({String? stato, int pagina = 1, int perPagina = 20}) async {
+  /// GET /api/spedizioni — il backend filtra già per ruolo (il corriere vede solo le sue,
+  /// il cliente solo quelle di cui è destinatario). [dal] e [al] sono giorni di creazione,
+  /// inclusi; [codOrdine] cerca una parte del codice, senza distinguere maiuscole.
+  Future<PaginaSpedizioni> elencoSpedizioni({
+    String? stato,
+    DateTime? dal,
+    DateTime? al,
+    String? codOrdine,
+    int pagina = 1,
+    int perPagina = 20,
+  }) async {
+    final cod = codOrdine?.trim();
     final uri = Uri.parse('$base/api/spedizioni').replace(queryParameters: {
       if (stato != null) 'stato': stato,
+      if (dal != null) 'dal': _giorno(dal),
+      if (al != null) 'al': _giorno(al),
+      if (cod != null && cod.isNotEmpty) 'cod_ordine': cod,
       'pagina': '$pagina',
       'per_pagina': '$perPagina',
     });
@@ -131,6 +159,14 @@ class ApiClient {
       j['per_pagina'] as int? ?? perPagina,
     );
   }
+
+  /// GET /api/spedizioni/{id} — 404 anche se la spedizione esiste ma chi chiama non può vederla.
+  Future<DettaglioSpedizioneApi> dettaglioSpedizione(int id) async =>
+      DettaglioSpedizioneApi.daJson(await _getJson(Uri.parse('$base/api/spedizioni/$id')));
+
+  /// AAAA-MM-GG, il formato che il backend accetta per dal/al.
+  static String _giorno(DateTime d) =>
+      '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
   Future<Map<String, dynamic>> _getJson(Uri uri) async {
     final r = await _get(uri);

@@ -23,5 +23,9 @@ Nella pagina iniziale compare "Dati reali dal backend": si sceglie ruolo e ID
 
 - `lib/api.dart` — client HTTP verso il backend (header di identità, errori per status)
 - `lib/backend_page.dart` — accesso con ruolo/ID ed elenco spedizioni dal backend
+- `lib/tracking_page.dart` — tracking del cliente destinatario (ruolo Cliente): i suoi pacchi
+  filtrabili per numero ordine, stato e data di creazione; il dettaglio mostra indirizzi di
+  mittente e destinatario, date e i motivi delle note pubbliche, mai il corriere
+- `test/tracking_page_test.dart` — test della pagina di tracking con un backend finto
 - `lib/store.dart`, `lib/main.dart` — demo con dati in memoria (non ancora collegata)
 - `test/api_test.dart` — test del client con un server finto
