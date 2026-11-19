@@ -20,7 +20,7 @@ void main() {
     final api = ApiClient(
       base: 'http://backend:8080/',
       ruolo: RuoloApi.corriere,
-      idUtente: 7,
+      idRuolo: 7,
       client: MockClient((req) async {
         inviata = req;
         return http.Response(jsonEncode({'dati': [_voce], 'pagina': 1, 'per_pagina': 20}), 200);
@@ -38,7 +38,7 @@ void main() {
     final api = ApiClient(
       base: 'http://backend:8080',
       ruolo: RuoloApi.operatore,
-      idUtente: 99,
+      idRuolo: 99,
       client: MockClient((_) async => http.Response('{"errore":"utente non riconosciuto"}', 401)),
     );
     await expectLater(
@@ -51,7 +51,7 @@ void main() {
     final api = ApiClient(
       base: 'http://backend:8080',
       ruolo: RuoloApi.operatore,
-      idUtente: 1,
+      idRuolo: 1,
       client: MockClient((_) async => throw http.ClientException('Failed to fetch')),
     );
     await expectLater(api.elencoSpedizioni(), throwsA(isA<ErroreApi>().having((e) => e.status, 'status', null)));
