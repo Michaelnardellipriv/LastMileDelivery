@@ -15,7 +15,7 @@ type DettaglioSpedizione struct {
 }
 
 func (s *Servizio) Dettaglio(ctx context.Context, r identita.Richiedente, id int32) (DettaglioSpedizione, error) {
-	vis, err := visibilitaPer(r, s.giorniCliente, s.adesso())
+	vis, err := s.visibilita(ctx, r)
 	if err != nil {
 		return DettaglioSpedizione{}, err
 	}
@@ -29,11 +29,18 @@ func (s *Servizio) Dettaglio(ctx context.Context, r identita.Richiedente, id int
 
 func nascondi(vis Visibilita, v *VoceElenco) {
 	if !vis.MostraCorriere {
-		v.IDCorriere = nil
+		v.IDCorriere, v.Corriere = nil, nil
+	}
+	if vis.NascondiAssegnante {
+		v.AssegnataDa = nil
+	}
+	if vis.NascondiIDMittente && v.Mittente != nil {
+		v.Mittente.ID = 0
 	}
 	if vis.SoloNotePubbliche {
 		for i := range v.Note {
 			v.Note[i].Testo, v.Note[i].IDOperatore, v.Note[i].IDCorriere = "", nil, nil
+			v.Note[i].NomeAutore, v.Note[i].CognomeAutore = nil, nil
 		}
 	}
 }

@@ -15,7 +15,7 @@
 
 | Entità | Descrizione | Attributi essenziali (tipo logico) |
 | :---- | :---- | :---- |
-| Utente | chiunque acceda al sistema; i dati anagrafici e di accesso stanno qui una volta sola, i ruoli sono entità separate | id (identificativo), nome (testo), cognome (testo), prefisso (testo, es. "+39"), nr\_telefono (testo), email (testo), pwd\_hash (testo) |
+| Utente | chiunque acceda al sistema; i dati anagrafici e di accesso stanno qui una volta sola, i ruoli sono entità separate | id (identificativo), nome (testo), cognome (testo), prefisso (testo, es. "+39"), nr\_telefono (testo), email (testo), pwd\_hash (testo), attivo (booleano: l'amministratore può disattivare corrieri e operatori) |
 | Cliente | ruolo di un Utente: può essere mittente o destinatario di una spedizione | id, utente (riferimento a Utente) |
 | Corriere | ruolo di un Utente: ritira e consegna fisicamente il pacco | id, utente (riferimento a Utente) |
 | Operatore logistico | ruolo di un Utente: crea, assegna e annulla le spedizioni, gestisce disdette, riprogrammazioni e resi | id, utente (riferimento a Utente) |
@@ -29,6 +29,8 @@
 | Città |  | id, nome (testo), cod\_postale (testo) |
 | Regione |  | id, nome (testo) |
 | Nazione |  | id, nome (testo) |
+| Impostazioni | parametri globali scelti dall'amministratore; sempre una sola riga | intervallo\_posizione\_sec, giorni\_visibilita\_cliente, max\_tentativi\_ritiro, max\_tentativi\_consegna (interi), modificate\_il (data/ora), amministratore che le ha modificate |
+| Motivo | elenco dei motivi pubblici di tentativi falliti, annullamenti e perdite, gestito dall'amministratore | id, descrizione (testo, unica senza distinguere maiuscole), attivo (booleano), creato\_il (data/ora) |
 
 *Nota: lo storico delle spedizioni è persistente (slide 12), per questo è un'entità e non solo un attributo. Rispetto alla v1, "CambioStato" è diventato "CambiamentoSpedizione": non registra solo i cambi di stato, ma la creazione, ogni modifica di qualsiasi campo e gli annullamenti di spedizione. Nelle modifiche, valore\_vecchio e valore\_nuovo contengono solo i campi cambiati, ad esempio* `{"stato":"assegnata"}` \-\> `{"stato":"in consegna"}`.
 
@@ -452,6 +454,7 @@ COMMIT;
 | \[19/10/2026\] | v2: aggiunte Assegnazione e Nota | tracciare chi assegna a quale corriere; commenti e motivi dei tentativi falliti |
 | \[19/10/2026\] | v2: CambioStato sostituito da CambiamentoSpedizione | lo storico deve registrare ogni operazione (creazione, modifica di qualsiasi campo, archiviazione) con chi e quando, non solo i cambi di stato |
 | \[19/10/2026\] | v2: stati "non assegnata" → "creata" e "disdetta" → "annullata"; aggiunta l'archiviazione | allineamento con lo schema fisico |
+| \[17/11/2026\] | Impostazioni con giorni di visibilità e tentativi massimi (ritiro e consegna separati); entità Motivo; Utente.attivo | il cliente vuole che questi parametri li imposti l'amministratore invece di variabili d'ambiente e costanti; l'amministratore crea e disattiva corrieri e operatori. Nota.motivo resta testo: un motivo disattivato non cambia le note già scritte |
 
 ## Punti da confermare nel team
 

@@ -32,9 +32,15 @@ var altroEndpoint = map[Stato]string{
 }
 
 const (
-	maxCodOrdine       = 50
-	maxNota            = 2000
+	maxCodOrdine = 50
+	maxNota      = 2000
+	// margine per gli orologi non sincronizzati tra client e server
 	tolleranzaOrologio = 5 * time.Minute
+
+	// un tentativo di consegna fallito chiude l'uscita: niente altro tentativo né consegna
+	// finché la spedizione non torna in ritirata e riparte
+	messaggioUscitaFallita = "per questa uscita è già stato registrato un tentativo di consegna fallito: " +
+		"l'operatore deve riportare la spedizione in ritirata e il corriere rimetterla in consegna"
 )
 
 var formatoCodOrdine = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
@@ -71,9 +77,10 @@ func controllaIndirizzi(e *errori.Validazione, ritiro, spedizione int32) {
 	}
 }
 
-func controllaData(e *errori.Validazione, data, adesso time.Time) {
-	if !data.IsZero() && data.Before(adesso.Add(-tolleranzaOrologio)) {
-		e.Aggiungi("dataora_richiesta_spedizione", "non può essere nel passato")
+// controllaDataRichiesta: la spedizione è stata richiesta adesso o in passato, mai nel futuro.
+func controllaDataRichiesta(e *errori.Validazione, data, adesso time.Time) {
+	if data.After(adesso.Add(tolleranzaOrologio)) {
+		e.Aggiungi("dataora_richiesta_spedizione", "non può essere nel futuro: è il momento in cui la spedizione è stata richiesta")
 	}
 }
 

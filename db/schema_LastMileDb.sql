@@ -2,8 +2,10 @@ BEGIN;
 
 
 
+DROP TABLE IF EXISTS recuperi_password      CASCADE;
 DROP TABLE IF EXISTS posizioni_corrieri     CASCADE;
 DROP TABLE IF EXISTS impostazioni           CASCADE;
+DROP TABLE IF EXISTS motivi                 CASCADE;
 DROP TABLE IF EXISTS cambiamenti_spedizioni CASCADE;
 DROP TABLE IF EXISTS tentativi              CASCADE;
 DROP TABLE IF EXISTS note                   CASCADE;
@@ -23,6 +25,7 @@ DROP TABLE IF EXISTS utenti                 CASCADE;
 DROP FUNCTION IF EXISTS fn_traccia_cambiamenti_spedizioni() CASCADE;
 DROP FUNCTION IF EXISTS fn_blocca_modifica_storico()        CASCADE;
 DROP FUNCTION IF EXISTS fn_controlla_annullamento()         CASCADE;
+DROP FUNCTION IF EXISTS fn_un_solo_ruolo()                  CASCADE;
 
 DROP TYPE IF EXISTS tipo_operazione_spedizione CASCADE;
 DROP TYPE IF EXISTS stato_spedizione           CASCADE;
@@ -57,11 +60,16 @@ CREATE TABLE utenti (
     prefisso     VARCHAR(5)   NOT NULL,          -- es. '+39'
     nr_telefono  VARCHAR(20)  NOT NULL,
     email        VARCHAR(254) NOT NULL,
+    -- hash bcrypt della password, obbligatorio: ogni utente nasce con la sua password
+    pwd_hash     VARCHAR(255) NOT NULL,
+    -- l'amministratore può disattivare un utente: non entra più e i suoi token non valgono
+    attivo       BOOLEAN      NOT NULL DEFAULT TRUE,
     CONSTRAINT uq_utenti_email    UNIQUE (email),
     CONSTRAINT uq_utenti_telefono UNIQUE (prefisso, nr_telefono),
     CONSTRAINT ck_utenti_prefisso CHECK (prefisso ~ '^\+[0-9]{1,4}$'),
     CONSTRAINT ck_utenti_telefono CHECK (nr_telefono ~ '^[0-9]{4,15}$'),
-    CONSTRAINT ck_utenti_email    CHECK (email ~* '^[^@\s]+@[^@\s]+\.[^@\s]+$')
+    CONSTRAINT ck_utenti_email    CHECK (email ~* '^[^@\s]+@[^@\s]+\.[^@\s]+$'),
+    CONSTRAINT ck_utenti_pwd_hash CHECK (pwd_hash <> '')
 );
 
 CREATE TABLE clienti (
@@ -73,7 +81,6 @@ CREATE TABLE clienti (
 
 CREATE TABLE corrieri (
     id         INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    pwd_hash     VARCHAR(255) NOT NULL,
     id_utente  INTEGER NOT NULL UNIQUE
                REFERENCES utenti (id) ON UPDATE CASCADE ON DELETE RESTRICT
             
@@ -81,17 +88,56 @@ CREATE TABLE corrieri (
 
 CREATE TABLE operatori_logistici (
     id         INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    pwd_hash     VARCHAR(255) NOT NULL,
     id_utente  INTEGER NOT NULL UNIQUE
                REFERENCES utenti (id) ON UPDATE CASCADE ON DELETE RESTRICT
 );
 
 CREATE TABLE amministratori (
     id         INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    pwd_hash     VARCHAR(255) NOT NULL,
     id_utente  INTEGER NOT NULL UNIQUE
                REFERENCES utenti (id) ON UPDATE CASCADE ON DELETE RESTRICT
 );
+
+-- Un utente (cioè un'email) ha un solo ruolo: non può essere insieme cliente, corriere,
+-- operatore o amministratore. Il blocco sulla riga dell'utente mette in fila due
+-- inserimenti contemporanei nelle tabelle di ruoli diversi.
+CREATE FUNCTION fn_un_solo_ruolo()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    PERFORM 1 FROM utenti WHERE id = NEW.id_utente FOR UPDATE;
+    IF (SELECT count(*) FROM (
+            SELECT id_utente FROM clienti             WHERE id_utente = NEW.id_utente
+            UNION ALL
+            SELECT id_utente FROM corrieri            WHERE id_utente = NEW.id_utente
+            UNION ALL
+            SELECT id_utente FROM operatori_logistici WHERE id_utente = NEW.id_utente
+            UNION ALL
+            SELECT id_utente FROM amministratori      WHERE id_utente = NEW.id_utente
+        ) AS ruoli) > 1 THEN
+        RAISE EXCEPTION 'L''utente % ha già un ruolo: ogni email può avere un solo ruolo', NEW.id_utente
+            USING ERRCODE = 'unique_violation', CONSTRAINT = 'uq_utenti_un_solo_ruolo';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_clienti_un_solo_ruolo
+AFTER INSERT OR UPDATE OF id_utente ON clienti
+FOR EACH ROW EXECUTE FUNCTION fn_un_solo_ruolo();
+
+CREATE TRIGGER trg_corrieri_un_solo_ruolo
+AFTER INSERT OR UPDATE OF id_utente ON corrieri
+FOR EACH ROW EXECUTE FUNCTION fn_un_solo_ruolo();
+
+CREATE TRIGGER trg_operatori_un_solo_ruolo
+AFTER INSERT OR UPDATE OF id_utente ON operatori_logistici
+FOR EACH ROW EXECUTE FUNCTION fn_un_solo_ruolo();
+
+CREATE TRIGGER trg_amministratori_un_solo_ruolo
+AFTER INSERT OR UPDATE OF id_utente ON amministratori
+FOR EACH ROW EXECUTE FUNCTION fn_un_solo_ruolo();
 
 
 CREATE TABLE nazioni (
@@ -157,7 +203,11 @@ CREATE TABLE spedizioni (
                                   REFERENCES clienti (id)   ON UPDATE CASCADE ON DELETE RESTRICT,
     id_cliente_destinatario       INTEGER NOT NULL
                                   REFERENCES clienti (id)   ON UPDATE CASCADE ON DELETE RESTRICT,
+    -- data e ora richieste per la spedizione: le imposta l'operatore
     dataora_richiesta_spedizione  TIMESTAMPTZ NOT NULL,
+    -- data e ora del ritiro: le registra il sistema quando il corriere porta la
+    -- spedizione in 'ritirata' (resta quella del primo ritiro)
+    ritirata_il                   TIMESTAMPTZ NULL,
     id_indirizzo_ritiro           INTEGER NOT NULL
                                   REFERENCES indirizzi (id) ON UPDATE CASCADE ON DELETE RESTRICT,
     id_indirizzo_spedizione       INTEGER NOT NULL
@@ -177,6 +227,9 @@ CREATE TABLE spedizioni (
         (stato = 'annullata') = (annullata_il IS NOT NULL)
     ),
     CONSTRAINT ck_spedizioni_date_annullamento   CHECK (annullata_il IS NULL OR annullata_il >= creata_il),
+    CONSTRAINT ck_spedizioni_date_ritiro         CHECK (ritirata_il IS NULL OR ritirata_il >= creata_il),
+    -- prima del ritiro la data del ritiro non c'è
+    CONSTRAINT ck_spedizioni_ritiro_stato        CHECK (stato NOT IN ('creata', 'assegnata') OR ritirata_il IS NULL),
     -- da 'assegnata' in poi serve l'assegnazione (e quindi il corriere);
     -- possono non averla solo le spedizioni 'creata' e 'annullata'
     CONSTRAINT ck_spedizioni_assegnazione_stato  CHECK (
@@ -379,23 +432,66 @@ EXECUTE FUNCTION fn_blocca_modifica_storico();
 
 
 
--- ===== Posizione dei corrieri (RF16) =====
+-- ===== Configurazione dell'amministratore =====
 
 -- Impostazioni globali dell'applicazione, modificabili dall'amministratore.
 -- La tabella ha sempre UNA sola riga: la chiave è un booleano che può
 -- valere solo TRUE, quindi una seconda riga violerebbe la PRIMARY KEY.
 CREATE TABLE impostazioni (
     id                          BOOLEAN PRIMARY KEY DEFAULT TRUE,
+    -- ogni quanti secondi il corriere invia la posizione (RF16)
     intervallo_posizione_sec    INTEGER NOT NULL DEFAULT 30,
+    -- per quanti giorni il cliente destinatario vede una spedizione chiusa
+    giorni_visibilita_cliente   INTEGER NOT NULL DEFAULT 30,
+    -- tentativi falliti oltre i quali la spedizione va annullata (ritiro)
+    -- o diventa 'non consegnata' (consegna)
+    max_tentativi_ritiro        INTEGER NOT NULL DEFAULT 3,
+    max_tentativi_consegna      INTEGER NOT NULL DEFAULT 3,
     modificate_il               TIMESTAMPTZ NOT NULL DEFAULT now(),
     id_amministratore_modifica  INTEGER NULL
                                 REFERENCES amministratori (id) ON UPDATE CASCADE ON DELETE SET NULL,
     CONSTRAINT ck_impostazioni_riga_unica CHECK (id),
     -- sotto i 5 secondi il database si riempie, sopra l'ora la posizione non serve più
-    CONSTRAINT ck_impostazioni_intervallo CHECK (intervallo_posizione_sec BETWEEN 5 AND 3600)
+    CONSTRAINT ck_impostazioni_intervallo CHECK (intervallo_posizione_sec BETWEEN 5 AND 3600),
+    CONSTRAINT ck_impostazioni_giorni     CHECK (giorni_visibilita_cliente BETWEEN 1 AND 365),
+    CONSTRAINT ck_impostazioni_ritiro     CHECK (max_tentativi_ritiro BETWEEN 1 AND 10),
+    CONSTRAINT ck_impostazioni_consegna   CHECK (max_tentativi_consegna BETWEEN 1 AND 10)
 );
 
 INSERT INTO impostazioni DEFAULT VALUES;
+
+-- Elenco dei motivi pubblici di tentativi falliti, annullamenti e perdite.
+-- Un motivo non si cancella né si rinomina: si disattiva, così le note che lo
+-- usano restano leggibili. Le note salvano il testo del motivo (note.motivo).
+CREATE TABLE motivi (
+    id           INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    descrizione  VARCHAR(100) NOT NULL,
+    attivo       BOOLEAN      NOT NULL DEFAULT TRUE,
+    creato_il    TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    CONSTRAINT ck_motivi_descrizione CHECK (btrim(descrizione) <> '')
+);
+
+CREATE UNIQUE INDEX uq_motivi_descrizione ON motivi (lower(descrizione));
+
+INSERT INTO motivi (descrizione) VALUES
+    ('mittente assente'),
+    ('pacco non pronto'),
+    ('indirizzo di ritiro errato'),
+    ('destinatario assente'),
+    ('indirizzo errato'),
+    ('rifiutata dal destinatario'),
+    ('accesso impossibile'),
+    ('richiesta del mittente'),
+    ('richiesta del destinatario'),
+    ('dati della spedizione errati'),
+    ('ritiro non riuscito'),
+    ('smarrita in deposito'),
+    ('smarrita durante il trasporto'),
+    ('furto'),
+    ('altro');
+
+
+-- ===== Posizione dei corrieri (RF16) =====
 
 -- Storico delle posizioni (simulate) inviate dai corrieri.
 -- L'ultima posizione di un corriere è la riga con rilevata_il più recente.
@@ -413,6 +509,25 @@ CREATE TABLE posizioni_corrieri (
 -- Rende veloce "ultima posizione di ogni corriere".
 CREATE INDEX ix_posizioni_corrieri_ultima
     ON posizioni_corrieri (id_corriere, rilevata_il DESC);
+
+
+-- ===== Recupero password =====
+
+-- Una riga per ogni richiesta di recupero: nel database c'è solo l'hash SHA-256
+-- del token inviato per mail, così chi legge la tabella non può usarlo.
+CREATE TABLE recuperi_password (
+    id          INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id_utente   INTEGER NOT NULL
+                REFERENCES utenti (id) ON UPDATE CASCADE ON DELETE CASCADE,
+    token_hash  CHAR(64)    NOT NULL,
+    creato_il   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    scade_il    TIMESTAMPTZ NOT NULL,
+    usato_il    TIMESTAMPTZ NULL,
+    CONSTRAINT uq_recuperi_password_token UNIQUE (token_hash),
+    CONSTRAINT ck_recuperi_password_scadenza CHECK (scade_il > creato_il)
+);
+
+CREATE INDEX ix_recuperi_password_utente ON recuperi_password (id_utente);
 
 
 COMMIT;

@@ -14,6 +14,9 @@ type richiestaCrea struct {
 	IDIndirizzoRitiro     *int32  `json:"id_indirizzo_ritiro"`
 	IDIndirizzoSpedizione *int32  `json:"id_indirizzo_spedizione"`
 	DataoraRichiesta      *string `json:"dataora_richiesta_spedizione"`
+	// decisa dal sistema: se arriva viene rifiutata con un messaggio chiaro
+	RitirataIl any    `json:"ritirata_il"`
+	IDCorriere *int32 `json:"id_corriere"`
 }
 
 type richiestaModifica struct {
@@ -23,6 +26,7 @@ type richiestaModifica struct {
 	IDIndirizzoRitiro     *int32  `json:"id_indirizzo_ritiro"`
 	IDIndirizzoSpedizione *int32  `json:"id_indirizzo_spedizione"`
 	DataoraRichiesta      *string `json:"dataora_richiesta_spedizione"`
+	RitirataIl            any     `json:"ritirata_il"`
 }
 
 type richiestaAssegnazione struct {
@@ -52,6 +56,7 @@ type spedizioneDTO struct {
 	IsReso                   bool       `json:"is_reso"`
 	CreataIl                 time.Time  `json:"creata_il"`
 	DataoraRichiesta         time.Time  `json:"dataora_richiesta_spedizione"`
+	RitirataIl               *time.Time `json:"ritirata_il"`
 	IDClienteMittente        int32      `json:"id_cliente_mittente"`
 	IDClienteDestinatario    int32      `json:"id_cliente_destinatario"`
 	IDIndirizzoRitiro        int32      `json:"id_indirizzo_ritiro"`
@@ -62,7 +67,27 @@ type spedizioneDTO struct {
 	TentativiConsegnaFalliti int        `json:"tentativi_consegna_falliti"`
 }
 
-const messaggioData = "formato non valido: usare ISO 8601 con fuso orario, es. 2026-11-02T09:00:00+01:00"
+const (
+	messaggioData       = "formato non valido: usare ISO 8601 con fuso orario, es. 2026-11-02T09:00:00+01:00"
+	messaggioDataRitiro = "non si imposta: data e ora del ritiro le registra il sistema quando il corriere porta la spedizione in ritirata"
+)
+
+// dataRitiroDiSistema rifiuta ritirata_il: la decide il sistema, non il client.
+func dataRitiroDiSistema(e *errori.Validazione, ritiro any) {
+	if ritiro != nil {
+		e.Aggiungi("ritirata_il", messaggioDataRitiro)
+	}
+}
+
+// leggiData interpreta una data ISO 8601 con fuso orario.
+func leggiData(e *errori.Validazione, campo, v string) (time.Time, bool) {
+	t, err := time.Parse(time.RFC3339, v)
+	if err != nil {
+		e.Aggiungi(campo, messaggioData)
+		return time.Time{}, false
+	}
+	return t, true
+}
 
 func versoDTO(s Spedizione) spedizioneDTO {
 	d := spedizioneDTO{
@@ -74,6 +99,7 @@ func versoDTO(s Spedizione) spedizioneDTO {
 		TentativiRitiroFalliti: s.TentativiRitiroFalliti, TentativiConsegnaFalliti: s.TentativiConsegnaFalliti,
 	}
 	d.AnnullataIl = inUTC(s.AnnullataIl)
+	d.RitirataIl = inUTC(s.RitirataIl)
 	return d
 }
 
@@ -100,11 +126,11 @@ func (req richiestaCrea) versoDominio() (NuovaSpedizione, *errori.Validazione) {
 
 	if req.DataoraRichiesta == nil {
 		e.Aggiungi("dataora_richiesta_spedizione", "obbligatoria")
-	} else if t, err := time.Parse(time.RFC3339, *req.DataoraRichiesta); err != nil {
-		e.Aggiungi("dataora_richiesta_spedizione", messaggioData)
-	} else {
+	} else if t, ok := leggiData(e, "dataora_richiesta_spedizione", *req.DataoraRichiesta); ok {
 		n.DataoraRichiesta = t
 	}
+	dataRitiroDiSistema(e, req.RitirataIl)
+	n.IDCorriere = req.IDCorriere
 	return n, e
 }
 
@@ -116,21 +142,44 @@ func (req richiestaModifica) versoDominio() (DatiSpedizione, error) {
 		IDIndirizzoRitiro:     req.IDIndirizzoRitiro,
 		IDIndirizzoSpedizione: req.IDIndirizzoSpedizione,
 	}
+	e := &errori.Validazione{}
 	if req.DataoraRichiesta != nil {
-		t, err := time.Parse(time.RFC3339, *req.DataoraRichiesta)
-		if err != nil {
-			e := &errori.Validazione{}
-			e.Aggiungi("dataora_richiesta_spedizione", messaggioData)
-			return d, e
+		if t, ok := leggiData(e, "dataora_richiesta_spedizione", *req.DataoraRichiesta); ok {
+			d.DataoraRichiesta = &t
 		}
-		d.DataoraRichiesta = &t
 	}
-	return d, nil
+	dataRitiroDiSistema(e, req.RitirataIl)
+	return d, e.Err()
 }
 
 type indirizzoDTO struct {
-	Via    string `json:"via"`
-	Civico string `json:"civico"`
+	Via     string  `json:"via"`
+	Civico  string  `json:"civico"`
+	Citta   *string `json:"citta"`
+	CAP     *string `json:"cap"`
+	Regione *string `json:"regione"`
+	Nazione *string `json:"nazione"`
+}
+
+type personaDTO struct {
+	ID       *int32  `json:"id,omitempty"`
+	Nome     string  `json:"nome"`
+	Cognome  string  `json:"cognome"`
+	Email    *string `json:"email,omitempty"`
+	Telefono *string `json:"telefono,omitempty"`
+}
+
+func versoPersonaDTO(p Persona) personaDTO {
+	d := personaDTO{Nome: p.Nome, Cognome: p.Cognome, Email: p.Email, Telefono: p.Telefono}
+	if p.ID != 0 {
+		id := p.ID
+		d.ID = &id
+	}
+	return d
+}
+
+func versoIndirizzoDTO(i Indirizzo) indirizzoDTO {
+	return indirizzoDTO{Via: i.Via, Civico: i.Civico, Citta: i.Citta, CAP: i.CAP, Regione: i.Regione, Nazione: i.Nazione}
 }
 
 type notaDTO struct {
@@ -143,8 +192,12 @@ type notaDTO struct {
 }
 
 func versoNotaDTO(n Nota) notaDTO {
-	return notaDTO{ID: n.ID, Nota: n.Testo, IsInterna: n.IsInterna, Motivo: n.Motivo, CreataIl: n.CreataIl.UTC(),
+	d := notaDTO{ID: n.ID, Nota: n.Testo, IsInterna: n.IsInterna, Motivo: n.Motivo, CreataIl: n.CreataIl.UTC(),
 		Autore: autoreDa(n.IDOperatore, n.IDCorriere)}
+	if d.Autore != nil {
+		d.Autore.Nome, d.Autore.Cognome = n.NomeAutore, n.CognomeAutore
+	}
+	return d
 }
 
 type voceElencoDTO struct {
@@ -154,23 +207,39 @@ type voceElencoDTO struct {
 	IsReso                bool         `json:"is_reso"`
 	CreataIl              time.Time    `json:"creata_il"`
 	DataoraRichiesta      time.Time    `json:"dataora_richiesta_spedizione"`
-	IDClienteMittente     int32        `json:"id_cliente_mittente"`
+	RitirataIl            *time.Time   `json:"ritirata_il"`
+	IDClienteMittente     *int32       `json:"id_cliente_mittente,omitempty"`
 	IDClienteDestinatario int32        `json:"id_cliente_destinatario"`
 	IndirizzoRitiro       indirizzoDTO `json:"indirizzo_ritiro"`
 	IndirizzoSpedizione   indirizzoDTO `json:"indirizzo_spedizione"`
+	Mittente              *personaDTO  `json:"mittente,omitempty"`
+	Destinatario          personaDTO   `json:"destinatario"`
 	IDCorriere            *int32       `json:"id_corriere,omitempty"`
+	Corriere              *personaDTO  `json:"corriere,omitempty"`
+	AssegnataDa           *personaDTO  `json:"assegnata_da,omitempty"`
 	ConclusaIl            *time.Time   `json:"conclusa_il"`
 	Note                  []notaDTO    `json:"note"`
 }
 
 type rispostaElenco struct {
-	Dati      []voceElencoDTO `json:"dati"`
-	Pagina    int             `json:"pagina"`
-	PerPagina int             `json:"per_pagina"`
+	Dati           []voceElencoDTO `json:"dati"`
+	Pagina         int             `json:"pagina"`
+	PerPagina      int             `json:"per_pagina"`
+	TotaleElementi int             `json:"totale_elementi"`
+	TotalePagine   int             `json:"totale_pagine"`
 }
 
-func versoElencoDTO(voci []VoceElenco, f FiltroElenco) rispostaElenco {
-	r := rispostaElenco{Dati: make([]voceElencoDTO, len(voci)), Pagina: f.Pagina, PerPagina: f.PerPagina}
+// TotalePagine: quante pagine servono per totale elementi (0 se non ce n'è nessuno).
+func TotalePagine(totale, perPagina int) int {
+	if totale <= 0 || perPagina <= 0 {
+		return 0
+	}
+	return (totale + perPagina - 1) / perPagina
+}
+
+func versoElencoDTO(voci []VoceElenco, f FiltroElenco, totale int) rispostaElenco {
+	r := rispostaElenco{Dati: make([]voceElencoDTO, len(voci)), Pagina: f.Pagina, PerPagina: f.PerPagina,
+		TotaleElementi: totale, TotalePagine: TotalePagine(totale, f.PerPagina)}
 	for i, v := range voci {
 		r.Dati[i] = versoVoceDTO(v)
 	}
@@ -182,13 +251,31 @@ func versoVoceDTO(v VoceElenco) voceElencoDTO {
 	for j, n := range v.Note {
 		note[j] = versoNotaDTO(n)
 	}
+	var corriere, mittente, assegnante *personaDTO
+	var idMittente *int32
+	if v.Corriere != nil {
+		c := versoPersonaDTO(*v.Corriere)
+		corriere = &c
+	}
+	if v.AssegnataDa != nil {
+		a := versoPersonaDTO(*v.AssegnataDa)
+		assegnante = &a
+	}
+	if v.Mittente != nil {
+		m := versoPersonaDTO(*v.Mittente)
+		mittente, idMittente = &m, m.ID
+	}
 	return voceElencoDTO{
 		ID: v.ID, CodOrdine: v.CodOrdine, Stato: v.Stato.String(), IsReso: v.IsReso,
-		CreataIl: v.CreataIl.UTC(), DataoraRichiesta: v.DataoraRichiesta.UTC(),
-		IDClienteMittente: v.IDClienteMittente, IDClienteDestinatario: v.IDClienteDestinatario,
-		IndirizzoRitiro:     indirizzoDTO{v.IndirizzoRitiro.Via, v.IndirizzoRitiro.Civico},
-		IndirizzoSpedizione: indirizzoDTO{v.IndirizzoSpedizione.Via, v.IndirizzoSpedizione.Civico},
+		CreataIl: v.CreataIl.UTC(), DataoraRichiesta: v.DataoraRichiesta.UTC(), RitirataIl: inUTC(v.RitirataIl),
+		IDClienteMittente: idMittente, IDClienteDestinatario: v.IDClienteDestinatario,
+		IndirizzoRitiro:     versoIndirizzoDTO(v.IndirizzoRitiro),
+		IndirizzoSpedizione: versoIndirizzoDTO(v.IndirizzoSpedizione),
+		Mittente:            mittente,
+		Destinatario:        versoPersonaDTO(v.Destinatario),
 		IDCorriere:          v.IDCorriere,
+		Corriere:            corriere,
+		AssegnataDa:         assegnante,
 		ConclusaIl:          inUTC(v.ConclusaIl),
 		Note:                note,
 	}
@@ -219,8 +306,10 @@ func inUTC(t *time.Time) *time.Time {
 }
 
 type autoreDTO struct {
-	Ruolo string `json:"ruolo"`
-	ID    int32  `json:"id"`
+	Ruolo   string  `json:"ruolo"`
+	ID      int32   `json:"id"`
+	Nome    *string `json:"nome,omitempty"`
+	Cognome *string `json:"cognome,omitempty"`
 }
 
 type voceStoricoDTO struct {
@@ -252,6 +341,7 @@ func versoStoricoDTO(voci []VoceStorico) rispostaStorico {
 		autore := autoreDTO{}
 		if a := autoreDa(v.IDOperatore, v.IDCorriere); a != nil {
 			autore = *a
+			autore.Nome, autore.Cognome = v.NomeAutore, v.CognomeAutore
 		}
 		r.Dati[i] = voceStoricoDTO{
 			ID: v.ID, Operazione: v.Operazione,

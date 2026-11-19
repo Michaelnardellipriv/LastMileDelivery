@@ -1,3 +1,4 @@
+-- Tutti gli utenti di prova hanno la password PasswordProva1 (solo sviluppo).
 -- Dati di prova per la posizione dei corrieri (solo sviluppo).
 -- Da eseguire DOPO schema_LastMileDb.sql e seed_dev.sql.
 --
@@ -13,15 +14,15 @@
 
 BEGIN;
 
-INSERT INTO utenti (nome, cognome, prefisso, nr_telefono, email) VALUES
-  ('Anna',  'Admin',     '+39', '3330000001', 'admin@veloce24.test'),
-  ('Paolo', 'Corriere2', '+39', '3330000004', 'corriere2@veloce24.test');
+INSERT INTO utenti (nome, cognome, prefisso, nr_telefono, email, pwd_hash) VALUES
+  ('Anna',  'Admin',     '+39', '3330000001', 'admin@veloce24.test', '$2a$10$SNjhWOVP8LM0v7WcZuAjROVxOjm3QadNZirnsdusfZvt3FjLAl7vG'),
+  ('Paolo', 'Corriere2', '+39', '3330000004', 'corriere2@veloce24.test', '$2a$10$SNjhWOVP8LM0v7WcZuAjROVxOjm3QadNZirnsdusfZvt3FjLAl7vG');
 
-INSERT INTO amministratori (pwd_hash, id_utente)
-SELECT 'da-sostituire', id FROM utenti WHERE email = 'admin@veloce24.test';
+INSERT INTO amministratori (id_utente)
+SELECT id FROM utenti WHERE email = 'admin@veloce24.test';
 
-INSERT INTO corrieri (pwd_hash, id_utente)
-SELECT 'da-sostituire', id FROM utenti WHERE email = 'corriere2@veloce24.test';
+INSERT INTO corrieri (id_utente)
+SELECT id FROM utenti WHERE email = 'corriere2@veloce24.test';
 
 INSERT INTO indirizzi (via, civico) VALUES
   ('Via Belenzani', '1'),
@@ -43,13 +44,13 @@ JOIN utenti uc ON uc.id = co.id_utente AND uc.email = 'corriere@veloce24.test';
 -- spedizione già "in consegna": il corriere può trasmettere la posizione
 INSERT INTO spedizioni (
     stato, cod_ordine, id_operatore_ha_creato,
-    id_cliente_mittente, id_cliente_destinatario, dataora_richiesta_spedizione,
+    id_cliente_mittente, id_cliente_destinatario, dataora_richiesta_spedizione, ritirata_il,
     id_indirizzo_ritiro, id_indirizzo_spedizione, id_assegnazione_corrente
 )
 SELECT 'in consegna', 'SEED-POS-001', a.id_operatore,
        (SELECT cl.id FROM clienti cl JOIN utenti u ON u.id = cl.id_utente WHERE u.email = 'mittente@veloce24.test'),
        (SELECT cl.id FROM clienti cl JOIN utenti u ON u.id = cl.id_utente WHERE u.email = 'destinatario@veloce24.test'),
-       now(),
+       now(), now(),
        (SELECT id FROM indirizzi WHERE via = 'Via Belenzani'),
        (SELECT id FROM indirizzi WHERE via = 'Via Manci'),
        a.id
@@ -68,13 +69,13 @@ JOIN utenti uc ON uc.id = co.id_utente AND uc.email = 'corriere2@veloce24.test';
 
 INSERT INTO spedizioni (
     stato, cod_ordine, id_operatore_ha_creato,
-    id_cliente_mittente, id_cliente_destinatario, dataora_richiesta_spedizione,
+    id_cliente_mittente, id_cliente_destinatario, dataora_richiesta_spedizione, ritirata_il,
     id_indirizzo_ritiro, id_indirizzo_spedizione, id_assegnazione_corrente
 )
 SELECT 'ritirata', 'SEED-POS-002', a.id_operatore,
        (SELECT cl.id FROM clienti cl JOIN utenti u ON u.id = cl.id_utente WHERE u.email = 'mittente@veloce24.test'),
        (SELECT cl.id FROM clienti cl JOIN utenti u ON u.id = cl.id_utente WHERE u.email = 'destinatario@veloce24.test'),
-       now(),
+       now(), now(),
        (SELECT id FROM indirizzi WHERE via = 'Via Belenzani'),
        (SELECT id FROM indirizzi WHERE via = 'Via Manci'),
        a.id

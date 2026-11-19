@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"lastmiledelivery/backend/internal/configurazione"
 	"lastmiledelivery/backend/internal/errori"
 	"lastmiledelivery/backend/internal/identita"
 )
@@ -15,21 +16,27 @@ type archivio interface {
 	Aggiorna(ctx context.Context, id int32, autore identita.Richiedente,
 		decidi func(attuale Spedizione) (Modifica, error)) (Spedizione, bool, error)
 	Elenca(ctx context.Context, v Visibilita, f FiltroElenco) ([]VoceElenco, error)
+	Conta(ctx context.Context, v Visibilita, f FiltroElenco) (int, error)
 	Storico(ctx context.Context, id int32) ([]VoceStorico, error)
 	Dettaglio(ctx context.Context, v Visibilita, id int32) (DettaglioSpedizione, error)
 	AggiungiNota(ctx context.Context, id int32, autore identita.Richiedente, testo string,
 		verifica func(attuale Spedizione) error) (Nota, error)
 }
 
-type Servizio struct {
-	archivio      archivio
-	maxTentativi  int
-	giorniCliente int
-	adesso        func() time.Time
+// fonteRegole dà i parametri impostati dall'amministratore (tentativi, giorni di
+// visibilità, motivi): si leggono a ogni operazione, così una modifica vale subito.
+type fonteRegole interface {
+	Regole(ctx context.Context) (configurazione.Regole, error)
 }
 
-func NuovoServizio(a archivio, maxTentativi, giorniCliente int) *Servizio {
-	return &Servizio{archivio: a, maxTentativi: maxTentativi, giorniCliente: giorniCliente, adesso: time.Now}
+type Servizio struct {
+	archivio archivio
+	regole   fonteRegole
+	adesso   func() time.Time
+}
+
+func NuovoServizio(a archivio, r fonteRegole) *Servizio {
+	return &Servizio{archivio: a, regole: r, adesso: time.Now}
 }
 
 func soloOperatore(r identita.Richiedente, azione string) error {
@@ -63,7 +70,10 @@ func (s *Servizio) validaNuova(n NuovaSpedizione) *errori.Validazione {
 	controllaID(e, "id_indirizzo_ritiro", n.IDIndirizzoRitiro)
 	controllaID(e, "id_indirizzo_spedizione", n.IDIndirizzoSpedizione)
 	controllaIndirizzi(e, n.IDIndirizzoRitiro, n.IDIndirizzoSpedizione)
-	controllaData(e, n.DataoraRichiesta, s.adesso())
+	controllaDataRichiesta(e, n.DataoraRichiesta, s.adesso())
+	if n.IDCorriere != nil {
+		controllaID(e, "id_corriere", *n.IDCorriere)
+	}
 	return e
 }
 
@@ -97,7 +107,7 @@ func (s *Servizio) validaDati(d DatiSpedizione) error {
 		}
 	}
 	if d.DataoraRichiesta != nil {
-		controllaData(e, *d.DataoraRichiesta, s.adesso())
+		controllaDataRichiesta(e, *d.DataoraRichiesta, s.adesso())
 	}
 	return e.Err()
 }
@@ -142,20 +152,24 @@ func (s *Servizio) Assegna(ctx context.Context, r identita.Richiedente, id int32
 	if err := e.Err(); err != nil {
 		return Spedizione{}, false, err
 	}
+	reg, err := s.regole.Regole(ctx)
+	if err != nil {
+		return Spedizione{}, false, err
+	}
 	return s.archivio.Aggiorna(ctx, id, r, func(attuale Spedizione) (Modifica, error) {
-		return s.decidiAssegnazione(attuale, idCorriere)
+		return decidiAssegnazione(reg, attuale, idCorriere)
 	})
 }
 
-func (s *Servizio) decidiAssegnazione(attuale Spedizione, idCorriere *int32) (Modifica, error) {
+func decidiAssegnazione(reg configurazione.Regole, attuale Spedizione, idCorriere *int32) (Modifica, error) {
 	nuovo := attuale.Stato
 	switch attuale.Stato {
 	case Creata:
 		nuovo = Assegnata
 	case Assegnata:
-		if attuale.TentativiRitiroFalliti >= s.maxTentativi {
+		if attuale.TentativiRitiroFalliti >= reg.MaxTentativiRitiro {
 			return Modifica{}, &errori.Conflitto{Messaggio: fmt.Sprintf(
-				"falliti %d tentativi di ritiro su %d: la spedizione va annullata", attuale.TentativiRitiroFalliti, s.maxTentativi)}
+				"falliti %d tentativi di ritiro su %d: la spedizione va annullata", attuale.TentativiRitiroFalliti, reg.MaxTentativiRitiro)}
 		}
 	case Ritirata:
 		if attuale.TentativiConsegnaFalliti == 0 {
@@ -175,28 +189,32 @@ func (s *Servizio) RegistraTentativo(ctx context.Context, r identita.Richiedente
 	if r.Ruolo != identita.Corriere {
 		return Spedizione{}, &errori.NonAutorizzato{Messaggio: "solo il corriere assegnato può registrare un tentativo"}
 	}
-	if err := validaTentativo(t); err != nil {
+	reg, err := s.regole.Regole(ctx)
+	if err != nil {
+		return Spedizione{}, err
+	}
+	if err := validaTentativo(reg, t); err != nil {
 		return Spedizione{}, err
 	}
 	sped, _, err := s.archivio.Aggiorna(ctx, id, r, func(attuale Spedizione) (Modifica, error) {
-		return s.decidiTentativo(r, attuale, t)
+		return decidiTentativo(reg, r, attuale, t)
 	})
 	return sped, err
 }
 
-func validaTentativo(t TentativoFallito) error {
+func validaTentativo(reg configurazione.Regole, t TentativoFallito) error {
 	e := &errori.Validazione{}
 	if !t.Tipo.Valido() {
 		e.Aggiungi("tipo", "valore non previsto: ammessi ritiro, consegna")
 	}
 	controllaNota(e, t.Nota, "obbligatoria per ogni tentativo non riuscito")
 	if t.Tipo.Valido() {
-		controllaMotivo(e, t.Motivo, motiviTentativo(t.Tipo), "obbligatorio per ogni tentativo non riuscito")
+		controllaMotivo(e, reg.Motivi, t.Motivo, "obbligatorio per ogni tentativo non riuscito")
 	}
 	return e.Err()
 }
 
-func (s *Servizio) decidiTentativo(r identita.Richiedente, attuale Spedizione, t TentativoFallito) (Modifica, error) {
+func decidiTentativo(reg configurazione.Regole, r identita.Richiedente, attuale Spedizione, t TentativoFallito) (Modifica, error) {
 	if !stessoCorriere(&r.ID, attuale.IDCorriere) {
 		return Modifica{}, &errori.NonAutorizzato{Messaggio: "la spedizione non è assegnata a te"}
 	}
@@ -208,10 +226,10 @@ func (s *Servizio) decidiTentativo(r identita.Richiedente, attuale Spedizione, t
 			return Modifica{}, &errori.Conflitto{Messaggio: fmt.Sprintf(
 				"un tentativo di ritiro si registra solo su una spedizione assegnata (stato attuale: %q)", attuale.Stato)}
 		}
-		if attuale.TentativiRitiroFalliti >= s.maxTentativi {
+		if attuale.TentativiRitiroFalliti >= reg.MaxTentativiRitiro {
 			return Modifica{}, &errori.Conflitto{Messaggio: fmt.Sprintf(
 				"già falliti %d tentativi di ritiro su %d: l'operatore deve annullare la spedizione",
-				attuale.TentativiRitiroFalliti, s.maxTentativi)}
+				attuale.TentativiRitiroFalliti, reg.MaxTentativiRitiro)}
 		}
 		m.NuovoStato = Assegnata
 		return m, nil
@@ -222,11 +240,10 @@ func (s *Servizio) decidiTentativo(r identita.Richiedente, attuale Spedizione, t
 			"un tentativo di consegna si registra solo su una spedizione in consegna (stato attuale: %q)", attuale.Stato)}
 	}
 	if attuale.TentativiConsegnaFalliti >= attuale.UsciteInConsegna {
-		return Modifica{}, &errori.Conflitto{Messaggio: "tentativo di consegna già registrato per questa uscita: " +
-			"l'operatore deve riportare la spedizione in ritirata e il corriere rimetterla in consegna"}
+		return Modifica{}, &errori.Conflitto{Messaggio: messaggioUscitaFallita}
 	}
 	m.NuovoStato = InConsegna
-	if attuale.TentativiConsegnaFalliti+1 >= s.maxTentativi {
+	if attuale.TentativiConsegnaFalliti+1 >= reg.MaxTentativiConsegna {
 		m.NuovoStato = NonConsegnata
 	}
 	return m, nil
@@ -236,16 +253,20 @@ func (s *Servizio) CambiaStato(ctx context.Context, r identita.Richiedente, id i
 	if r.Ruolo != identita.Operatore && r.Ruolo != identita.Corriere {
 		return Spedizione{}, &errori.NonAutorizzato{Messaggio: "solo operatori logistici e corrieri possono cambiare lo stato"}
 	}
-	if err := validaCambio(c); err != nil {
+	reg, err := s.regole.Regole(ctx)
+	if err != nil {
+		return Spedizione{}, err
+	}
+	if err := validaCambio(reg, c); err != nil {
 		return Spedizione{}, err
 	}
 	sped, _, err := s.archivio.Aggiorna(ctx, id, r, func(attuale Spedizione) (Modifica, error) {
-		return s.decidiStato(r, attuale, c)
+		return decidiStato(reg, r, attuale, c)
 	})
 	return sped, err
 }
 
-func validaCambio(c CambioStato) error {
+func validaCambio(reg configurazione.Regole, c CambioStato) error {
 	e := &errori.Validazione{}
 	switch {
 	case !c.Stato.Valido():
@@ -253,8 +274,8 @@ func validaCambio(c CambioStato) error {
 	case altroEndpoint[c.Stato] != "":
 		e.Aggiungi("stato", "\""+c.Stato.String()+"\" "+altroEndpoint[c.Stato])
 	}
-	if regola, chiusa := motiviStato[c.Stato]; chiusa {
-		controllaMotivo(e, c.Motivo, regola.ammessi, "")
+	if _, conMotivo := azioniConMotivo[c.Stato]; conMotivo {
+		controllaMotivo(e, reg.Motivi, c.Motivo, "")
 		controllaNota(e, c.Nota, "")
 	} else {
 		if c.Nota != nil {
@@ -267,7 +288,7 @@ func validaCambio(c CambioStato) error {
 	return e.Err()
 }
 
-func (s *Servizio) decidiStato(r identita.Richiedente, attuale Spedizione, c CambioStato) (Modifica, error) {
+func decidiStato(reg configurazione.Regole, r identita.Richiedente, attuale Spedizione, c CambioStato) (Modifica, error) {
 	ruolo, ammessa := transizioni[passaggio{attuale.Stato, c.Stato}]
 	if !ammessa {
 		if err := rifiuta(r, attuale, c.Stato); err != nil {
@@ -281,12 +302,15 @@ func (s *Servizio) decidiStato(r identita.Richiedente, attuale Spedizione, c Cam
 	if r.Ruolo == identita.Corriere && !stessoCorriere(&r.ID, attuale.IDCorriere) {
 		return Modifica{}, &errori.NonAutorizzato{Messaggio: "la spedizione non è assegnata a te"}
 	}
-	if attuale.Stato == Assegnata && c.Stato == Ritirata && attuale.TentativiRitiroFalliti >= s.maxTentativi {
+	if attuale.Stato == Assegnata && c.Stato == Ritirata && attuale.TentativiRitiroFalliti >= reg.MaxTentativiRitiro {
 		return Modifica{}, &errori.Conflitto{Messaggio: fmt.Sprintf(
 			"falliti %d tentativi di ritiro su %d: la spedizione deve essere annullata dall'operatore",
-			attuale.TentativiRitiroFalliti, s.maxTentativi)}
+			attuale.TentativiRitiroFalliti, reg.MaxTentativiRitiro)}
 	}
-	if err := s.richiediMotivoENota(attuale, c); err != nil {
+	if attuale.Stato == InConsegna && c.Stato == Consegnata && attuale.TentativiConsegnaFalliti >= attuale.UsciteInConsegna {
+		return Modifica{}, &errori.Conflitto{Messaggio: messaggioUscitaFallita}
+	}
+	if err := richiediMotivoENota(reg, attuale, c); err != nil {
 		return Modifica{}, err
 	}
 	nota := notaDaSalvare(c.Nota, c.Motivo)
@@ -296,13 +320,13 @@ func (s *Servizio) decidiStato(r identita.Richiedente, attuale Spedizione, c Cam
 	return Modifica{NuovoStato: c.Stato, Annulla: c.Stato == Annullata, Nota: nota}, nil
 }
 
-func (s *Servizio) richiediMotivoENota(attuale Spedizione, c CambioStato) error {
-	regola, chiusa := motiviStato[c.Stato]
-	if !chiusa {
+func richiediMotivoENota(reg configurazione.Regole, attuale Spedizione, c CambioStato) error {
+	azione, conMotivo := azioniConMotivo[c.Stato]
+	if !conMotivo {
 		return nil
 	}
 	e := &errori.Validazione{}
-	ritiriEsauriti := c.Stato == Annullata && attuale.TentativiRitiroFalliti >= s.maxTentativi
+	ritiriEsauriti := c.Stato == Annullata && attuale.TentativiRitiroFalliti >= reg.MaxTentativiRitiro
 	if ritiriEsauriti {
 		if (c.Motivo == nil) != (c.Nota == nil) {
 			e.Aggiungi("motivo", "motivo e nota vanno indicati insieme oppure omessi: i tentativi di ritiro falliti hanno già i loro motivi")
@@ -310,10 +334,10 @@ func (s *Servizio) richiediMotivoENota(attuale Spedizione, c CambioStato) error 
 		return e.Err()
 	}
 	if c.Motivo == nil {
-		e.Aggiungi("motivo", "obbligatorio per "+regola.azione)
+		e.Aggiungi("motivo", "obbligatorio per "+azione)
 	}
 	if c.Nota == nil {
-		e.Aggiungi("nota", "obbligatoria per "+regola.azione)
+		e.Aggiungi("nota", "obbligatoria per "+azione)
 	}
 	return e.Err()
 }

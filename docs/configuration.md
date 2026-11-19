@@ -17,13 +17,19 @@ Se le cambiate, il processo va riavviato (in Kubernetes:
 | `DATABASE_URL` | backend | **sì** | — | Connessione a PostgreSQL, `postgres://utente:password@host:5432/db?sslmode=disable`. Contiene una password: è un **secret**. |
 | `CORS_ORIGIN` | backend | **sì** | — | Origine del frontend che il browser può usare per chiamare l'API, es. `http://localhost:5173`. Più origini separate da virgola, `*` = tutte (solo DEV). Senza percorso né barra finale. |
 | `LISTEN_ADDR` | backend | no | `127.0.0.1:8080` | Indirizzo e porta su cui ascolta. Dentro un container **deve** essere `0.0.0.0:8080`. Accetta anche il vecchio nome `HTTP_ADDR`. |
-| `MAX_TENTATIVI` | backend | no | `3` | Tentativi di consegna/ritiro falliti oltre i quali la spedizione non si riassegna. |
-| `GIORNI_VISIBILITA_CLIENTE` | backend | no | `30` | Per quanti giorni il cliente vede una spedizione conclusa. |
 | `POSTGRES_USER` | immagine db | sì | — | Utente creato al primo avvio del database. |
 | `POSTGRES_PASSWORD` | immagine db | sì | — | Password di quell'utente. È un **secret**. |
 | `POSTGRES_DB` | immagine db | sì | — | Nome del database creato al primo avvio. |
 | `DB_PORT` | docker compose | no | `5432` | Porta del PC su cui viene pubblicato il database. |
 | `API_BASE` | app Flutter | no | vuota = solo dati demo | URL del backend, passato con `--dart-define=API_BASE=...` alla compilazione. |
+
+**Parametri dell'amministratore.** Tentativi massimi di ritiro e di consegna,
+giorni di visibilità del cliente, intervallo della posizione e motivi **non** sono
+variabili d'ambiente: stanno nelle tabelle `impostazioni` e `motivi` del database e
+li modifica l'amministratore con `/api/impostazioni` (vedi `docs/api.md`), senza
+riavviare il backend. `MAX_TENTATIVI` e `GIORNI_VISIBILITA_CLIENTE`, se ancora
+impostate, vengono ignorate con un avviso nel log. Su un database già esistente va
+eseguita una volta `db/migrazione_configurazione_amministratore.sql`.
 
 **Fallire presto.** Se `DATABASE_URL` o `CORS_ORIGIN` mancano, o se un valore
 non è valido, il backend si ferma subito con un messaggio chiaro invece di
@@ -61,8 +67,6 @@ password di PROD non deve mai girare su un portatile.
 | `DATABASE_URL` | `...@localhost:5432/lastmile` con `go run`, `...@db:5432/lastmile` nel compose | dal Secret `db-secret`, host `db-svc` | dal secret di PROD (da definire) |
 | `CORS_ORIGIN` | `http://localhost:5173` | `http://lastmile.test` | dominio del cliente (da definire) |
 | `LISTEN_ADDR` | `127.0.0.1:8080` con `go run`, `0.0.0.0:8080` nel compose | `0.0.0.0:8080` | `0.0.0.0:8080` |
-| `MAX_TENTATIVI` | `3` | `3` | `3` |
-| `GIORNI_VISIBILITA_CLIENTE` | `30` | `30` | `30` |
 | Dati | finti, `db/seed.sql` | di prova | reali, da proteggere |
 
 ## 4. Come si avvia in ogni ambiente
