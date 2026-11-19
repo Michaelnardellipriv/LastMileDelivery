@@ -34,6 +34,46 @@ void main() {
     expect(p.dati.single.consegna.testo, 'Via Verdi 10');
   });
 
+  test('filtri per data e numero ordine nel formato del backend', () async {
+    late Uri url;
+    final api = ApiClient(
+      base: 'http://backend:8080',
+      ruolo: RuoloApi.cliente,
+      idUtente: 2,
+      client: MockClient((req) async {
+        url = req.url;
+        return http.Response(jsonEncode({'dati': [], 'pagina': 1, 'per_pagina': 20}), 200);
+      }),
+    );
+    await api.elencoSpedizioni(dal: DateTime(2026, 11, 1), al: DateTime(2026, 11, 9), codOrdine: '  ord-4 ');
+    expect(url.queryParameters['dal'], '2026-11-01');
+    expect(url.queryParameters['al'], '2026-11-09');
+    expect(url.queryParameters['cod_ordine'], 'ord-4');
+
+    await api.elencoSpedizioni(codOrdine: '   ');
+    expect(url.queryParameters.containsKey('cod_ordine'), isFalse, reason: 'il backend rifiuta cod_ordine vuoto');
+  });
+
+  test('dettaglio: GET /api/spedizioni/{id} con tentativi e annullamento', () async {
+    late http.Request inviata;
+    final api = ApiClient(
+      base: 'http://backend:8080',
+      ruolo: RuoloApi.cliente,
+      idUtente: 2,
+      client: MockClient((req) async {
+        inviata = req;
+        return http.Response(
+            jsonEncode({..._voce, 'annullata_il': null, 'tentativi_ritiro_falliti': 0, 'tentativi_consegna_falliti': 2}), 200);
+      }),
+    );
+    final d = await api.dettaglioSpedizione(4);
+    expect(inviata.url.path, '/api/spedizioni/4');
+    expect(inviata.headers['X-Id-Cliente'], '2');
+    expect(d.spedizione.ritiro.testo, 'Via Roma 1');
+    expect(d.tentativiConsegnaFalliti, 2);
+    expect(d.annullataIl, isNull);
+  });
+
   test('401 diventa ErroreApi con lo status', () async {
     final api = ApiClient(
       base: 'http://backend:8080',
