@@ -1,16 +1,20 @@
-// Elenco di tutte le spedizioni con i filtri per stato, corriere, data e riferimento.
+// Elenco di tutte le spedizioni con i filtri per stato, corriere, data e riferimento,
+// comune a operatori e amministratori: cambia solo il dettaglio che si apre
+// (con le azioni per l'operatore, in sola lettura per l'amministratore).
 // Su schermo largo il dettaglio sta a destra dell'elenco, su schermo stretto si apre
 // in una pagina a parte.
 import 'package:flutter/material.dart';
 
 import 'api.dart';
-import '../comune/comuni.dart';
-import 'dettaglio.dart';
-import 'selettori.dart';
+import 'comuni.dart';
+import 'ricerca.dart';
 
 class SpedizioniPage extends StatefulWidget {
-  final ApiOperatore api;
-  const SpedizioniPage({super.key, required this.api});
+  final ApiSessione api;
+
+  /// Dettaglio della spedizione [id]; [alCambio] aggiorna l'elenco dopo una modifica.
+  final Widget Function(int id, VoidCallback alCambio) dettaglio;
+  const SpedizioniPage({super.key, required this.api, required this.dettaglio});
   @override
   State<SpedizioniPage> createState() => SpedizioniPageState();
 }
@@ -85,7 +89,7 @@ class SpedizioniPageState extends State<SpedizioniPage> {
       Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => Scaffold(
           appBar: AppBar(title: const Text('Dettaglio spedizione')),
-          body: DettaglioSpedizione(api: widget.api, id: id, alCambio: () => _carica(pagina: _pagina)),
+          body: widget.dettaglio(id, () => _carica(pagina: _pagina)),
         ),
       ));
     }
@@ -221,11 +225,9 @@ class SpedizioniPageState extends State<SpedizioniPage> {
       Expanded(
         child: _selezionata == null
             ? const Center(child: Text('Seleziona una spedizione per vederne il dettaglio'))
-            : DettaglioSpedizione(
+            : KeyedSubtree(
                 key: ValueKey('$_selezionata-$_versioneDettaglio'),
-                api: widget.api,
-                id: _selezionata!,
-                alCambio: () => _carica(pagina: _pagina),
+                child: widget.dettaglio(_selezionata!, () => _carica(pagina: _pagina)),
               ),
       ),
     ]);

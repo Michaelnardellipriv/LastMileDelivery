@@ -2,7 +2,7 @@ openapi: 3.0.3
 
 info:
   title: LastMileDelivery API
-  version: "0.30.0"
+  version: "0.33.0"
   description: |
     API per la gestione delle spedizioni di Veloce24.
 
@@ -41,9 +41,11 @@ info:
     (`/api/impostazioni`). Valgono dalla richiesta successiva. Le tabelle qui sotto usano i
     valori predefiniti (3 tentativi).
 
-    **Utenti disattivati.** L'amministratore può disattivare corrieri e operatori
-    (`PATCH /api/utenti/{id}`): il login risponde 403, i token già emessi ricevono 403 a ogni
-    richiesta e a un corriere disattivato non si assegnano spedizioni.
+    **Utenti disattivati.** L'amministratore può disattivare corrieri, operatori e clienti
+    destinatari (`PATCH /api/utenti/{id}`): il login risponde 403, i token già emessi ricevono
+    403 a ogni richiesta, a un corriere disattivato non si assegnano spedizioni e un cliente
+    disattivato non può essere destinatario di spedizioni nuove. I dati dei clienti li
+    modifica anche l'operatore, ma non può disattivarli.
 
     **Ciclo di vita** (stati del tipo `stato_spedizione` del database):
 
@@ -109,7 +111,7 @@ tags:
   - name: posizioni
     description: Posizione simulata dei corrieri (RF16) e intervallo di invio
   - name: amministrazione
-    description: Parametri della gestione delle spedizioni, motivi e utenti (corrieri e operatori), solo per l'amministratore
+    description: Parametri della gestione delle spedizioni, motivi e utenti (corrieri, operatori e clienti); l'operatore modifica solo i dati dei clienti
   - name: anagrafiche
     description: |
       Clienti e indirizzi, per creare una spedizione dall'interfaccia: l'operatore cerca o
@@ -412,7 +414,9 @@ paths:
         '401': { $ref: '#/components/responses/NonIdentificato' }
         '403': { $ref: '#/components/responses/NonAutorizzato' }
         '409':
-          description: Codice ordine già usato, oppure Idempotency-Key già usata con dati diversi
+          description: |
+            Codice ordine già usato, destinatario disattivato dall'amministratore (errore sul
+            campo `id_cliente_destinatario`), oppure Idempotency-Key già usata con dati diversi
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Errore' }
@@ -528,7 +532,8 @@ paths:
         '409':
           description: |
             Campi non modificabili nello stato attuale: dati dopo il ritiro, oppure
-            `is_reso` su una spedizione non annullata, persa o non consegnata
+            `is_reso` su una spedizione non annullata, persa o non consegnata; oppure nuovo
+            destinatario disattivato dall'amministratore (errore sul campo `id_cliente_destinatario`)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Errore' }
@@ -1114,7 +1119,9 @@ paths:
     get:
       tags: [posizioni]
       summary: Ogni quanti secondi il corriere invia la posizione
-      description: Corrieri, operatori e amministratori; il cliente riceve 403.
+      description: >-
+        Corrieri, operatori e amministratori; il cliente riceve 403. L'intervallo si
+        modifica solo con `PATCH /api/impostazioni` (`intervallo_posizione_sec`).
       operationId: leggiIntervalloPosizione
       security:
         - corriere: []
@@ -1128,35 +1135,6 @@ paths:
               schema: { $ref: '#/components/schemas/Intervallo' }
         '401': { $ref: '#/components/responses/NonIdentificato' }
         '403': { $ref: '#/components/responses/NonAutorizzato' }
-        '500': { $ref: '#/components/responses/ErroreInterno' }
-        '503': { $ref: '#/components/responses/NonDisponibile' }
-    put:
-      tags: [posizioni]
-      summary: Modifica l'intervallo di invio della posizione
-      description: Solo amministratori. L'intervallo va da 5 a 3600 secondi; la modifica registra l'amministratore e l'ora.
-      operationId: modificaIntervalloPosizione
-      security:
-        - amministratore: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/Intervallo' }
-            example: { intervallo_secondi: 30 }
-      responses:
-        '200':
-          description: Intervallo aggiornato
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Intervallo' }
-        '400':
-          description: Intervallo mancante o fuori dal range 5–3600
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Errore' }
-        '401': { $ref: '#/components/responses/NonIdentificato' }
-        '403': { $ref: '#/components/responses/NonAutorizzato' }
-        '415': { $ref: '#/components/responses/NonJSON' }
         '500': { $ref: '#/components/responses/ErroreInterno' }
         '503': { $ref: '#/components/responses/NonDisponibile' }
 
@@ -1321,16 +1299,17 @@ paths:
   /api/utenti:
     get:
       tags: [amministrazione]
-      summary: Corrieri e operatori
+      summary: Corrieri, operatori e clienti
       description: |
-        Attivi e disattivati. `q` cerca come in `GET /api/clienti`; `ruolo` e `attivo` filtrano.
-        Ordinati per cognome e nome.
+        Attivi e disattivati (gli amministratori non compaiono). `q` cerca come in
+        `GET /api/clienti`; `ruolo` e `attivo` filtrano. Ordinati per cognome e nome.
+        Per i clienti `destinatario` dice se hanno ricevuto almeno una spedizione.
       operationId: cercaUtenti
       security:
         - amministratore: []
       parameters:
         - { name: q, in: query, required: false, schema: { type: string, maxLength: 100 } }
-        - { name: ruolo, in: query, required: false, schema: { type: string, enum: [corriere, operatore] } }
+        - { name: ruolo, in: query, required: false, schema: { type: string, enum: [corriere, operatore, cliente] } }
         - { name: attivo, in: query, required: false, schema: { type: boolean } }
         - { name: pagina, in: query, required: false, schema: { type: integer, minimum: 1, default: 1 } }
         - { name: per_pagina, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
@@ -1399,20 +1378,31 @@ paths:
         schema: { type: integer, format: int32, minimum: 1 }
     patch:
       tags: [amministrazione]
-      summary: Modifica, abilita o disattiva un corriere o un operatore
+      summary: Modifica, abilita o disattiva un corriere, un operatore o un cliente
       description: |
         Cambia solo i campi presenti (almeno uno); il ruolo non si cambia. Per i dati valgono
         le regole di `POST /api/utenti`; l'email non può essere di un altro utente (409), la
         propria con maiuscole diverse sì. Con una nuova `password` l'utente la riceve per mail.
 
+        Chi può fare cosa:
+        - **amministratore**: dati, `password` e `attivo` di corrieri, operatori e clienti
+          destinatari. Di un cliente solo mittente (mai destinatario: non accede all'app) solo
+          i dati: con `password` o `attivo` risponde 409.
+        - **operatore logistico**: solo i dati dei clienti (nome, cognome, prefisso,
+          nr_telefono, email). `password` o `attivo`, oppure un corriere o un operatore, danno 403.
+        - gli amministratori non si modificano da qui (404).
+
         Un utente disattivato (`attivo: false`) non può fare il login (403), i token che aveva ricevono 403 a
         ogni richiesta e non riceve mail di recupero password. Un corriere disattivato non
         compare in `GET /api/corrieri` e non gli si assegnano spedizioni (409); quelle che
-        aveva restano sue finché l'operatore non le riassegna. Con `attivo: true` torna
+        aveva restano sue finché l'operatore non le riassegna. Un cliente disattivato non può
+        essere destinatario di spedizioni nuove (409 su `POST /api/spedizioni` e
+        `PATCH /api/spedizioni/{id}`); quelle che ha già restano sue. Con `attivo: true` torna
         tutto come prima.
       operationId: modificaUtente
       security:
         - amministratore: []
+        - operatore: []
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -1435,12 +1425,14 @@ paths:
         '401': { $ref: '#/components/responses/NonIdentificato' }
         '403': { $ref: '#/components/responses/NonAutorizzato' }
         '404':
-          description: Nessun corriere o operatore con questo id utente
+          description: Nessun corriere, operatore o cliente con questo id utente
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Errore' }
         '409':
-          description: Email già usata da un altro utente, oppure numero di telefono già usato
+          description: |
+            Email già usata da un altro utente, numero di telefono già usato, oppure `password`
+            o `attivo` per un cliente solo mittente
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Errore' }
@@ -1811,15 +1803,21 @@ components:
 
     Cliente:
       type: object
-      required: [id, id_utente, nome, cognome, email, prefisso, nr_telefono]
+      required: [id, id_utente, nome, cognome, email, prefisso, nr_telefono, attivo, destinatario]
       properties:
         id: { type: integer, format: int32, description: 'Id nella tabella clienti, da usare come id_cliente_mittente o id_cliente_destinatario' }
-        id_utente: { type: integer, format: int32 }
+        id_utente: { type: integer, format: int32, description: "Id dell'utente, da usare in PATCH /api/utenti/{id} per modificarne i dati" }
         nome: { type: string }
         cognome: { type: string }
         email: { type: string }
         prefisso: { type: string }
         nr_telefono: { type: string }
+        attivo: { type: boolean, description: "false se l'amministratore l'ha disattivato: non può essere destinatario di nuove spedizioni" }
+        destinatario:
+          type: boolean
+          description: |
+            true se ha ricevuto almeno una spedizione (è un cliente destinatario e accede
+            all'app), false se è un mittente, compreso un cliente appena creato
 
     EsitoCliente:
       type: object
@@ -2224,14 +2222,20 @@ components:
       required: [id, ruolo, id_ruolo, nome, cognome, email, prefisso, nr_telefono, attivo]
       properties:
         id: { type: integer, format: int32, description: "Id nella tabella utenti, da usare in /api/utenti/{id}" }
-        ruolo: { type: string, enum: [corriere, operatore] }
-        id_ruolo: { type: integer, format: int32, description: 'Id nella tabella corrieri o operatori_logistici, quello usato nelle spedizioni (es. id_corriere)' }
+        ruolo: { type: string, enum: [corriere, operatore, cliente] }
+        id_ruolo: { type: integer, format: int32, description: 'Id nella tabella corrieri, operatori_logistici o clienti, quello usato nelle spedizioni (es. id_corriere)' }
         nome: { type: string }
         cognome: { type: string }
         email: { type: string }
         prefisso: { type: string }
         nr_telefono: { type: string }
         attivo: { type: boolean }
+        destinatario:
+          type: boolean
+          nullable: true
+          description: |
+            Solo per i clienti (null per gli altri): true se è stato destinatario di almeno una
+            spedizione e quindi accede all'app, false se è solo mittente
 
     EsitoUtente:
       type: object

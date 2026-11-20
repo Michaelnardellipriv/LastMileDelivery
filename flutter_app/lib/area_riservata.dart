@@ -4,12 +4,16 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
+import 'amministratore/api.dart';
+import 'api.dart' show ApiClient, RuoloApi;
+import 'amministratore/app.dart';
 import 'comune/comuni.dart';
 import 'comune/login.dart';
 import 'corriere/api.dart';
 import 'corriere/app.dart';
 import 'operatore/api.dart';
 import 'operatore/app.dart';
+import 'tracking_page.dart';
 
 const _seme = Color(0xFF0B5FFF);
 
@@ -41,11 +45,13 @@ class _AreaRiservataState extends State<AreaRiservata> {
   late final ApiSessione _accesso = ApiSessione(base: widget.apiBase, client: widget.client);
   ApiSessione? _sessione; // la sessione del ruolo, dopo il login
   final _navigatoreCorriere = GlobalKey<NavigatorState>();
+  final _navigatoreCliente = GlobalKey<NavigatorState>();
 
   void _entrato() {
     final sessione = switch (_accesso.utente!.ruolo) {
       'operatore' => ApiOperatore.da(_accesso),
       'corriere' => ApiCorriere.da(_accesso),
+      'amministratore' => ApiAmministratore.da(_accesso),
       _ => ApiSessione.da(_accesso),
     };
     sessione.alScadereDelToken = _scaduto;
@@ -69,6 +75,7 @@ class _AreaRiservataState extends State<AreaRiservata> {
     return switch (sessione) {
       null => PaginaLogin(api: _accesso, titolo: 'Veloce24', alLogin: _entrato),
       final ApiOperatore operatore => HomeOperatore(api: operatore, alLogout: _esci),
+      final ApiAmministratore amministratore => HomeAmministratore(api: amministratore, alLogout: _esci),
       // Navigator proprio: il dettaglio si apre "dentro" l'area e sparisce con il logout.
       // NavigatorPopHandler fa funzionare il tasto indietro del telefono sul dettaglio.
       final ApiCorriere corriere => NavigatorPopHandler(
@@ -78,12 +85,32 @@ class _AreaRiservataState extends State<AreaRiservata> {
             onGenerateRoute: (_) => MaterialPageRoute(builder: (_) => HomeCorriere(api: corriere, alLogout: _esci)),
           ),
         ),
+      // il cliente destinatario ha il tracking dei suoi pacchi (tracking_page.dart)
+      _ when sessione.utente!.ruolo == 'cliente' => NavigatorPopHandler(
+          onPopWithResult: (_) => _navigatoreCliente.currentState?.maybePop(),
+          child: Navigator(
+            key: _navigatoreCliente,
+            onGenerateRoute: (_) => MaterialPageRoute(
+              builder: (_) => TrackingClientePage(
+                api: ApiClient(
+                  base: sessione.base,
+                  ruolo: RuoloApi.cliente,
+                  idUtente: sessione.utente!.id,
+                  token: sessione.token,
+                  client: widget.client,
+                  alScadereDelToken: _scaduto,
+                ),
+                alLogout: _esci,
+              ),
+            ),
+          ),
+        ),
       _ => PaginaSenzaArea(utente: sessione.utente!, alLogout: _esci),
     };
   }
 }
 
-/// Per i ruoli che non hanno ancora una pagina (amministratore, cliente destinatario).
+/// Per i ruoli che non hanno una pagina (oggi nessuno: resta per sicurezza).
 class PaginaSenzaArea extends StatelessWidget {
   final UtenteSessione utente;
   final VoidCallback alLogout;

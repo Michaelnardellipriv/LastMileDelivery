@@ -35,17 +35,8 @@ func TestPosizioneCorriere(t *testing.T) {
 	attivo, fermo := comeCorriere(f.idCorrierePos), comeCorriere(f.idCorriereFermo)
 	coordinate := map[string]any{"latitudine": 46.0679, "longitudine": 11.1211}
 
-	r := f.chiama(t, http.MethodGet, percorsoIntervallo, nil, admin)
-	if r.stato != http.StatusOK {
-		t.Fatalf("lettura intervallo: atteso 200, ottenuto %d: %s", r.stato, r.grezzo)
-	}
-	precedente := r.corpo["intervallo_secondi"]
-	t.Cleanup(func() {
-		f.chiama(t, http.MethodPut, percorsoIntervallo, map[string]any{"intervallo_secondi": precedente}, admin)
-	})
-	if r := f.chiama(t, http.MethodPut, percorsoIntervallo, map[string]any{"intervallo_secondi": 60}, admin); r.stato != http.StatusOK {
-		t.Fatalf("modifica intervallo: atteso 200, ottenuto %d: %s", r.stato, r.grezzo)
-	}
+	// l'intervallo si modifica solo con PATCH /api/impostazioni (ripristinato a fine test)
+	f.impostazioni(t, map[string]any{"intervallo_posizione_sec": 60})
 
 	inConsegna := f.nuovaSpedizione(t, "POS")
 	f.assegna(t, inConsegna, f.idCorrierePos, 201)
@@ -70,7 +61,8 @@ func TestPosizioneCorriere(t *testing.T) {
 			{"lettura da amministratore", http.MethodGet, percorsoPosizioni, admin, nil, http.StatusForbidden},
 			{"lettura da cliente", http.MethodGet, percorsoPosizioni, comeCliente(f.idDestinatario), nil, http.StatusForbidden},
 			{"intervallo letto da cliente", http.MethodGet, percorsoIntervallo, comeCliente(f.idDestinatario), nil, http.StatusForbidden},
-			{"intervallo modificato da operatore", http.MethodPut, percorsoIntervallo, op, map[string]any{"intervallo_secondi": 10}, http.StatusForbidden},
+			{"intervallo modificato da operatore", http.MethodPatch, percorsoImpostazioni, op, map[string]any{"intervallo_posizione_sec": 10}, http.StatusForbidden},
+			{"vecchio PUT dell'intervallo non più disponibile", http.MethodPut, percorsoIntervallo, admin, map[string]any{"intervallo_secondi": 10}, http.StatusMethodNotAllowed},
 		} {
 			if r := f.chiama(t, c.metodo, c.percorso, c.corpo, c.chi); r.stato != c.atteso {
 				t.Errorf("%s: atteso %d, ottenuto %d: %s", c.nome, c.atteso, r.stato, r.grezzo)
@@ -94,8 +86,8 @@ func TestPosizioneCorriere(t *testing.T) {
 		}{
 			{"longitudine mancante", http.MethodPost, percorsoPosizione, attivo, map[string]any{"latitudine": 46.0}, "longitudine"},
 			{"latitudine fuori range", http.MethodPost, percorsoPosizione, attivo, map[string]any{"latitudine": 100.0, "longitudine": 11.0}, "latitudine"},
-			{"intervallo troppo basso", http.MethodPut, percorsoIntervallo, admin, map[string]any{"intervallo_secondi": 1}, "intervallo_secondi"},
-			{"intervallo troppo alto", http.MethodPut, percorsoIntervallo, admin, map[string]any{"intervallo_secondi": 3601}, "intervallo_secondi"},
+			{"intervallo troppo basso", http.MethodPatch, percorsoImpostazioni, admin, map[string]any{"intervallo_posizione_sec": 4}, "intervallo_posizione_sec"},
+			{"intervallo troppo alto", http.MethodPatch, percorsoImpostazioni, admin, map[string]any{"intervallo_posizione_sec": 3601}, "intervallo_posizione_sec"},
 		} {
 			r := f.chiama(t, c.metodo, c.percorso, c.corpo, c.chi)
 			if r.stato != http.StatusBadRequest || !contiene(campiInErrore(r), c.campo) {

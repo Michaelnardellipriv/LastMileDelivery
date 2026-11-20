@@ -16,7 +16,10 @@ String _giorno(DateTime d) {
 class TrackingClientePage extends StatefulWidget {
   final ApiClient api;
   final int perPagina;
-  const TrackingClientePage({super.key, required this.api, this.perPagina = 20});
+
+  /// Dal login unico (area riservata): aggiunge il pulsante "Esci".
+  final VoidCallback? alLogout;
+  const TrackingClientePage({super.key, required this.api, this.perPagina = 20, this.alLogout});
   @override
   State<TrackingClientePage> createState() => _TrackingClienteState();
 }
@@ -118,6 +121,7 @@ class _TrackingClienteState extends State<TrackingClientePage> {
           title: const Text('I miei pacchi'),
           actions: [
             IconButton(tooltip: 'Aggiorna', icon: const Icon(Icons.refresh), onPressed: () => _carica(reset: true)),
+            if (widget.alLogout != null) IconButton(tooltip: 'Esci', icon: const Icon(Icons.logout), onPressed: widget.alLogout),
           ],
         ),
         body: Column(children: [
@@ -161,7 +165,7 @@ class _TrackingClienteState extends State<TrackingClientePage> {
             Expanded(
               child: DropdownButtonFormField<String?>(
                 key: ValueKey('filtro-stato-$_azzeramenti'), // nuova chiave = torna a "Tutti"
-                initialValue: _stato,
+                value: _stato,
                 isExpanded: true,
                 decoration: const InputDecoration(labelText: 'Stato', border: OutlineInputBorder(), isDense: true),
                 items: [

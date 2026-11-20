@@ -10,9 +10,8 @@ import (
 )
 
 type archivioFinto struct {
-	registrata       bool
-	intervallo       int32
-	idAmministratore int32
+	registrata bool
+	intervallo int32
 }
 
 func (a *archivioFinto) Registra(context.Context, int32, float64, float64) (int32, error) {
@@ -26,11 +25,6 @@ func (a *archivioFinto) Posizioni(context.Context) ([]Posizione, error) {
 
 func (a *archivioFinto) Intervallo(context.Context) (int32, error) {
 	return a.intervallo, nil
-}
-
-func (a *archivioFinto) AggiornaIntervallo(_ context.Context, secondi, idAmministratore int32) error {
-	a.intervallo, a.idAmministratore = secondi, idAmministratore
-	return nil
 }
 
 var (
@@ -108,19 +102,5 @@ func TestIntervallo(t *testing.T) {
 	}
 	if _, err := s.Intervallo(ctx, cliente); tipoErrore(err) != "403" {
 		t.Errorf("il cliente non legge l'intervallo: %v", err)
-	}
-
-	if secondi, err := s.ModificaIntervallo(ctx, amministratore, p(int32(60))); err != nil || secondi != 60 || a.intervallo != 60 || a.idAmministratore != 4 {
-		t.Fatalf("l'amministratore modifica l'intervallo: %d %v %+v", secondi, err, a)
-	}
-	for _, r := range []identita.Richiedente{corriere, operatore, cliente} {
-		if _, err := s.ModificaIntervallo(ctx, r, p(int32(60))); tipoErrore(err) != "403" {
-			t.Errorf("%s non modifica l'intervallo: %v", r.Ruolo, err)
-		}
-	}
-	for _, secondi := range []*int32{nil, p(int32(4)), p(int32(3601))} {
-		if _, err := s.ModificaIntervallo(ctx, amministratore, secondi); tipoErrore(err) != "400" {
-			t.Errorf("intervallo %v: atteso 400, ottenuto %v", secondi, err)
-		}
 	}
 }

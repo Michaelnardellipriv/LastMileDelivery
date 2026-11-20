@@ -66,7 +66,9 @@ class SpedizioneApi {
   final String codOrdine, stato;
   final bool isReso;
   final DateTime creataIl, richiestaIl;
-  final int idMittente, idDestinatario;
+  /// null per il cliente: il backend non gli manda l'id del mittente.
+  final int? idMittente;
+  final int idDestinatario;
   final IndirizzoApi ritiro, consegna;
   final int? idCorriere;
   final DateTime? conclusaIl;
@@ -86,7 +88,7 @@ class SpedizioneApi {
         isReso: j['is_reso'] as bool? ?? false,
         creataIl: DateTime.parse(j['creata_il'] as String).toLocal(),
         richiestaIl: DateTime.parse(j['dataora_richiesta_spedizione'] as String).toLocal(),
-        idMittente: j['id_cliente_mittente'] as int,
+        idMittente: j['id_cliente_mittente'] as int?,
         idDestinatario: j['id_cliente_destinatario'] as int,
         ritiro: IndirizzoApi.daJson(j['indirizzo_ritiro'] as Map<String, dynamic>),
         consegna: IndirizzoApi.daJson(j['indirizzo_spedizione'] as Map<String, dynamic>),
@@ -123,13 +125,26 @@ class ApiClient {
   final int idUtente;
   final http.Client _http;
 
-  ApiClient({required String base, required this.ruolo, required this.idUtente, http.Client? client})
-      : base = base.endsWith('/') ? base.substring(0, base.length - 1) : base,
+  /// Token del login unico (area riservata): se c'è, l'identità viaggia come
+  /// Authorization: Bearer invece che con l'header X-Id-* (solo sviluppo).
+  final String? token;
+
+  /// Chiamata quando il backend rifiuta il token (401): sessione scaduta.
+  final void Function()? alScadereDelToken;
+
+  ApiClient({
+    required String base,
+    required this.ruolo,
+    required this.idUtente,
+    http.Client? client,
+    this.token,
+    this.alScadereDelToken,
+  })  : base = base.endsWith('/') ? base.substring(0, base.length - 1) : base,
         _http = client ?? http.Client();
 
   Map<String, String> get _intestazioni => {
         'Accept': 'application/json',
-        ruolo.header: '$idUtente',
+        if (token != null) 'Authorization': 'Bearer $token' else ruolo.header: '$idUtente',
       };
 
   /// GET /api/spedizioni — il backend filtra già per ruolo (il corriere vede solo le sue,
@@ -170,8 +185,9 @@ class ApiClient {
 
   Future<Map<String, dynamic>> _getJson(Uri uri) async {
     final r = await _get(uri);
+    if (r.statusCode == 401 && token != null) alScadereDelToken?.call();
     if (r.statusCode != 200) {
-      throw ErroreApi(r.statusCode, _messaggio(r.body));
+      throw ErroreApi(r.statusCode, _messaggio(utf8.decode(r.bodyBytes, allowMalformed: true)));
     }
     return jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>;
   }

@@ -39,6 +39,9 @@ type Cliente struct {
 	Email      string
 	Prefisso   string
 	NrTelefono string
+	Attivo     bool
+	// Destinatario: ha ricevuto almeno una spedizione; altrimenti è un mittente.
+	Destinatario bool
 }
 
 type NuovoCliente struct {
@@ -100,6 +103,8 @@ type archivio interface {
 	TrovaOCreaIndirizzo(ctx context.Context, i Indirizzo) (Indirizzo, bool, error)
 	CercaUtenti(ctx context.Context, r RicercaUtenti) ([]Utente, int, error)
 	CreaUtente(ctx context.Context, ruolo identita.Ruolo, c Cliente, pwdHash string) (Utente, error)
+	// UtentePerID: corriere, operatore o cliente; NonTrovato per gli altri (amministratori).
+	UtentePerID(ctx context.Context, idUtente int32) (Utente, error)
 	ModificaUtente(ctx context.Context, idUtente int32, d DatiUtente) (Utente, error)
 }
 
