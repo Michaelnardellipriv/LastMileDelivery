@@ -36,16 +36,6 @@ func (r *Repository) Intervallo(ctx context.Context) (int32, error) {
 	return leggiIntervallo(ctx, r.db)
 }
 
-func (r *Repository) AggiornaIntervallo(ctx context.Context, secondi, idAmministratore int32) error {
-	_, err := r.db.Exec(ctx, `
-		UPDATE impostazioni
-		SET intervallo_posizione_sec   = $1,
-		    modificate_il              = now(),
-		    id_amministratore_modifica = $2`,
-		secondi, idAmministratore)
-	return err
-}
-
 func (r *Repository) Registra(ctx context.Context, idCorriere int32, lat, lon float64) (int32, error) {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {

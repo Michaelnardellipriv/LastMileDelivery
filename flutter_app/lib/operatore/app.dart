@@ -1,11 +1,14 @@
 // Area operatori (pagina web), aperta dopo il login unico di area_riservata.dart:
-// spedizioni con filtri e dettaglio, nuova spedizione, mappa dei corrieri in consegna.
+// spedizioni con filtri e dettaglio, nuova spedizione, mappa dei corrieri in consegna,
+// anagrafica dei clienti (modifica dei dati).
 import 'package:flutter/material.dart';
 
+import '../comune/spedizioni.dart';
 import 'api.dart';
+import 'clienti.dart';
+import 'dettaglio.dart';
 import 'mappa.dart';
 import 'nuova_spedizione.dart';
-import 'spedizioni.dart';
 
 class HomeOperatore extends StatefulWidget {
   final ApiOperatore api;
@@ -28,15 +31,21 @@ class _HomeOperatoreState extends State<HomeOperatore> {
   Widget build(BuildContext context) {
     final api = widget.api;
     final pagine = [
-      SpedizioniPage(key: _spedizioni, api: api),
+      SpedizioniPage(
+        key: _spedizioni,
+        api: api,
+        dettaglio: (id, alCambio) => DettaglioSpedizione(api: api, id: id, alCambio: alCambio),
+      ),
       NuovaSpedizionePage(api: api, alCreata: _apriSpedizione),
       // la mappa resta in memoria ma si aggiorna solo quando è la sezione a schermo
       MappaCorrieriPage(api: api, alApriSpedizione: _apriSpedizione, attiva: _sezione == 2),
+      ClientiPage(api: api),
     ];
     const voci = [
       (Icons.local_shipping_outlined, 'Spedizioni'),
       (Icons.add_box_outlined, 'Nuova spedizione'),
       (Icons.map_outlined, 'Corrieri'),
+      (Icons.people_outline, 'Clienti'),
     ];
     final largo = MediaQuery.sizeOf(context).width >= 900;
     final corpo = IndexedStack(index: _sezione, children: pagine);
