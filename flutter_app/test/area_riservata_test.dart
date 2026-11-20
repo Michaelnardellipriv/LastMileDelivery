@@ -12,8 +12,11 @@ import 'package:veloce24_app/area_riservata.dart';
 http.Response _json(Object corpo, int status) =>
     http.Response.bytes(utf8.encode(jsonEncode(corpo)), status, headers: {'content-type': 'application/json; charset=utf-8'});
 
+final _richieste = <http.Request>[];
+
 /// Backend finto: il ruolo dipende dall'email; mittente@ è un cliente solo mittente.
 Future<http.Response> _backend(http.Request req) async {
+  _richieste.add(req);
   switch (req.url.path) {
     case '/api/auth/login':
       final corpo = jsonDecode(req.body) as Map<String, dynamic>;
@@ -43,6 +46,21 @@ Future<http.Response> _backend(http.Request req) async {
       return _json({'intervallo_secondi': 30, 'corrieri': []}, 200);
     case '/api/corrieri/posizione':
       return _json({'intervallo_secondi': 30}, 201);
+    case '/api/clienti':
+      return _json({'dati': [], 'pagina': 1, 'per_pagina': 20, 'totale_elementi': 0, 'totale_pagine': 0}, 200);
+    case '/api/utenti':
+      return _json({'dati': [], 'pagina': 1, 'per_pagina': 20, 'totale_elementi': 0, 'totale_pagine': 0}, 200);
+    case '/api/impostazioni':
+      return _json({
+        'giorni_visibilita_cliente': 30,
+        'max_tentativi_ritiro': 3,
+        'max_tentativi_consegna': 3,
+        'intervallo_posizione_sec': 30,
+        'modificate_il': '2026-11-18T09:00:00Z',
+        'id_amministratore_modifica': null,
+      }, 200);
+    case '/api/impostazioni/motivi':
+      return _json({'dati': []}, 200);
   }
   return _json({'errore': 'percorso sconosciuto'}, 404);
 }
@@ -63,6 +81,7 @@ void main() {
     await _login(tester, 'operatore@test.it');
     expect(find.text('Nuova spedizione'), findsOneWidget);
     expect(find.text('Corrieri'), findsOneWidget);
+    expect(find.text('Clienti'), findsOneWidget);
     await _chiudi(tester);
   });
 
@@ -73,17 +92,27 @@ void main() {
     await _chiudi(tester);
   });
 
-  testWidgets('amministratore e cliente destinatario: login riuscito, area non ancora disponibile', (tester) async {
-    for (final ruolo in ['amministratore', 'cliente']) {
-      await _login(tester, '$ruolo@test.it');
-      expect(find.text('Accesso riuscito come $ruolo'), findsOneWidget);
-      expect(find.text('Area non ancora disponibile per il tuo ruolo.'), findsOneWidget);
+  testWidgets("amministratore: dopo il login si apre l'area amministratori", (tester) async {
+    await _login(tester, 'amministratore@test.it');
+    expect(find.text('Spedizioni'), findsOneWidget);
+    expect(find.text('Utenti'), findsOneWidget);
+    expect(find.text('Configurazione'), findsOneWidget);
+    await _chiudi(tester);
+  });
 
-      // "Esci" riporta al login
-      await tester.tap(find.text('Esci'));
-      await tester.pumpAndSettle();
-      expect(find.text('Entra'), findsOneWidget);
-    }
+  testWidgets('cliente destinatario: dopo il login si apre il tracking dei suoi pacchi', (tester) async {
+    _richieste.clear();
+    await _login(tester, 'cliente@test.it');
+    expect(find.text('I miei pacchi'), findsOneWidget);
+    // l'elenco arriva dal backend con il token del login, non con l'header di sviluppo
+    final elenco = _richieste.lastWhere((r) => r.url.path == '/api/spedizioni');
+    expect(elenco.headers['Authorization'], 'Bearer tok-cliente');
+    expect(elenco.headers.containsKey('X-Id-Cliente'), isFalse);
+
+    // "Esci" riporta al login
+    await tester.tap(find.byTooltip('Esci'));
+    await tester.pumpAndSettle();
+    expect(find.text('Entra'), findsOneWidget);
   });
 
   testWidgets('cliente solo mittente: il backend rifiuta il login e la pagina mostra il suo messaggio', (tester) async {

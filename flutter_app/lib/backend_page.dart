@@ -67,7 +67,7 @@ class _BackendAccessoState extends State<BackendAccessoPage> {
               '(con db/seed.sql: operatore 1, corriere 1, clienti 1 e 2).'),
           const SizedBox(height: 16),
           DropdownButtonFormField<RuoloApi>(
-            initialValue: ruolo,
+            value: ruolo,
             decoration: const InputDecoration(labelText: 'Ruolo', border: OutlineInputBorder()),
             items: [for (final r in RuoloApi.values) DropdownMenuItem(value: r, child: Text(r.nome))],
             onChanged: (v) => setState(() => ruolo = v ?? ruolo),
@@ -121,7 +121,7 @@ class _BackendElencoState extends State<BackendElencoPage> {
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
             child: DropdownButtonFormField<String?>(
-              initialValue: stato,
+              value: stato,
               decoration: const InputDecoration(labelText: 'Stato', border: OutlineInputBorder(), isDense: true),
               items: [
                 const DropdownMenuItem(value: null, child: Text('Tutti')),

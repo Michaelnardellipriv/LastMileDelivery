@@ -8,19 +8,28 @@ import (
 	"lastmiledelivery/backend/internal/identita"
 )
 
-// Utente è un corriere o un operatore logistico, gestito dall'amministratore.
+// Utente è un corriere, un operatore logistico o un cliente, gestito
+// dall'amministratore (i dati dei clienti li modifica anche l'operatore).
 // ID è l'id dell'utente (tabella utenti), IDRuolo quello nella tabella del ruolo
-// (corrieri o operatori_logistici), cioè l'id usato nelle spedizioni.
+// (corrieri, operatori_logistici o clienti), cioè l'id usato nelle spedizioni.
+// Destinatario c'è solo per i clienti: true se il cliente è stato destinatario di
+// almeno una spedizione (accede all'app), false se è solo mittente.
 type Utente struct {
-	ID         int32
-	Ruolo      identita.Ruolo
-	IDRuolo    int32
-	Nome       string
-	Cognome    string
-	Email      string
-	Prefisso   string
-	NrTelefono string
-	Attivo     bool
+	ID           int32
+	Ruolo        identita.Ruolo
+	IDRuolo      int32
+	Nome         string
+	Cognome      string
+	Email        string
+	Prefisso     string
+	NrTelefono   string
+	Attivo       bool
+	Destinatario *bool
+}
+
+// soloMittente: un cliente che non è mai stato destinatario non accede all'app.
+func (u Utente) soloMittente() bool {
+	return u.Ruolo == identita.Cliente && (u.Destinatario == nil || !*u.Destinatario)
 }
 
 type NuovoUtente struct {
@@ -66,10 +75,17 @@ type RicercaUtenti struct {
 	Attivo *bool
 }
 
-// ruoliGestiti sono i ruoli che l'amministratore crea, abilita e disattiva.
+// ruoliGestiti sono i ruoli che l'amministratore crea: i clienti li crea l'operatore.
 var ruoliGestiti = map[identita.Ruolo]string{
 	identita.Corriere:  "corriere",
 	identita.Operatore: "operatore logistico",
+}
+
+// ruoliInElenco sono i ruoli di GET /api/utenti e di PATCH /api/utenti/{id}.
+var ruoliInElenco = map[identita.Ruolo]string{
+	identita.Corriere:  "corriere",
+	identita.Operatore: "operatore logistico",
+	identita.Cliente:   "cliente",
 }
 
 func soloAmministratore(r identita.Richiedente, azione string) error {
@@ -94,7 +110,19 @@ func controllaRuolo(e *errori.Validazione, ruolo *string, obbligatorio bool) *id
 	return &r
 }
 
-// CercaUtenti restituisce corrieri e operatori, attivi e disattivati, con il totale.
+func controllaRuoloElenco(e *errori.Validazione, ruolo *string) *identita.Ruolo {
+	if ruolo == nil {
+		return nil
+	}
+	r := identita.Ruolo(*ruolo)
+	if _, ok := ruoliInElenco[r]; !ok {
+		e.Aggiungi("ruolo", "valore non previsto: ammessi corriere, operatore, cliente")
+		return nil
+	}
+	return &r
+}
+
+// CercaUtenti restituisce corrieri, operatori e clienti, attivi e disattivati, con il totale.
 func (s *Servizio) CercaUtenti(ctx context.Context, r identita.Richiedente, ric Ricerca, ruolo *string, attivo *bool) ([]Utente, int, error) {
 	if err := soloAmministratore(r, "consultare gli utenti"); err != nil {
 		return nil, 0, err
@@ -103,7 +131,7 @@ func (s *Servizio) CercaUtenti(ctx context.Context, r identita.Richiedente, ric 
 		return nil, 0, err
 	}
 	e := &errori.Validazione{}
-	filtro := RicercaUtenti{Ricerca: ric, Ruolo: controllaRuolo(e, ruolo, false), Attivo: attivo}
+	filtro := RicercaUtenti{Ricerca: ric, Ruolo: controllaRuoloElenco(e, ruolo), Attivo: attivo}
 	if err := e.Err(); err != nil {
 		return nil, 0, err
 	}
@@ -134,13 +162,25 @@ func (s *Servizio) CreaUtente(ctx context.Context, r identita.Richiedente, n Nuo
 	return EsitoUtente{Utente: creato, MailInviata: mail}, nil
 }
 
-// ModificaUtente cambia i dati di un corriere o di un operatore: solo i campi presenti.
+// ModificaUtente cambia solo i campi presenti di un corriere, di un operatore o di un
+// cliente.
+//   - L'amministratore cambia dati, password e stato di tutti; di un cliente solo
+//     mittente (non accede all'app) solo i dati.
+//   - L'operatore cambia solo i dati dei clienti: niente password né disattivazione.
+//
 // Con attivo=false l'utente non entra più e i token che ha già smettono di valere; un
-// corriere disattivato non riceve nuove spedizioni. Con una nuova password, l'utente la
-// riceve per mail.
+// corriere disattivato non riceve nuove spedizioni, un cliente disattivato non può
+// essere destinatario di nuove spedizioni. Con una nuova password, l'utente la riceve
+// per mail.
 func (s *Servizio) ModificaUtente(ctx context.Context, r identita.Richiedente, idUtente int32, m ModificaUtente) (Utente, error) {
-	if err := soloAmministratore(r, "modificare corrieri e operatori"); err != nil {
-		return Utente{}, err
+	switch r.Ruolo {
+	case identita.Amministratore:
+	case identita.Operatore:
+		if m.Attivo != nil || m.Password != nil {
+			return Utente{}, &errori.NonAutorizzato{Messaggio: "solo un amministratore può disattivare un utente o reimpostarne la password"}
+		}
+	default:
+		return Utente{}, &errori.NonAutorizzato{Messaggio: "solo amministratori e operatori logistici possono modificare gli utenti"}
 	}
 	e := &errori.Validazione{}
 	if m.vuota() {
@@ -176,6 +216,17 @@ func (s *Servizio) ModificaUtente(ctx context.Context, r identita.Richiedente, i
 		return Utente{}, err
 	}
 
+	bersaglio, err := s.archivio.UtentePerID(ctx, idUtente)
+	if err != nil {
+		return Utente{}, err
+	}
+	if r.Ruolo == identita.Operatore && bersaglio.Ruolo != identita.Cliente {
+		return Utente{}, &errori.NonAutorizzato{Messaggio: "l'operatore logistico può modificare solo i dati dei clienti"}
+	}
+	if bersaglio.soloMittente() && (m.Attivo != nil || m.Password != nil) {
+		return Utente{}, &errori.Conflitto{Messaggio: "un cliente solo mittente non accede all'app: si possono modificare solo i dati"}
+	}
+
 	if d.Email != nil {
 		usata, err := s.archivio.EmailUsata(ctx, *d.Email, idUtente)
 		if err != nil {
@@ -198,7 +249,7 @@ func (s *Servizio) ModificaUtente(ctx context.Context, r identita.Richiedente, i
 	}
 	if m.Password != nil {
 		s.inviaCredenziali(ctx, u.Nome, u.Email, *m.Password,
-			"L'amministratore di Veloce24 ha reimpostato la password del tuo account da "+ruoliGestiti[u.Ruolo]+".")
+			"L'amministratore di Veloce24 ha reimpostato la password del tuo account da "+ruoliInElenco[u.Ruolo]+".")
 	}
 	return u, nil
 }

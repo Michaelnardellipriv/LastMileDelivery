@@ -74,8 +74,11 @@ func TestCercaUtenti(t *testing.T) {
 		a.utenti.Ruolo == nil || *a.utenti.Ruolo != identita.Corriere || a.utenti.Attivo == nil || *a.utenti.Attivo {
 		t.Fatalf("filtri per ruolo e stato: %+v %v", a.utenti, err)
 	}
-	if _, _, err := s.CercaUtenti(ctx, amministratore, ric, p("cliente"), nil); tipoErrore(err) != "400" {
-		t.Errorf("si cercano solo corrieri e operatori: %v", err)
+	if _, _, err := s.CercaUtenti(ctx, amministratore, ric, p("cliente"), nil); err != nil || *a.utenti.Ruolo != identita.Cliente {
+		t.Errorf("si cercano anche i clienti: %+v %v", a.utenti, err)
+	}
+	if _, _, err := s.CercaUtenti(ctx, amministratore, ric, p("amministratore"), nil); tipoErrore(err) != "400" {
+		t.Errorf("gli amministratori non sono in elenco: %v", err)
 	}
 	for _, r := range []identita.Richiedente{operatore, corriere, cliente} {
 		if _, _, err := s.CercaUtenti(ctx, r, ric, nil, nil); tipoErrore(err) != "403" {
@@ -98,6 +101,56 @@ func TestAbilitaDisattivaUtente(t *testing.T) {
 	for _, r := range []identita.Richiedente{operatore, corriere, cliente} {
 		if _, err := s.ModificaUtente(ctx, r, 7, ModificaUtente{Attivo: p(false)}); tipoErrore(err) != "403" {
 			t.Errorf("%s non disattiva utenti: %v", r.Ruolo, err)
+		}
+	}
+	if _, err := s.ModificaUtente(ctx, amministratore, 99, ModificaUtente{Attivo: p(false)}); tipoErrore(err) != "404" {
+		t.Errorf("utente inesistente o amministratore: atteso 404, ottenuto %v", err)
+	}
+}
+
+func TestModificaClienti(t *testing.T) {
+	ctx := context.Background()
+	a := &archivioFinto{emailUsate: map[string]bool{}}
+	postino := &postinoFinto{}
+	s := NuovoServizio(a, postino)
+	const destinatario, soloMittente = 30, 31
+
+	// amministratore: il destinatario si disattiva e riceve una nuova password
+	for _, m := range []ModificaUtente{{Attivo: p(false)}, {Password: p("NuovaPassword9")}, {Cognome: p("Rossi")}} {
+		if _, err := s.ModificaUtente(ctx, amministratore, destinatario, m); err != nil {
+			t.Errorf("l'amministratore modifica il destinatario %+v: %v", m, err)
+		}
+	}
+	// il solo mittente non accede all'app: solo i dati
+	if _, err := s.ModificaUtente(ctx, amministratore, soloMittente, ModificaUtente{Nome: p("Mario")}); err != nil {
+		t.Errorf("i dati del solo mittente si modificano: %v", err)
+	}
+	for _, m := range []ModificaUtente{{Attivo: p(false)}, {Password: p("NuovaPassword9")}} {
+		a.modifica = nil
+		if _, err := s.ModificaUtente(ctx, amministratore, soloMittente, m); tipoErrore(err) != "409" || a.modifica != nil {
+			t.Errorf("solo mittente %+v: atteso 409 senza salvare, ottenuto %v", m, err)
+		}
+	}
+
+	// operatore: solo i dati dei clienti
+	for _, id := range []int32{destinatario, soloMittente} {
+		if _, err := s.ModificaUtente(ctx, operatore, id, ModificaUtente{Email: p("nuova@test.it")}); err != nil {
+			t.Errorf("l'operatore modifica i dati del cliente %d: %v", id, err)
+		}
+	}
+	for nome, c := range map[string]struct {
+		id int32
+		m  ModificaUtente
+	}{
+		"disattiva un cliente":     {destinatario, ModificaUtente{Attivo: p(false)}},
+		"reimposta una password":   {destinatario, ModificaUtente{Password: p("NuovaPassword9")}},
+		"modifica un corriere":     {7, ModificaUtente{Nome: p("Carlo")}},
+		"modifica un operatore":    {8, ModificaUtente{Nome: p("Olga")}},
+		"dati e stato del cliente": {destinatario, ModificaUtente{Nome: p("Dora"), Attivo: p(true)}},
+	} {
+		a.modifica = nil
+		if _, err := s.ModificaUtente(ctx, operatore, c.id, c.m); tipoErrore(err) != "403" || a.modifica != nil {
+			t.Errorf("l'operatore non %s: atteso 403 senza salvare, ottenuto %v", nome, err)
 		}
 	}
 }

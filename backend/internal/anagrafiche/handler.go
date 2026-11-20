@@ -65,6 +65,9 @@ type clienteDTO struct {
 	Email      string `json:"email"`
 	Prefisso   string `json:"prefisso"`
 	NrTelefono string `json:"nr_telefono"`
+	Attivo     bool   `json:"attivo"`
+	// true se ha ricevuto almeno una spedizione, false se è un mittente (anche appena creato)
+	Destinatario bool `json:"destinatario"`
 }
 
 type esitoClienteDTO struct {
@@ -92,6 +95,8 @@ type utenteDTO struct {
 	Prefisso   string `json:"prefisso"`
 	NrTelefono string `json:"nr_telefono"`
 	Attivo     bool   `json:"attivo"`
+	// solo per i clienti: true se è stato destinatario di almeno una spedizione
+	Destinatario *bool `json:"destinatario"`
 }
 
 type esitoUtenteDTO struct {
@@ -127,12 +132,12 @@ func nuovaPagina[T any](n int, ric Ricerca, totale int) pagina[T] {
 
 func versoClienteDTO(c Cliente) clienteDTO {
 	return clienteDTO{ID: c.ID, IDUtente: c.IDUtente, Nome: c.Nome, Cognome: c.Cognome,
-		Email: c.Email, Prefisso: c.Prefisso, NrTelefono: c.NrTelefono}
+		Email: c.Email, Prefisso: c.Prefisso, NrTelefono: c.NrTelefono, Attivo: c.Attivo, Destinatario: c.Destinatario}
 }
 
 func versoUtenteDTO(u Utente) utenteDTO {
 	return utenteDTO{ID: u.ID, Ruolo: string(u.Ruolo), IDRuolo: u.IDRuolo, Nome: u.Nome, Cognome: u.Cognome,
-		Email: u.Email, Prefisso: u.Prefisso, NrTelefono: u.NrTelefono, Attivo: u.Attivo}
+		Email: u.Email, Prefisso: u.Prefisso, NrTelefono: u.NrTelefono, Attivo: u.Attivo, Destinatario: u.Destinatario}
 }
 
 func versoIndirizzoDTO(i Indirizzo) indirizzoDTO {
