@@ -1,20 +1,41 @@
 // Client HTTP dell'area operatori: alla sessione comune aggiunge le chiamate che il
-// backend riserva all'operatore (storico, creazione, assegnazione, posizioni dei
-// corrieri, anagrafiche).
+// backend riserva all'operatore (creazione, assegnazione, reso, posizioni dei
+// corrieri, clienti e indirizzi).
 import '../comune/api.dart';
 
 export '../comune/api.dart';
+
+/// Cliente di GET /api/clienti: [id] è quello usato nelle spedizioni, [idUtente] quello
+/// di PATCH /api/utenti/{id}. [destinatario]: ha ricevuto almeno una spedizione;
+/// altrimenti è un mittente (anche se appena creato).
+class ClienteAnagrafica {
+  final int id, idUtente;
+  final String nome, cognome, email, prefisso, nrTelefono;
+  final bool attivo, destinatario;
+  ClienteAnagrafica(this.id, this.idUtente, this.nome, this.cognome, this.email, this.prefisso, this.nrTelefono, this.attivo,
+      [this.destinatario = false]);
+  factory ClienteAnagrafica.daJson(Map<String, dynamic> j) => ClienteAnagrafica(
+        j['id'] as int,
+        j['id_utente'] as int? ?? 0,
+        j['nome'] as String? ?? '',
+        j['cognome'] as String? ?? '',
+        j['email'] as String? ?? '',
+        j['prefisso'] as String? ?? '',
+        j['nr_telefono'] as String? ?? '',
+        j['attivo'] as bool? ?? true,
+        j['destinatario'] as bool? ?? false,
+      );
+  String get nomeCompleto => '$nome $cognome'.trim();
+
+  /// Valori modificabili per nome del campo JSON.
+  Map<String, String> get dati => {'nome': nome, 'cognome': cognome, 'prefisso': prefisso, 'nr_telefono': nrTelefono, 'email': email};
+}
 
 class ApiOperatore extends ApiSessione {
   ApiOperatore({required super.base, super.client});
 
   /// Continua la sessione aperta dal login unico.
   ApiOperatore.da(super.sessione) : super.da();
-
-  Future<List<VoceStorico>> storico(int id) async {
-    final j = await chiama('GET', '/api/spedizioni/$id/storico') as Map<String, dynamic>;
-    return [for (final v in j['dati'] as List) VoceStorico.daJson(v as Map<String, dynamic>)];
-  }
 
   /// Crea la spedizione. La risposta di POST /api/spedizioni è la spedizione "piatta"
   /// (solo id, senza persone e indirizzi): da qui servono id, codice e stato, il
@@ -59,9 +80,27 @@ class ApiOperatore extends ApiSessione {
 
   // ───── anagrafiche ─────
 
-  Future<Pagina<Persona>> clienti(String q) => _elenco('/api/clienti', q, Persona.daJson);
-  Future<Pagina<Persona>> corrieri(String q, {int perPagina = 20}) => _elenco('/api/corrieri', q, Persona.daJson, perPagina: perPagina);
-  Future<Pagina<Indirizzo>> indirizzi(String q) => _elenco('/api/indirizzi', q, Indirizzo.daJson);
+  Future<Pagina<Persona>> clienti(String q) => elenco('/api/clienti', q, Persona.daJson);
+
+  /// Anagrafica dei clienti, una pagina alla volta (sezione Clienti).
+  Future<Pagina<ClienteAnagrafica>> anagraficaClienti(String q, {int pagina = 1, int perPagina = 20}) async {
+    final j = await chiama('GET', '/api/clienti', query: {
+      if (q.trim().isNotEmpty) 'q': q.trim(),
+      'pagina': '$pagina',
+      'per_pagina': '$perPagina',
+    }) as Map<String, dynamic>;
+    return Pagina.daJson(j, ClienteAnagrafica.daJson, pagina: pagina, perPagina: perPagina);
+  }
+
+  /// L'operatore cambia solo i dati del cliente (PATCH /api/utenti/{id_utente}): stato e
+  /// password li gestisce l'amministratore, e il backend lo fa rispettare.
+  Future<ClienteAnagrafica> modificaCliente(ClienteAnagrafica c, Map<String, Object?> modifiche, {required String chiave}) async {
+    final u = await modificaUtente(c.idUtente, modifiche, chiave: chiave);
+    return ClienteAnagrafica(c.id, c.idUtente, u['nome'] as String? ?? '', u['cognome'] as String? ?? '', u['email'] as String? ?? '',
+        u['prefisso'] as String? ?? '', u['nr_telefono'] as String? ?? '', u['attivo'] as bool? ?? true,
+        u['destinatario'] as bool? ?? c.destinatario);
+  }
+  Future<Pagina<Indirizzo>> indirizzi(String q) => elenco('/api/indirizzi', q, Indirizzo.daJson);
 
   /// Restituisce il cliente creato e se la mail con le credenziali è partita.
   Future<(Persona, bool)> creaCliente({
@@ -101,10 +140,4 @@ class ApiOperatore extends ApiSessione {
         'regione': regione,
         'nazione': nazione,
       }) as Map<String, dynamic>);
-
-  Future<Pagina<T>> _elenco<T>(String percorso, String q, T Function(Map<String, dynamic>) daJson, {int perPagina = 20}) async {
-    final j =
-        await chiama('GET', percorso, query: {if (q.trim().isNotEmpty) 'q': q.trim(), 'per_pagina': '$perPagina'}) as Map<String, dynamic>;
-    return Pagina.daJson(j, daJson, perPagina: perPagina);
-  }
 }

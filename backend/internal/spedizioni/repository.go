@@ -38,6 +38,9 @@ func (r *Repository) Crea(ctx context.Context, idOperatore int32, n NuovaSpedizi
 	}
 	defer tx.Rollback(ctx)
 
+	if err := destinatarioAttivo(ctx, tx, n.IDClienteDestinatario); err != nil {
+		return Spedizione{}, err
+	}
 	var id int32
 	err = tx.QueryRow(ctx, `
 		INSERT INTO spedizioni (
@@ -148,6 +151,12 @@ func (r *Repository) Aggiorna(ctx context.Context, id int32, autore identita.Ric
 	if d == nil {
 		d = &DatiSpedizione{}
 	}
+	// solo un destinatario nuovo: quello che la spedizione ha già resta anche se disattivato
+	if d.IDClienteDestinatario != nil && *d.IDClienteDestinatario != attuale.IDClienteDestinatario {
+		if err := destinatarioAttivo(ctx, tx, *d.IDClienteDestinatario); err != nil {
+			return Spedizione{}, false, err
+		}
+	}
 	_, err = tx.Exec(ctx, `
 		UPDATE spedizioni SET
 			stato                        = $2,
@@ -201,6 +210,27 @@ func nuovaAssegnazione(ctx context.Context, tx pgx.Tx, idOperatore, idCorriere i
 		}
 	}
 	return id, traduciErrore(err)
+}
+
+// destinatarioAttivo rifiuta (409) un cliente disattivato dall'amministratore come
+// destinatario di una spedizione nuova o modificata. Un cliente inesistente passa: lo
+// segnala poi la chiave esterna con l'errore sul campo.
+func destinatarioAttivo(ctx context.Context, q interrogabile, idCliente int32) error {
+	var attivo bool
+	err := q.QueryRow(ctx, `
+		SELECT u.attivo FROM clienti c JOIN utenti u ON u.id = c.id_utente WHERE c.id = $1`, idCliente).Scan(&attivo)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return nil
+	case err != nil:
+		return err
+	case !attivo:
+		return &errori.Conflitto{
+			Messaggio: "il cliente destinatario è disattivato: non può ricevere nuove spedizioni",
+			Dettagli:  []errori.ErroreCampo{{Campo: "id_cliente_destinatario", Messaggio: "cliente disattivato"}},
+		}
+	}
+	return nil
 }
 
 func autoreNota(autore identita.Richiedente) (idOperatore, idCorriere *int32) {

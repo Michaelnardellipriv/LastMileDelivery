@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'api.dart';
@@ -46,7 +48,20 @@ void registraErrore(Object e, [StackTrace? traccia]) {
 /// Messaggio breve per l'utente; i dettagli tecnici finiscono in console.
 String testoErrore(Object e) {
   registraErrore(e);
-  return e is ErroreServer ? e.perUtente : 'Si è verificato un errore imprevisto. Riprova; se succede ancora avvisa l\'assistenza.';
+  final errore = primoErrore(e);
+  return errore is ErroreServer
+      ? errore.perUtente
+      : 'Si è verificato un errore imprevisto. Riprova; se succede ancora avvisa l\'assistenza.';
+}
+
+/// Con due chiamate in parallelo ((a, b).wait) l'errore arriva dentro un
+/// ParallelWaitError: per il messaggio all'utente conta il primo errore del backend.
+Object primoErrore(Object e) {
+  if (e is ParallelWaitError) {
+    final errori = e.errors;
+    if (errori is (AsyncError?, AsyncError?)) return errori.$1?.error ?? errori.$2?.error ?? e;
+  }
+  return e;
 }
 
 void mostraErrore(BuildContext context, Object e) {

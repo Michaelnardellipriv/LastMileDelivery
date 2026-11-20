@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 
 import 'api.dart';
 import '../comune/comuni.dart';
+import '../comune/scheda_spedizione.dart';
 import 'mappa.dart';
 import 'selettori.dart';
 
@@ -207,31 +208,10 @@ class _DettaglioSpedizioneState extends State<DettaglioSpedizione> {
             ),
           ]),
         ),
-        Sezione('Spedizione', [
-          Riga('Creata il', fmtDataOra(s.creataIl)),
-          Riga('Richiesta il', fmtDataOra(s.richiestaIl)),
-          Riga('Ritirata il', s.ritirataIl == null ? 'non ancora ritirata' : fmtDataOra(s.ritirataIl!)),
-          if (s.conclusaIl != null) Riga('Conclusa il', fmtDataOra(s.conclusaIl!)),
-          if (s.annullataIl != null) Riga('Annullata il', fmtDataOra(s.annullataIl!)),
-          Riga('Reso', s.isReso ? 'sì' : 'no'),
-          Riga('Ritiri falliti', '${s.tentativiRitiro ?? 0}'),
-          Riga('Consegne fallite', '${s.tentativiConsegna ?? 0}'),
-        ]),
-        Sezione('Persone', [
-          Riga('Mittente', descriviPersona(s.mittente)),
-          Riga('Destinatario', descriviPersona(s.destinatario)),
-          Riga('Corriere', s.corriere == null ? 'non assegnata' : descriviPersona(s.corriere)),
-          if (s.assegnataDa != null)
-            Riga('Assegnata da', [nomeConId(s.assegnataDa), if (s.assegnataDa!.email != null) s.assegnataDa!.email!,
-              if (s.assegnataDa!.telefono != null) s.assegnataDa!.telefono!].join(' · ')),
-        ]),
-        Sezione('Indirizzi', [
-          Riga('Ritiro', s.ritiro.testo),
-          Riga('Consegna', s.consegna.testo),
-        ]),
+        ...sezioniSpedizione(s),
         if (s.stato == 'in consegna') _sezionePosizione(),
         _sezioneNote(s),
-        _sezioneStorico(),
+        SezioneStorico(_storico),
       ]),
       if (_invio) const Positioned(top: 0, left: 0, right: 0, child: LinearProgressIndicator()),
     ]);
@@ -255,18 +235,7 @@ class _DettaglioSpedizioneState extends State<DettaglioSpedizione> {
   }
 
   Widget _sezioneNote(Spedizione s) => Sezione('Note', [
-        if (s.note.isEmpty) const Text('Nessuna nota'),
-        for (final n in s.note)
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: Icon(n.interna ? Icons.lock_outline : Icons.public, color: n.interna ? null : Colors.teal),
-            title: Text(n.testo),
-            subtitle: Text([
-              n.interna ? 'interna' : 'pubblica · il cliente vede il motivo "${n.motivo ?? ''}"',
-              fmtDataOra(n.creataIl),
-              if (n.autore != null) n.autore!.testo,
-            ].join(' · ')),
-          ),
+        ...vociNote(s.note),
         const Divider(),
         Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Expanded(
@@ -289,32 +258,6 @@ class _DettaglioSpedizioneState extends State<DettaglioSpedizione> {
           ),
         ]),
       ]);
-
-  Widget _sezioneStorico() => Sezione('Storico', [
-        if (_storico.isEmpty) const Text('Nessuna modifica registrata'),
-        for (final v in _storico.reversed)
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            dense: true,
-            leading: Icon(switch (v.operazione) {
-              'creazione' => Icons.add_circle_outline,
-              'annullamento' => Icons.cancel_outlined,
-              _ => Icons.edit_outlined,
-            }),
-            title: Text(_descriviModifica(v)),
-            subtitle: Text('${fmtDataOra(v.quando)} · ${v.autore.testo}'),
-          ),
-      ]);
-
-  static String _descriviModifica(VoceStorico v) {
-    if (v.operazione == 'creazione') return 'Spedizione creata';
-    final prima = v.prima ?? const {};
-    final cambi = [
-      for (final e in v.dopo.entries)
-        if (e.key != 'modificata_il') '${e.key.replaceAll('_', ' ')}: ${prima[e.key] ?? '—'} → ${e.value ?? '—'}',
-    ];
-    return cambi.isEmpty ? v.operazione : cambi.join('\n');
-  }
 }
 
 /// Cambio di stato: l'operatore sceglie lo stato e, se vuole aggiungere la nota pubblica,

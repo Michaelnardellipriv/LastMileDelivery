@@ -71,6 +71,23 @@ func (a *archivioFinto) CreaUtente(_ context.Context, ruolo identita.Ruolo, c Cl
 		Prefisso: c.Prefisso, NrTelefono: c.NrTelefono, Attivo: true}, nil
 }
 
+// Utenti di prova: 7 corriere, 8 operatore, 30 cliente destinatario, 31 cliente solo
+// mittente; gli altri id non esistono (o sono amministratori).
+func (a *archivioFinto) UtentePerID(_ context.Context, idUtente int32) (Utente, error) {
+	si, no := true, false
+	switch idUtente {
+	case 7:
+		return Utente{ID: 7, Ruolo: identita.Corriere}, nil
+	case 8:
+		return Utente{ID: 8, Ruolo: identita.Operatore}, nil
+	case 30:
+		return Utente{ID: 30, Ruolo: identita.Cliente, Destinatario: &si}, nil
+	case 31:
+		return Utente{ID: 31, Ruolo: identita.Cliente, Destinatario: &no}, nil
+	}
+	return Utente{}, &errori.NonTrovato{Messaggio: "nessun corriere, operatore o cliente con questo id utente"}
+}
+
 func (a *archivioFinto) ModificaUtente(_ context.Context, idUtente int32, d DatiUtente) (Utente, error) {
 	a.modifica = &d
 	u := Utente{ID: idUtente, Ruolo: identita.Corriere, Nome: "Carlo", Email: "carlo@test.it", Attivo: true}
@@ -102,6 +119,7 @@ func tipoErrore(err error) string {
 	var validazione *errori.Validazione
 	var nonAutorizzato *errori.NonAutorizzato
 	var conflitto *errori.Conflitto
+	var nonTrovato *errori.NonTrovato
 	switch {
 	case err == nil:
 		return "nessuno"
@@ -111,6 +129,8 @@ func tipoErrore(err error) string {
 		return "403"
 	case errors.As(err, &conflitto):
 		return "409"
+	case errors.As(err, &nonTrovato):
+		return "404"
 	}
 	return err.Error()
 }

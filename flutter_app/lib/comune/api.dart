@@ -293,6 +293,28 @@ class ApiSessione {
 
   Future<Spedizione> dettaglio(int id) async => Spedizione.daJson(await chiama('GET', '/api/spedizioni/$id') as Map<String, dynamic>);
 
+  /// Storico delle modifiche (operatori e amministratori).
+  Future<List<VoceStorico>> storico(int id) async {
+    final j = await chiama('GET', '/api/spedizioni/$id/storico') as Map<String, dynamic>;
+    return [for (final v in j['dati'] as List) VoceStorico.daJson(v as Map<String, dynamic>)];
+  }
+
+  /// Corrieri attivi (operatori e amministratori), per il filtro delle spedizioni.
+  Future<Pagina<Persona>> corrieri(String q, {int perPagina = 20}) => elenco('/api/corrieri', q, Persona.daJson, perPagina: perPagina);
+
+  /// PATCH /api/utenti/{id} con i soli campi in [modifiche]. L'amministratore cambia
+  /// dati, password e stato; l'operatore solo i dati dei clienti: lo decide il backend.
+  Future<Map<String, dynamic>> modificaUtente(int idUtente, Map<String, Object?> modifiche, {String? chiave}) async =>
+      await chiama('PATCH', '/api/utenti/$idUtente', chiave: chiave ?? nuovaChiave(), corpo: modifiche) as Map<String, dynamic>;
+
+  /// Ricerca in un'anagrafica (GET con q e per_pagina).
+  @protected
+  Future<Pagina<T>> elenco<T>(String percorso, String q, T Function(Map<String, dynamic>) daJson, {int perPagina = 20}) async {
+    final j =
+        await chiama('GET', percorso, query: {if (q.trim().isNotEmpty) 'q': q.trim(), 'per_pagina': '$perPagina'}) as Map<String, dynamic>;
+    return Pagina.daJson(j, daJson, perPagina: perPagina);
+  }
+
   /// Cambia lo stato e restituisce quello registrato dal backend.
   Future<String> cambiaStato(int id, String stato, {String? motivo, String? nota}) async {
     final j = await chiama('PATCH', '/api/spedizioni/$id/stato', chiave: nuovaChiave(), corpo: {

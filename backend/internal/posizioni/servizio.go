@@ -9,6 +9,8 @@ import (
 	"lastmiledelivery/backend/internal/identita"
 )
 
+// Limiti dell'intervallo di invio della posizione. L'intervallo lo modifica
+// l'amministratore con PATCH /api/impostazioni (pacchetto configurazione).
 const (
 	IntervalloMinimoSecondi  = 5
 	IntervalloMassimoSecondi = 3600
@@ -28,7 +30,6 @@ type archivio interface {
 	Registra(ctx context.Context, idCorriere int32, lat, lon float64) (int32, error)
 	Posizioni(ctx context.Context) ([]Posizione, error)
 	Intervallo(ctx context.Context) (int32, error)
-	AggiornaIntervallo(ctx context.Context, secondi, idAmministratore int32) error
 }
 
 type Servizio struct {
@@ -77,21 +78,4 @@ func (s *Servizio) Intervallo(ctx context.Context, r identita.Richiedente) (int3
 		return 0, &errori.NonAutorizzato{Messaggio: "l'intervallo della posizione è riservato a corrieri, operatori e amministratori"}
 	}
 	return s.archivio.Intervallo(ctx)
-}
-
-func (s *Servizio) ModificaIntervallo(ctx context.Context, r identita.Richiedente, secondi *int32) (int32, error) {
-	if r.Ruolo != identita.Amministratore {
-		return 0, &errori.NonAutorizzato{Messaggio: "solo un amministratore può modificare l'intervallo della posizione"}
-	}
-	e := &errori.Validazione{}
-	switch {
-	case secondi == nil:
-		e.Aggiungi("intervallo_secondi", "obbligatorio")
-	case *secondi < IntervalloMinimoSecondi || *secondi > IntervalloMassimoSecondi:
-		e.Aggiungi("intervallo_secondi", fmt.Sprintf("deve essere tra %d e %d", IntervalloMinimoSecondi, IntervalloMassimoSecondi))
-	}
-	if err := e.Err(); err != nil {
-		return 0, err
-	}
-	return *secondi, s.archivio.AggiornaIntervallo(ctx, *secondi, r.ID)
 }

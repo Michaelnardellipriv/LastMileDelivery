@@ -329,14 +329,128 @@ func TestUtentiAmministratore(t *testing.T) {
 		}
 	})
 
-	t.Run("solo_corrieri_e_operatori", func(t *testing.T) {
-		var idUtenteCliente int32
-		if err := f.db.QueryRow(t.Context(), `SELECT id_utente FROM clienti WHERE id = $1`, f.idDestinatario).Scan(&idUtenteCliente); err != nil {
+	t.Run("clienti", func(t *testing.T) {
+		// due clienti nuovi, creati dall'operatore: uno diventa destinatario, l'altro resta solo mittente
+		creaCliente := func(nome string) (idCliente int, percorso string) {
+			corpo := map[string]any{"nome": nome, "cognome": "Cliente", "prefisso": "+39", "nr_telefono": telefonoUnico(),
+				"email": f.emailDi(nome), "password": "PasswordCliente1"}
+			r := f.chiama(t, http.MethodPost, "/api/clienti", corpo, op)
+			if r.stato != http.StatusCreated {
+				t.Fatalf("creazione cliente %s: %d %s", nome, r.stato, r.grezzo)
+			}
+			c := r.corpo["cliente"].(map[string]any)
+			if c["attivo"] != true || c["destinatario"] != false {
+				t.Errorf("un cliente appena creato è attivo e mittente: %v", c)
+			}
+			return int(c["id"].(float64)), percorsoUtenti + "/" + strconv.Itoa(int(c["id_utente"].(float64)))
+		}
+		idDest, percorsoDest := creaCliente("clientedest")
+		_, percorsoMitt := creaCliente("clientemitt")
+		spedizione := func(codice string, idDestinatario int) risposta {
+			corpo := f.corpoValido(codice)
+			corpo["id_cliente_destinatario"] = idDestinatario
+			return f.chiama(t, http.MethodPost, "/api/spedizioni", corpo, op)
+		}
+		if r := spedizione("CLI-DEST", idDest); r.stato != http.StatusCreated {
+			t.Fatalf("spedizione al nuovo destinatario: %d %s", r.stato, r.grezzo)
+		}
+
+		// l'operatore vede chi è destinatario e chi mittente
+		r := f.chiama(t, http.MethodGet, "/api/clienti?q="+f.suffisso+"&per_pagina=100", nil, op)
+		if r.stato != http.StatusOK {
+			t.Fatalf("elenco clienti dell'operatore: %d %s", r.stato, r.grezzo)
+		}
+		perEmail := map[string]any{}
+		for _, v := range r.corpo["dati"].([]any) {
+			c := v.(map[string]any)
+			perEmail[c["email"].(string)] = c["destinatario"]
+		}
+		if perEmail[f.emailDi("clientedest")] != true || perEmail[f.emailDi("clientemitt")] != false {
+			t.Errorf("GET /api/clienti: destinatario true per chi ha ricevuto una spedizione, false per il mittente; ottenuto %v", perEmail)
+		}
+
+		// l'amministratore vede anche i clienti, con destinatario o solo mittente
+		r = f.chiama(t, http.MethodGet, percorsoUtenti+"?ruolo=cliente&q="+f.suffisso, nil, admin)
+		if r.stato != http.StatusOK {
+			t.Fatalf("elenco clienti: %d %s", r.stato, r.grezzo)
+		}
+		tipi := map[string]any{}
+		for _, v := range r.corpo["dati"].([]any) {
+			u := v.(map[string]any)
+			if u["ruolo"] != "cliente" {
+				t.Errorf("filtro ruolo=cliente: trovato %v", u)
+			}
+			tipi[u["email"].(string)] = u["destinatario"]
+		}
+		if tipi[f.emailDi("clientedest")] != true || tipi[f.emailDi("clientemitt")] != false {
+			t.Errorf("destinatario: atteso true per il destinatario e false per il solo mittente, ottenuto %v", tipi)
+		}
+		r = f.chiama(t, http.MethodGet, percorsoUtenti+"?q="+f.suffisso+"&per_pagina=100", nil, admin)
+		ruoli := map[any]bool{}
+		for _, v := range r.corpo["dati"].([]any) {
+			ruoli[v.(map[string]any)["ruolo"]] = true
+		}
+		if !ruoli["cliente"] || !ruoli["corriere"] || !ruoli["operatore"] {
+			t.Errorf("senza filtro compaiono tutti i ruoli: %v", ruoli)
+		}
+
+		// l'operatore cambia solo i dati dei clienti
+		for _, percorso := range []string{percorsoDest, percorsoMitt} {
+			if r := f.chiama(t, http.MethodPatch, percorso, map[string]any{"cognome": "Modificato"}, op); r.stato != http.StatusOK || r.corpo["cognome"] != "Modificato" {
+				t.Errorf("l'operatore modifica i dati di un cliente: %d %s", r.stato, r.grezzo)
+			}
+		}
+		for _, corpo := range []map[string]any{{"attivo": false}, {"password": "PasswordNuova9"}, {"nome": "X", "attivo": true}} {
+			if r := f.chiama(t, http.MethodPatch, percorsoDest, corpo, op); r.stato != http.StatusForbidden {
+				t.Errorf("l'operatore %v: atteso 403, ottenuto %d %s", corpo, r.stato, r.grezzo)
+			}
+		}
+
+		// il solo mittente non accede all'app: niente stato né password
+		for _, corpo := range []map[string]any{{"attivo": false}, {"password": "PasswordNuova9"}} {
+			if r := f.chiama(t, http.MethodPatch, percorsoMitt, corpo, admin); r.stato != http.StatusConflict {
+				t.Errorf("solo mittente %v: atteso 409, ottenuto %d %s", corpo, r.stato, r.grezzo)
+			}
+		}
+
+		// il destinatario: nuova password, poi disattivazione
+		if r := f.chiama(t, http.MethodPatch, percorsoDest, map[string]any{"password": "PasswordNuova9"}, admin); r.stato != http.StatusOK {
+			t.Fatalf("nuova password al destinatario: %d %s", r.stato, r.grezzo)
+		}
+		sessione := f.login(t, map[string]any{"email": f.emailDi("clientedest"), "password": "PasswordNuova9"}, 200)
+		if r := f.chiama(t, http.MethodPatch, percorsoDest, map[string]any{"attivo": false}, admin); r.stato != http.StatusOK || r.corpo["attivo"] != false {
+			t.Fatalf("disattivazione del destinatario: %d %s", r.stato, r.grezzo)
+		}
+		f.login(t, map[string]any{"email": f.emailDi("clientedest"), "password": "PasswordNuova9"}, 403)
+		if r := f.chiama(t, http.MethodGet, "/api/spedizioni", nil, conToken(sessione)); r.stato != http.StatusForbidden {
+			t.Errorf("il token del destinatario disattivato non vale più: %d", r.stato)
+		}
+
+		// un destinatario disattivato non riceve spedizioni nuove, né per modifica
+		if r := spedizione("CLI-OFF", idDest); r.stato != http.StatusConflict || !contiene(campiInErrore(r), "id_cliente_destinatario") {
+			t.Errorf("spedizione a un destinatario disattivato: atteso 409, ottenuto %d %s", r.stato, r.grezzo)
+		}
+		altra := f.nuovaSpedizione(t, "CLI-MOD")
+		if r := f.chiama(t, http.MethodPatch, "/api/spedizioni/"+strconv.Itoa(altra), map[string]any{"id_cliente_destinatario": idDest}, op); r.stato != http.StatusConflict {
+			t.Errorf("modifica verso un destinatario disattivato: atteso 409, ottenuto %d %s", r.stato, r.grezzo)
+		}
+
+		// riattivato, torna tutto come prima
+		if r := f.chiama(t, http.MethodPatch, percorsoDest, map[string]any{"attivo": true}, admin); r.stato != http.StatusOK {
+			t.Fatalf("riattivazione: %d %s", r.stato, r.grezzo)
+		}
+		f.login(t, map[string]any{"email": f.emailDi("clientedest"), "password": "PasswordNuova9"}, 200)
+		if r := spedizione("CLI-ON", idDest); r.stato != http.StatusCreated {
+			t.Errorf("spedizione al destinatario riattivato: %d %s", r.stato, r.grezzo)
+		}
+
+		// gli amministratori non si modificano da qui
+		var idUtenteAdmin int32
+		if err := f.db.QueryRow(t.Context(), `SELECT id_utente FROM amministratori WHERE id = $1`, f.idAmministratore).Scan(&idUtenteAdmin); err != nil {
 			t.Fatal(err)
 		}
-		percorso := percorsoUtenti + "/" + strconv.Itoa(int(idUtenteCliente))
-		if r := f.chiama(t, http.MethodPatch, percorso, map[string]any{"attivo": false}, admin); r.stato != http.StatusNotFound {
-			t.Fatalf("un cliente non si disattiva da qui: atteso 404, ottenuto %d", r.stato)
+		if r := f.chiama(t, http.MethodPatch, percorsoUtenti+"/"+strconv.Itoa(int(idUtenteAdmin)), map[string]any{"nome": "X"}, admin); r.stato != http.StatusNotFound {
+			t.Errorf("amministratore: atteso 404, ottenuto %d", r.stato)
 		}
 	})
 }

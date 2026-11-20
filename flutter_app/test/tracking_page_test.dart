@@ -10,7 +10,8 @@ import 'package:veloce24_app/tracking_page.dart';
 const _voce = {
   'id': 7, 'cod_ordine': 'ORD-7', 'stato': 'in consegna', 'is_reso': false,
   'creata_il': '2026-11-03T09:00:00Z', 'dataora_richiesta_spedizione': '2026-11-04T09:00:00Z',
-  'id_cliente_mittente': 1, 'id_cliente_destinatario': 2,
+  // come il backend vero: al cliente non arriva id_cliente_mittente
+  'id_cliente_destinatario': 2,
   'indirizzo_ritiro': {'via': 'Via Roma', 'civico': '1'},
   'indirizzo_spedizione': {'via': 'Via Verdi', 'civico': '10'},
   'conclusa_il': null, 'note': [],

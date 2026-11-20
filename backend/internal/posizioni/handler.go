@@ -20,16 +20,11 @@ func (h *Handler) Registra(rotte *httpx.Rotte, identifica httpx.Middleware) {
 	rotte.Gestisci(http.MethodPost, "/api/corrieri/posizione", http.HandlerFunc(h.invia), identifica)
 	rotte.Gestisci(http.MethodGet, "/api/corrieri/posizioni", http.HandlerFunc(h.elenca), identifica)
 	rotte.Gestisci(http.MethodGet, "/api/impostazioni/intervallo-posizione", http.HandlerFunc(h.intervallo), identifica)
-	rotte.Gestisci(http.MethodPut, "/api/impostazioni/intervallo-posizione", http.HandlerFunc(h.modificaIntervallo), identifica)
 }
 
 type richiestaPosizione struct {
 	Latitudine  *float64 `json:"latitudine"`
 	Longitudine *float64 `json:"longitudine"`
-}
-
-type richiestaIntervallo struct {
-	IntervalloSecondi *int32 `json:"intervallo_secondi"`
 }
 
 type intervalloDTO struct {
@@ -83,19 +78,6 @@ func (h *Handler) elenca(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) intervallo(w http.ResponseWriter, r *http.Request) {
 	intervallo, err := h.servizio.Intervallo(r.Context(), identita.DalContesto(r.Context()))
-	if err != nil {
-		httpx.RispondiErrore(w, r, err)
-		return
-	}
-	httpx.ScriviJSON(w, http.StatusOK, intervalloDTO{IntervalloSecondi: intervallo})
-}
-
-func (h *Handler) modificaIntervallo(w http.ResponseWriter, r *http.Request) {
-	var req richiestaIntervallo
-	if !httpx.LeggiCorpo(w, r, &req) {
-		return
-	}
-	intervallo, err := h.servizio.ModificaIntervallo(r.Context(), identita.DalContesto(r.Context()), req.IntervalloSecondi)
 	if err != nil {
 		httpx.RispondiErrore(w, r, err)
 		return
