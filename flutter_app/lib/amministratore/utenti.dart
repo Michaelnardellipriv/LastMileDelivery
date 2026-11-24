@@ -42,7 +42,7 @@ class _UtentiPageState extends State<UtentiPage> {
     try {
       final r = await api.utenti(FiltroUtenti(q: _q.text, ruolo: _ruolo, attivo: _attivo), pagina: pagina);
       if (!mounted) return;
-      if (r.oltreLaFine) return _carica(pagina: r.totalePagine);
+      if (r.oltreLaFine) return await _carica(pagina: r.totalePagine);
       setState(() {
         _risultato = r;
         _pagina = pagina;

@@ -51,7 +51,7 @@ class SpedizioniPageState extends State<SpedizioniPage> {
       final r = await widget.api.spedizioni(_filtro, pagina: pagina, perPagina: _perPagina);
       if (!mounted) return;
       // Dopo una modifica la pagina attuale può non esistere più: si va all'ultima.
-      if (r.oltreLaFine) return _carica(pagina: r.totalePagine);
+      if (r.oltreLaFine) return await _carica(pagina: r.totalePagine);
       setState(() {
         _risultato = r;
         _pagina = pagina;

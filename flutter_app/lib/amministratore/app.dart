@@ -12,7 +12,10 @@ import 'utenti.dart';
 class HomeAmministratore extends StatefulWidget {
   final ApiAmministratore api;
   final VoidCallback alLogout;
-  const HomeAmministratore({super.key, required this.api, required this.alLogout});
+
+  /// Apre il profilo e il cambio password (ProfilePage); assente = nessun pulsante.
+  final VoidCallback? alProfilo;
+  const HomeAmministratore({super.key, required this.api, required this.alLogout, this.alProfilo});
   @override
   State<HomeAmministratore> createState() => _HomeAmministratoreState();
 }
@@ -39,27 +42,30 @@ class _HomeAmministratoreState extends State<HomeAmministratore> {
     return Scaffold(
       appBar: AppBar(
         title: Text('Veloce24 · Amministrazione · ${api.utente!.nomeCompleto}', style: const TextStyle(fontSize: 16)),
-        actions: [IconButton(tooltip: 'Esci', icon: const Icon(Icons.logout), onPressed: widget.alLogout)],
+        actions: [
+          if (widget.alProfilo != null) IconButton(tooltip: 'Il mio profilo', icon: const Icon(Icons.account_circle_outlined), onPressed: widget.alProfilo),
+          IconButton(tooltip: 'Esci', icon: const Icon(Icons.logout), onPressed: widget.alLogout),
+        ],
       ),
       body: largo
           ? Row(children: [
-              NavigationRail(
-                selectedIndex: _sezione,
-                labelType: NavigationRailLabelType.all,
-                onDestinationSelected: (i) => setState(() => _sezione = i),
-                destinations: [for (final v in voci) NavigationRailDestination(icon: Icon(v.$1), label: Text(v.$2))],
-              ),
-              const VerticalDivider(width: 1),
-              Expanded(child: corpo),
-            ])
+        NavigationRail(
+          selectedIndex: _sezione,
+          labelType: NavigationRailLabelType.all,
+          onDestinationSelected: (i) => setState(() => _sezione = i),
+          destinations: [for (final v in voci) NavigationRailDestination(icon: Icon(v.$1), label: Text(v.$2))],
+        ),
+        const VerticalDivider(width: 1),
+        Expanded(child: corpo),
+      ])
           : corpo,
       bottomNavigationBar: largo
           ? null
           : NavigationBar(
-              selectedIndex: _sezione,
-              onDestinationSelected: (i) => setState(() => _sezione = i),
-              destinations: [for (final v in voci) NavigationDestination(icon: Icon(v.$1), label: v.$2)],
-            ),
+        selectedIndex: _sezione,
+        onDestinationSelected: (i) => setState(() => _sezione = i),
+        destinations: [for (final v in voci) NavigationDestination(icon: Icon(v.$1), label: v.$2)],
+      ),
     );
   }
 }

@@ -30,8 +30,9 @@ info:
     sviluppo; le richieste senza `Origin`, come quelle delle app mobile, non ne dipendono),
     `LISTEN_ADDR` (predefinito `127.0.0.1:8080`), `JWT_SEGRETO` (almeno 32 caratteri; se
     manca se ne genera uno casuale a ogni avvio), `DURATA_TOKEN` (predefinito `8h`),
-    `IDENTITA_HEADER_SVILUPPO` (`attiva` o `disattiva`), `LINK_RECUPERO_PASSWORD` (pagina a
-    cui punta il link della mail), `SMTP_HOST`, `SMTP_PORT` (predefinito 587),
+    `IDENTITA_HEADER_SVILUPPO` (`attiva` o `disattiva`), `LINK_RECUPERO_PASSWORD` (pagina del
+    frontend a cui punta il link della mail, predefinita `http://localhost:5173/`; il backend
+    aggiunge `?token=<token>`, quindi il valore non deve contenerlo), `SMTP_HOST`, `SMTP_PORT` (predefinito 587),
     `SMTP_UTENTE`, `SMTP_PASSWORD`, `SMTP_MITTENTE`. Senza `SMTP_HOST` le mail non vengono
     inviate ma scritte nel log del server.
 
@@ -222,7 +223,8 @@ paths:
         link valido 30 minuti per sceglierne una nuova. La risposta è sempre
         202, anche per email sconosciute, per non rivelare quali email esistono. Una nuova
         richiesta annulla i link precedenti; oltre 3 richieste nell'ultima ora per lo stesso
-        utente la mail non viene inviata. Il link è `LINK_RECUPERO_PASSWORD?token=<token>`.
+        utente la mail non viene inviata. Il link è `LINK_RECUPERO_PASSWORD?token=<token>`, per esempio
+        `http://localhost:5173/?token=<token>`: apre il frontend, che legge il token e chiede la nuova password.
       operationId: richiediRecuperoPassword
       security: []
       requestBody:
