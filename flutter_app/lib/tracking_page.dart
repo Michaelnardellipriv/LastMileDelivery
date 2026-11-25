@@ -19,7 +19,10 @@ class TrackingClientePage extends StatefulWidget {
 
   /// Dal login unico (area riservata): aggiunge il pulsante "Esci".
   final VoidCallback? alLogout;
-  const TrackingClientePage({super.key, required this.api, this.perPagina = 20, this.alLogout});
+
+  /// Apre il profilo e il cambio password (ProfilePage); assente = nessun pulsante.
+  final VoidCallback? alProfilo;
+  const TrackingClientePage({super.key, required this.api, this.perPagina = 20, this.alLogout, this.alProfilo});
   @override
   State<TrackingClientePage> createState() => _TrackingClienteState();
 }
@@ -117,111 +120,113 @@ class _TrackingClienteState extends State<TrackingClientePage> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(
-          title: const Text('I miei pacchi'),
-          actions: [
-            IconButton(tooltip: 'Aggiorna', icon: const Icon(Icons.refresh), onPressed: () => _carica(reset: true)),
-            if (widget.alLogout != null) IconButton(tooltip: 'Esci', icon: const Icon(Icons.logout), onPressed: widget.alLogout),
-          ],
-        ),
-        body: Column(children: [
-          _filtri(context),
-          const Divider(height: 1),
-          Expanded(child: _elenco(context)),
-        ]),
-      );
+    appBar: AppBar(
+      title: const Text('I miei pacchi'),
+      actions: [
+        IconButton(tooltip: 'Aggiorna', icon: const Icon(Icons.refresh), onPressed: () => _carica(reset: true)),
+        if (widget.alProfilo != null)
+          IconButton(tooltip: 'Il mio profilo', icon: const Icon(Icons.account_circle_outlined), onPressed: widget.alProfilo),
+        if (widget.alLogout != null) IconButton(tooltip: 'Esci', icon: const Icon(Icons.logout), onPressed: widget.alLogout),
+      ],
+    ),
+    body: Column(children: [
+      _filtri(context),
+      const Divider(height: 1),
+      Expanded(child: _elenco(context)),
+    ]),
+  );
 
   Widget _filtri(BuildContext context) => Padding(
-        padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          TextField(
-            key: const Key('filtro-codice'),
-            controller: _codice,
-            onChanged: _codiceCambiato,
-            onSubmitted: (_) {
-              _attesa?.cancel();
+    padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      TextField(
+        key: const Key('filtro-codice'),
+        controller: _codice,
+        onChanged: _codiceCambiato,
+        onSubmitted: (_) {
+          _attesa?.cancel();
+          _carica(reset: true);
+        },
+        textInputAction: TextInputAction.search,
+        decoration: InputDecoration(
+          labelText: 'Numero ordine',
+          prefixIcon: const Icon(Icons.search),
+          border: const OutlineInputBorder(),
+          isDense: true,
+          suffixIcon: _codice.text.isEmpty
+              ? null
+              : IconButton(
+            tooltip: 'Cancella',
+            icon: const Icon(Icons.clear),
+            onPressed: () {
+              _codice.clear();
+              _codiceCambiato('');
+            },
+          ),
+        ),
+      ),
+      const SizedBox(height: 8),
+      Row(children: [
+        Expanded(
+          child: DropdownButtonFormField<String?>(
+            key: ValueKey('filtro-stato-$_azzeramenti'), // nuova chiave = torna a "Tutti"
+            value: _stato,
+            isExpanded: true,
+            decoration: const InputDecoration(labelText: 'Stato', border: OutlineInputBorder(), isDense: true),
+            items: [
+              const DropdownMenuItem(value: null, child: Text('Tutti')),
+              for (final s in statiSpedizione) DropdownMenuItem(value: s, child: Text(s)),
+            ],
+            onChanged: (v) {
+              _stato = v;
               _carica(reset: true);
             },
-            textInputAction: TextInputAction.search,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: InputDecorator(
             decoration: InputDecoration(
-              labelText: 'Numero ordine',
-              prefixIcon: const Icon(Icons.search),
+              labelText: 'Data',
               border: const OutlineInputBorder(),
               isDense: true,
-              suffixIcon: _codice.text.isEmpty
+              contentPadding: const EdgeInsets.fromLTRB(12, 4, 0, 4),
+              suffixIcon: _periodo == null
                   ? null
                   : IconButton(
-                      tooltip: 'Cancella',
-                      icon: const Icon(Icons.clear),
-                      onPressed: () {
-                        _codice.clear();
-                        _codiceCambiato('');
-                      },
-                    ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Row(children: [
-            Expanded(
-              child: DropdownButtonFormField<String?>(
-                key: ValueKey('filtro-stato-$_azzeramenti'), // nuova chiave = torna a "Tutti"
-                value: _stato,
-                isExpanded: true,
-                decoration: const InputDecoration(labelText: 'Stato', border: OutlineInputBorder(), isDense: true),
-                items: [
-                  const DropdownMenuItem(value: null, child: Text('Tutti')),
-                  for (final s in statiSpedizione) DropdownMenuItem(value: s, child: Text(s)),
-                ],
-                onChanged: (v) {
-                  _stato = v;
+                tooltip: 'Togli il filtro data',
+                icon: const Icon(Icons.clear, size: 18),
+                onPressed: () {
+                  _periodo = null;
                   _carica(reset: true);
                 },
               ),
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: InputDecorator(
-                decoration: InputDecoration(
-                  labelText: 'Data',
-                  border: const OutlineInputBorder(),
-                  isDense: true,
-                  contentPadding: const EdgeInsets.fromLTRB(12, 4, 0, 4),
-                  suffixIcon: _periodo == null
-                      ? null
-                      : IconButton(
-                          tooltip: 'Togli il filtro data',
-                          icon: const Icon(Icons.clear, size: 18),
-                          onPressed: () {
-                            _periodo = null;
-                            _carica(reset: true);
-                          },
-                        ),
-                ),
-                child: InkWell(
-                  key: const Key('filtro-data'),
-                  onTap: _scegliPeriodo,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    child: Text(
-                      _periodo == null
-                          ? 'Qualsiasi'
-                          : _periodo!.start == _periodo!.end
-                              ? _giorno(_periodo!.start)
-                              : '${_giorno(_periodo!.start)} – ${_giorno(_periodo!.end)}',
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
+            child: InkWell(
+              key: const Key('filtro-data'),
+              onTap: _scegliPeriodo,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Text(
+                  _periodo == null
+                      ? 'Qualsiasi'
+                      : _periodo!.start == _periodo!.end
+                      ? _giorno(_periodo!.start)
+                      : '${_giorno(_periodo!.start)} – ${_giorno(_periodo!.end)}',
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ),
-          ]),
-          if (_filtriAttivi)
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton.icon(onPressed: _azzera, icon: const Icon(Icons.filter_alt_off, size: 18), label: const Text('Azzera filtri')),
-            ),
-        ]),
-      );
+          ),
+        ),
+      ]),
+      if (_filtriAttivi)
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton.icon(onPressed: _azzera, icon: const Icon(Icons.filter_alt_off, size: 18), label: const Text('Azzera filtri')),
+        ),
+    ]),
+  );
 
   Widget _elenco(BuildContext context) {
     if (_voci.isEmpty && _caricando) return const Center(child: CircularProgressIndicator());
@@ -333,19 +338,19 @@ class _TrackingDettaglioState extends State<TrackingDettaglioPage> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(
-          title: Text(widget.codOrdine),
-          actions: [IconButton(tooltip: 'Aggiorna', icon: const Icon(Icons.refresh), onPressed: _ricarica)],
-        ),
-        body: FutureBuilder<DettaglioSpedizioneApi>(
-          future: _caricamento,
-          builder: (context, snap) {
-            if (snap.connectionState != ConnectionState.done) return const Center(child: CircularProgressIndicator());
-            if (snap.hasError) return _Errore(snap.error!, onRiprova: _ricarica);
-            return _contenuto(context, snap.data!);
-          },
-        ),
-      );
+    appBar: AppBar(
+      title: Text(widget.codOrdine),
+      actions: [IconButton(tooltip: 'Aggiorna', icon: const Icon(Icons.refresh), onPressed: _ricarica)],
+    ),
+    body: FutureBuilder<DettaglioSpedizioneApi>(
+      future: _caricamento,
+      builder: (context, snap) {
+        if (snap.connectionState != ConnectionState.done) return const Center(child: CircularProgressIndicator());
+        if (snap.hasError) return _Errore(snap.error!, onRiprova: _ricarica);
+        return _contenuto(context, snap.data!);
+      },
+    ),
+  );
 
   Widget _contenuto(BuildContext context, DettaglioSpedizioneApi d) {
     final s = d.spedizione;
@@ -402,12 +407,12 @@ class _TrackingDettaglioState extends State<TrackingDettaglioPage> {
   }
 
   Widget _riga(String etichetta, String valore) => Padding(
-        padding: const EdgeInsets.only(bottom: 6),
-        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Expanded(child: Text(etichetta)),
-          Text(valore, style: const TextStyle(fontWeight: FontWeight.w600)),
-        ]),
-      );
+    padding: const EdgeInsets.only(bottom: 6),
+    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Expanded(child: Text(etichetta)),
+      Text(valore, style: const TextStyle(fontWeight: FontWeight.w600)),
+    ]),
+  );
 }
 
 /// Passi del percorso normale; per non consegnata, persa e annullata basta il chip e la spiegazione.

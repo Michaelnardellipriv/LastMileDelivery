@@ -58,9 +58,11 @@ func esegui() error {
 	}
 
 	cfg := server.Config{
-		Firmatario:           firmatario,
-		Postino:              postino(),
-		LinkRecuperoPassword: valore("LINK_RECUPERO_PASSWORD", "http://localhost:8080/reimposta-password"),
+		Firmatario: firmatario,
+		Postino:    postino(),
+		// Pagina del FRONTEND a cui punta il link della mail: il servizio vi aggiunge "?token=<token>",
+		// quindi qui non va scritto il "?token=". Il backend non serve nessuna pagina di reset.
+		LinkRecuperoPassword: valore("LINK_RECUPERO_PASSWORD", "http://localhost:5173/"),
 		AmmettiHeaderID:      ammettiHeaderID,
 		CORS:                 cors,
 	}

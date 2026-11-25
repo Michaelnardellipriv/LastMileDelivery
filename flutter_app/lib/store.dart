@@ -2,10 +2,14 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'api.dart';
+import './auth/session.dart';
 
 /// Avvio con: flutter run --dart-define=API_BASE=http://localhost:8080
 /// (emulatore Android: http://10.0.2.2:8080). Vuoto = solo dati demo locali.
-const apiBase = String.fromEnvironment('API_BASE');
+/// Non è `const` solo perché gli entry point main_operatore.dart e main_corriere.dart, se
+/// API_BASE manca, impostano all'avvio il backend locale (vedi `avvia` in main.dart).
+String apiBase = const String.fromEnvironment('API_BASE');
 
 enum Ruolo { cliente, corriere, operatore, admin }
 
@@ -16,15 +20,18 @@ const ruoloNome = {
   Ruolo.admin: 'Amministratore',
 };
 const tuttiStati = ['creata', 'assegnata', 'ritirata', 'in consegna', 'consegnata', 'non consegnata', 'persa', 'annullata'];
-const _ops = {Ruolo.operatore, Ruolo.admin};
-const _cou = {Ruolo.corriere, Ruolo.operatore, Ruolo.admin};
-// Transizioni di stato: solo l'annullamento è imposto dal DB, le altre sono una proposta.
+const _ops = {Ruolo.operatore};
+const _cou = {Ruolo.corriere};
+// Transizioni di stato della demo, speculari a backend/internal/spedizioni/regole.go: ogni passaggio
+// ha un solo ruolo ammesso e l'amministratore è in sola lettura (il backend gli risponde 403).
+// 'non consegnata' nel backend si raggiunge solo registrando i tentativi (POST .../tentativi) ed è
+// finale; qui il corriere la imposta direttamente, come 'assegnata' per l'operatore, solo per simulare
+// quegli endpoint. Ogni stato finale (consegnata, non consegnata, persa, annullata) non ha uscite.
 final transizioni = <String, Map<String, Set<Ruolo>>>{
-  'creata': {'assegnata': _ops, 'annullata': _ops},
+  'creata': {'assegnata': _ops, 'annullata': _ops}, // nel backend l'assegnazione è POST .../assegnazioni, qui simulata
   'assegnata': {'ritirata': _cou, 'annullata': _ops},
   'ritirata': {'in consegna': _cou, 'persa': _ops},
-  'in consegna': {'consegnata': _cou, 'non consegnata': _cou, 'persa': _ops},
-  'non consegnata': {'assegnata': _ops},
+  'in consegna': {'consegnata': _cou, 'non consegnata': _cou, 'ritirata': _ops, 'persa': _ops},
 };
 
 DateTime ago(double giorni) => DateTime.now().subtract(Duration(minutes: (giorni * 1440).round()));
@@ -107,7 +114,16 @@ class Store extends ChangeNotifier {
   final tent = <Tentativo>[];
   final camb = <Cambiamento>[];
 
-  Store() {
+  // ───────── Sessione di login (JWT) ─────────
+  // `sessione` != null  → utente autenticato sul backend reale (token in memoria + storage sicuro).
+  // `meId` != null      → utente della demo locale (nessun token).
+  SessioneStorage _storage;
+  Sessione? sessione;
+  String? avviso; // messaggio da mostrare una volta nel login (es. "sessione scaduta")
+
+  @visibleForTesting
+  void usaStorage(SessioneStorage storage) => _storage = storage;
+  Store({SessioneStorage? storage}) : _storage = storage ?? SecureSessioneStorage() {
     utenti.addAll([
       Utente(1, 'Giulia', 'Admin', Ruolo.admin), Utente(2, 'Olga', 'Operatore', Ruolo.operatore),
       Utente(3, 'Marco', 'Bianchi', Ruolo.corriere), Utente(4, 'Sara', 'Neri', Ruolo.corriere),
@@ -156,16 +172,48 @@ class Store extends ChangeNotifier {
   Spedizione? byId(int id) => sped.where((s) => s.id == id).firstOrNull;
   int? corriereDi(Spedizione s) => ass.where((a) => a.id == s.idAssegnazione).firstOrNull?.idCorriere;
 
+  /// Accesso alla demo locale (nessuna rete, nessun token).
   void login(int? id) { meId = id; notifyListeners(); }
 
+  /// Dati dell'utente loggato dal backend (id_utente, id del ruolo, ruolo, nome, cognome, email):
+  /// sono quelli del login, perché il backend non ha un GET /api/auth/me.
+  Sessione? get utenteBackend => sessione;
+
+  /// All'avvio: recupera il JWT salvato, scartandolo se è già scaduto (`scade_il`).
+  Future<void> ripristina() async {
+    if (apiBase.isEmpty) return;
+    final s = await _storage.leggi();
+    if (s == null) return;
+    if (s.scaduta) return _storage.cancella();
+    sessione = s;
+  }
+
+  /// Dopo un login riuscito (risposta di POST /api/auth/login): tiene la sessione in memoria,
+  /// la salva cifrata e fa rifare la home dell'app (routing per `ruolo`).
+  Future<void> avviaSessione(Sessione s) async {
+    await _storage.salva(s);
+    sessione = s;
+    avviso = null;
+    notifyListeners();
+  }
+
+  /// Logout (demo o backend): azzera lo stato e cancella il token dal dispositivo.
+  Future<void> esci({String? avviso}) async {
+    meId = null;
+    sessione = null;
+    this.avviso = avviso;
+    notifyListeners();
+    await _storage.cancella();
+  }
+
   List<Spedizione> visibili(Utente u) => sped.where((s) {
-        if (u.ruolo == Ruolo.corriere) return corriereDi(s) == u.id;
-        if (u.ruolo != Ruolo.cliente) return true;
-        if (s.idMittente != u.id && s.idDestinatario != u.id) return false;
-        final fine = camb.where((c) => c.idSpedizione == s.id && c.nuovo['stato'] == 'consegnata').lastOrNull;
-        return fine == null || DateTime.now().difference(fine.il).inDays < 30; // regola dei 30 giorni
-      }).toList()
-        ..sort((a, b) => b.id.compareTo(a.id));
+    if (u.ruolo == Ruolo.corriere) return corriereDi(s) == u.id;
+    if (u.ruolo != Ruolo.cliente) return true;
+    if (s.idMittente != u.id && s.idDestinatario != u.id) return false;
+    final fine = camb.where((c) => c.idSpedizione == s.id && c.nuovo['stato'] == 'consegnata').lastOrNull;
+    return fine == null || DateTime.now().difference(fine.il).inDays < 30; // regola dei 30 giorni
+  }).toList()
+    ..sort((a, b) => b.id.compareTo(a.id));
 
   List<String> prossimiStati(Spedizione s, Utente u) {
     if (u.ruolo == Ruolo.corriere && corriereDi(s) != u.id) return [];
@@ -218,13 +266,17 @@ class Store extends ChangeNotifier {
       try {
         final r = await http
             .post(Uri.parse('$apiBase/api/spedizioni'),
-                headers: {'Content-Type': 'application/json'},
-                body: jsonEncode({
-                  'cod_ordine': cod, 'is_reso': reso, 'id_cliente_mittente': mittente,
-                  'id_cliente_destinatario': destinatario,
-                  'dataora_richiesta_spedizione': richiesta.toUtc().toIso8601String(),
-                  'id_indirizzo_ritiro': ritiro, 'id_indirizzo_spedizione': consegna,
-                }))
+            headers: {
+              'Content-Type': 'application/json',
+              // ── JWT: con il login reale la rotta protetta vuole `Authorization: Bearer <token>` ──
+              if (sessione != null) 'Authorization': 'Bearer ${sessione!.token}',
+            },
+            body: jsonEncode({
+              'cod_ordine': cod, 'is_reso': reso, 'id_cliente_mittente': mittente,
+              'id_cliente_destinatario': destinatario,
+              'dataora_richiesta_spedizione': richiesta.toUtc().toIso8601String(),
+              'id_indirizzo_ritiro': ritiro, 'id_indirizzo_spedizione': consegna,
+            }))
             .timeout(const Duration(seconds: 5));
         if (r.statusCode != 201) return (id: null, errore: '${r.body.trim()} (HTTP ${r.statusCode})');
         id = (jsonDecode(r.body) as Map)['id'] as int;

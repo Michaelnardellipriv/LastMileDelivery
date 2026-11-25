@@ -20,13 +20,13 @@ class ErroreServer implements Exception {
 
   /// Messaggio breve per l'utente. I dettagli dei campi si mostrano accanto ai campi.
   String get perUtente => switch (status) {
-        null => 'Impossibile contattare il server. Controlla la connessione e riprova.',
-        401 => 'Sessione scaduta o credenziali non valide: accedi di nuovo.',
-        404 => 'Elemento non trovato: potrebbe essere stato modificato. Aggiorna la pagina.',
-        >= 500 => 'Il server ha avuto un problema. Riprova tra poco.',
-        _ when campi.isNotEmpty => 'Alcuni dati non sono validi: controlla i campi evidenziati.',
-        _ => messaggio,
-      };
+    null => 'Impossibile contattare il server. Controlla la connessione e riprova.',
+    401 => 'Sessione scaduta o credenziali non valide: accedi di nuovo.',
+    404 => 'Elemento non trovato: potrebbe essere stato modificato. Aggiorna la pagina.',
+    >= 500 => 'Il server ha avuto un problema. Riprova tra poco.',
+    _ when campi.isNotEmpty => 'Alcuni dati non sono validi: controlla i campi evidenziati.',
+    _ => messaggio,
+  };
 
   @override
   String toString() => 'ErroreServer($status, $messaggio, campi: $campi${tecnico.isEmpty ? '' : ', $tecnico'})';
@@ -122,26 +122,26 @@ class Spedizione {
   });
 
   factory Spedizione.daJson(Map<String, dynamic> j) => Spedizione(
-        id: j['id'] as int,
-        codOrdine: j['cod_ordine'] as String,
-        stato: j['stato'] as String,
-        isReso: j['is_reso'] as bool? ?? false,
-        creataIl: _data(j['creata_il'])!,
-        richiestaIl: _data(j['dataora_richiesta_spedizione'])!,
-        ritirataIl: _data(j['ritirata_il']),
-        conclusaIl: _data(j['conclusa_il']),
-        annullataIl: _data(j['annullata_il']),
-        mittente: j['mittente'] == null ? null : Persona.daJson(j['mittente'] as Map<String, dynamic>),
-        destinatario: Persona.daJson(j['destinatario'] as Map<String, dynamic>? ?? {'id': j['id_cliente_destinatario']}),
-        corriere: j['corriere'] == null ? null : Persona.daJson(j['corriere'] as Map<String, dynamic>),
-        assegnataDa: j['assegnata_da'] == null ? null : Persona.daJson(j['assegnata_da'] as Map<String, dynamic>),
-        idCorriere: j['id_corriere'] as int?,
-        ritiro: Indirizzo.daJson(j['indirizzo_ritiro'] as Map<String, dynamic>),
-        consegna: Indirizzo.daJson(j['indirizzo_spedizione'] as Map<String, dynamic>),
-        note: [for (final n in (j['note'] as List? ?? const [])) Nota.daJson(n as Map<String, dynamic>)],
-        tentativiRitiro: j['tentativi_ritiro_falliti'] as int?,
-        tentativiConsegna: j['tentativi_consegna_falliti'] as int?,
-      );
+    id: j['id'] as int,
+    codOrdine: j['cod_ordine'] as String,
+    stato: j['stato'] as String,
+    isReso: j['is_reso'] as bool? ?? false,
+    creataIl: _data(j['creata_il'])!,
+    richiestaIl: _data(j['dataora_richiesta_spedizione'])!,
+    ritirataIl: _data(j['ritirata_il']),
+    conclusaIl: _data(j['conclusa_il']),
+    annullataIl: _data(j['annullata_il']),
+    mittente: j['mittente'] == null ? null : Persona.daJson(j['mittente'] as Map<String, dynamic>),
+    destinatario: Persona.daJson(j['destinatario'] as Map<String, dynamic>? ?? {'id': j['id_cliente_destinatario']}),
+    corriere: j['corriere'] == null ? null : Persona.daJson(j['corriere'] as Map<String, dynamic>),
+    assegnataDa: j['assegnata_da'] == null ? null : Persona.daJson(j['assegnata_da'] as Map<String, dynamic>),
+    idCorriere: j['id_corriere'] as int?,
+    ritiro: Indirizzo.daJson(j['indirizzo_ritiro'] as Map<String, dynamic>),
+    consegna: Indirizzo.daJson(j['indirizzo_spedizione'] as Map<String, dynamic>),
+    note: [for (final n in (j['note'] as List? ?? const [])) Nota.daJson(n as Map<String, dynamic>)],
+    tentativiRitiro: j['tentativi_ritiro_falliti'] as int?,
+    tentativiConsegna: j['tentativi_consegna_falliti'] as int?,
+  );
 }
 
 /// Una pagina di un elenco, con i totali calcolati dal backend
@@ -177,13 +177,13 @@ class VoceStorico {
   final Autore autore;
   VoceStorico(this.id, this.operazione, this.prima, this.dopo, this.quando, this.autore);
   factory VoceStorico.daJson(Map<String, dynamic> j) => VoceStorico(
-        j['id'] as int,
-        j['operazione'] as String,
-        j['valore_vecchio'] as Map<String, dynamic>?,
-        j['valore_nuovo'] as Map<String, dynamic>? ?? const {},
-        _data(j['modificato_il'])!,
-        Autore.daJson(j['autore'] as Map<String, dynamic>),
-      );
+    j['id'] as int,
+    j['operazione'] as String,
+    j['valore_vecchio'] as Map<String, dynamic>?,
+    j['valore_nuovo'] as Map<String, dynamic>? ?? const {},
+    _data(j['modificato_il'])!,
+    Autore.daJson(j['autore'] as Map<String, dynamic>),
+  );
 }
 
 class PosizioneCorriere {
@@ -194,14 +194,14 @@ class PosizioneCorriere {
   final List<int> spedizioni;
   PosizioneCorriere(this.idCorriere, this.nome, this.cognome, this.latitudine, this.longitudine, this.rilevataIl, this.spedizioni);
   factory PosizioneCorriere.daJson(Map<String, dynamic> j) => PosizioneCorriere(
-        j['id_corriere'] as int,
-        j['nome'] as String? ?? '',
-        j['cognome'] as String? ?? '',
-        (j['latitudine'] as num).toDouble(),
-        (j['longitudine'] as num).toDouble(),
-        _data(j['rilevata_il'])!,
-        [for (final s in (j['spedizioni_attive'] as List? ?? const [])) s as int],
-      );
+    j['id_corriere'] as int,
+    j['nome'] as String? ?? '',
+    j['cognome'] as String? ?? '',
+    (j['latitudine'] as num).toDouble(),
+    (j['longitudine'] as num).toDouble(),
+    _data(j['rilevata_il'])!,
+    [for (final s in (j['spedizioni_attive'] as List? ?? const [])) s as int],
+  );
   String get nomeCompleto => '$nome $cognome'.trim();
 }
 
@@ -260,6 +260,9 @@ class ApiSessione {
 
   // ───── autenticazione ─────
 
+  /// Login a livello di API. L'app NON lo usa: l'unico login dell'interfaccia è auth/login_page.dart
+  /// (AuthApi.login), che alimenta `store.sessione`; `AreaRiservata` ne ricava questa sessione con il
+  /// suo token. Resta qui per i test dei client per ruolo e per gli script.
   Future<UtenteSessione> login(String email, String password) async {
     final j = await chiama('POST', '/api/auth/login', corpo: {'email': email, 'password': password}) as Map<String, dynamic>;
     final u = UtenteSessione.daJson(j['utente'] as Map<String, dynamic>);
@@ -311,7 +314,7 @@ class ApiSessione {
   @protected
   Future<Pagina<T>> elenco<T>(String percorso, String q, T Function(Map<String, dynamic>) daJson, {int perPagina = 20}) async {
     final j =
-        await chiama('GET', percorso, query: {if (q.trim().isNotEmpty) 'q': q.trim(), 'per_pagina': '$perPagina'}) as Map<String, dynamic>;
+    await chiama('GET', percorso, query: {if (q.trim().isNotEmpty) 'q': q.trim(), 'per_pagina': '$perPagina'}) as Map<String, dynamic>;
     return Pagina.daJson(j, daJson, perPagina: perPagina);
   }
 

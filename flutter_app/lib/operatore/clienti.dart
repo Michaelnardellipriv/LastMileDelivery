@@ -36,7 +36,7 @@ class _ClientiPageState extends State<ClientiPage> {
     try {
       final r = await widget.api.anagraficaClienti(_q.text, pagina: pagina);
       if (!mounted) return;
-      if (r.oltreLaFine) return _carica(pagina: r.totalePagine);
+      if (r.oltreLaFine) return await _carica(pagina: r.totalePagine);
       setState(() {
         _risultato = r;
         _pagina = pagina;

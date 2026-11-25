@@ -1,10 +1,7 @@
-// Area riservata collegata al backend (login unico: operatori, corrieri, ...).
+// Stessa app di main.dart (un solo login, poi la pagina del ruolo), ma se API_BASE non è
+// passato parte già collegata al backend locale invece che in modalità demo:
 //   flutter run -d chrome --web-port 5173 -t lib/main_operatore.dart --dart-define=API_BASE=http://localhost:8080
-// È lo stesso ingresso di main_corriere.dart: la pagina che si apre dipende dal ruolo
-// di chi fa il login.
-import 'package:flutter/material.dart';
+// È lo stesso ingresso di main_corriere.dart: la pagina che si apre dipende dal ruolo di chi fa il login.
+import 'main.dart' show avvia;
 
-import 'area_riservata.dart';
-import 'store.dart' show apiBase;
-
-void main() => runApp(AreaRiservataApp(apiBase: apiBase.isEmpty ? 'http://localhost:8080' : apiBase));
+Future<void> main() => avvia(apiBaseDiDefault: 'http://localhost:8080');
