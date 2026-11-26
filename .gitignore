@@ -1,5 +1,4 @@
 env
-.env
 .exe
 *.exe
 
@@ -7,4 +6,28 @@ env
 build/
 .flutter-plugins
 .flutter-plugins-dependencies
-config
+
+# ── Credenziali: mai nel repository (vedi docs/configuration.md) ──
+# file di variabili con valori veri; .env.example (senza valori) invece va versionato
+.env
+.env.*
+!.env.example
+*.secret.env
+# chiavi e certificati (es. il certificato TLS di lastmile.test)
+*.key
+*.pem
+*.crt
+*.p12
+*.pfx
+*.jks
+# manifest dei Secret Kubernetes con i valori veri: nel repository c'è solo l'esempio
+secret*.yaml
+*-secret.yaml
+!k8s/esempi/secret-example.yaml
+kubeconfig*
+
+# config/: versionati solo gli esempi. dev.env (password dei database locali), test.env e
+# prod.env restano fuori: dev.env si copia da dev.env.example, i valori di TEST e PROD sono
+# in k8s/base/configmap.yaml e k8s/prod/configmap-patch.yaml.
+/config/*
+!/config/*.example

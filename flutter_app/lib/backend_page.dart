@@ -64,12 +64,17 @@ class _BackendAccessoState extends State<BackendAccessoPage> {
           Text('Backend: ${widget.apiBase}', style: Theme.of(context).textTheme.bodySmall),
           const SizedBox(height: 8),
           const Text('Scegli ruolo e ID di un utente che esiste nel database '
-              '(con db/seed.sql: operatore 1, corriere 1, clienti 1 e 2).'),
+              '(con db/globale/seed.sql: operatore 1, corriere 1, clienti 1 e 2).'),
           const SizedBox(height: 16),
           DropdownButtonFormField<RuoloApi>(
             value: ruolo,
             decoration: const InputDecoration(labelText: 'Ruolo', border: OutlineInputBorder()),
-            items: [for (final r in RuoloApi.values) DropdownMenuItem(value: r, child: Text(r.nome))],
+            // senza l'amministratore: qui non si sceglie la sede, e l'amministratore vede le
+            // spedizioni solo di una sede alla volta (lo fa la sua area, dopo il login)
+            items: [
+              for (final r in RuoloApi.values)
+                if (r != RuoloApi.amministratore) DropdownMenuItem(value: r, child: Text(r.nome)),
+            ],
             onChanged: (v) => setState(() => ruolo = v ?? ruolo),
           ),
           const SizedBox(height: 12),

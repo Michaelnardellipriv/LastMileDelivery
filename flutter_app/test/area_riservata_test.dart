@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:veloce24_app/area_riservata.dart' show baseApi;
 import 'package:veloce24_app/auth/recupero_link.dart';
 import 'package:veloce24_app/main.dart';
 import 'package:veloce24_app/store.dart';
@@ -45,8 +46,20 @@ Future<http.Response> _backend(http.Request req) async {
       }, 200);
     case '/api/auth/reimposta-password':
       return http.Response('', 204);
+    case '/api/auth/esci':
+      return http.Response('', 204);
+    case '/api/auth/rinnova':
+      return _json({
+        'token': 'tok-rinnovato',
+        'tipo': 'Bearer',
+        'scade_il': '2099-01-01T00:00:00Z',
+        'durata_secondi': 900,
+        'utente': {'id_utente': 1, 'ruolo': 'operatore', 'id': 1, 'nome': 'Utente', 'cognome': 'Prova', 'email': 'operatore@test.it'},
+      }, 200);
     case '/api/spedizioni':
       return _json({'dati': [], 'pagina': 1, 'per_pagina': 20}, 200);
+    case '/api/sedi':
+      return _json({'dati': [], 'pagina': 1, 'per_pagina': 20, 'totale_elementi': 0, 'totale_pagine': 0}, 200);
     case '/api/corrieri/posizioni':
       return _json({'intervallo_secondi': 30, 'corrieri': []}, 200);
     case '/api/corrieri/posizione':
@@ -119,6 +132,12 @@ void main() {
     expect(find.text('Area riservata'), findsNothing);
   });
 
+  test('baseApi: API_BASE se indicato, altrimenti nel browser lo stesso indirizzo della pagina', () {
+    expect(baseApi('http://localhost:8080'), 'http://localhost:8080');
+    expect(baseApi('', web: true, pagina: Uri.parse('http://lastmile.test/#/login')), 'http://lastmile.test');
+    expect(baseApi('', web: false), 'http://localhost:8080');
+  });
+
   testWidgets("operatore: dopo il login si apre l'area operatori", (tester) async {
     await _login(tester, 'operatore@test.it');
     expect(find.text('Nuova spedizione'), findsWidgets);
@@ -135,10 +154,14 @@ void main() {
   });
 
   testWidgets("amministratore: dopo il login si apre l'area amministratori", (tester) async {
+    _richieste.clear();
     await _login(tester, 'amministratore@test.it');
     expect(find.text('Spedizioni'), findsWidgets);
     expect(find.text('Utenti'), findsWidgets);
     expect(find.text('Configurazione'), findsWidgets);
+    // nessuna sede: le spedizioni non si chiedono (l'amministratore sceglie sempre una sede)
+    expect(find.text('Nessuna sede: creane una dalla sezione Sedi.'), findsOneWidget);
+    expect(_richieste.where((r) => r.url.path == '/api/spedizioni'), isEmpty);
     await _chiudi(tester);
   });
 
@@ -150,11 +173,24 @@ void main() {
     expect(elenco.headers['Authorization'], 'Bearer tok-cliente');
     expect(elenco.headers.containsKey('X-Id-Cliente'), isFalse);
 
-    // "Esci" riporta al login
+    // "Esci" riporta al login e chiude la sessione anche sul server, con il token del login
     await tester.tap(find.byTooltip('Esci'));
     await _assesta(tester);
     expect(find.text('Accedi'), findsOneWidget);
     expect(store.sessione, isNull);
+    final esci = _richieste.where((r) => r.url.path == '/api/auth/esci').toList();
+    expect(esci, hasLength(1));
+    expect(esci.single.headers['Authorization'], 'Bearer tok-cliente');
+  });
+
+  testWidgets("il token rinnovato si salva nella sessione senza ricreare l'area", (tester) async {
+    await _login(tester, 'operatore@test.it');
+    final chiave = store.sessione!.idSessione;
+    await store.aggiornaToken('tok-rinnovato', DateTime.utc(2099));
+    await _assesta(tester);
+    expect(store.sessione!.token, 'tok-rinnovato');
+    expect(store.sessione!.idSessione == chiave || store.sessione!.idSessione == 'tok-rinnovato', isTrue);
+    expect(find.text('Accedi'), findsNothing); // resta dentro
   });
 
   testWidgets('il profilo è raggiungibile da ogni area (qui: operatore) e si può uscire da lì', (tester) async {

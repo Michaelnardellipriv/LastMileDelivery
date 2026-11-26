@@ -21,17 +21,20 @@ const (
 	maxDescrizione   = 100
 )
 
-// Impostazioni sono i parametri della gestione delle spedizioni che sceglie l'amministratore.
+// Impostazioni sono i parametri della gestione delle spedizioni che l'amministratore
+// sceglie per ogni sede.
 type Impostazioni struct {
+	IDSede                   int64
 	GiorniVisibilitaCliente  int
 	MaxTentativiRitiro       int
 	MaxTentativiConsegna     int
 	IntervalloPosizioneSec   int
 	ModificateIl             time.Time
-	IDAmministratoreModifica *int32
+	IDAmministratoreModifica *int64
 }
 
-// Regole sono le impostazioni più i motivi attivi: quello che serve alle spedizioni.
+// Regole sono le impostazioni della sede più i motivi attivi (uguali per tutte le sedi):
+// quello che serve alle spedizioni.
 type Regole struct {
 	Impostazioni
 	Motivi []string
@@ -51,18 +54,19 @@ func (m ModificaImpostazioni) vuota() bool {
 }
 
 type Motivo struct {
-	ID          int32
+	ID          int64
 	Descrizione string
 	Attivo      bool
 	CreatoIl    time.Time
 }
 
 type archivio interface {
-	Regole(ctx context.Context) (Regole, error)
-	AggiornaImpostazioni(ctx context.Context, m ModificaImpostazioni, idAmministratore int32) (Impostazioni, error)
+	Regole(ctx context.Context, idSede int64) (Regole, error)
+	AggiornaImpostazioni(ctx context.Context, idSede int64, m ModificaImpostazioni, idAmministratore int64) (Impostazioni, error)
 	Motivi(ctx context.Context) ([]Motivo, error)
+	MotiviAttivi(ctx context.Context) ([]string, error)
 	CreaMotivo(ctx context.Context, descrizione string) (Motivo, error)
-	ImpostaMotivoAttivo(ctx context.Context, id int32, attivo bool) (Motivo, error)
+	ImpostaMotivoAttivo(ctx context.Context, id int64, attivo bool) (Motivo, error)
 }
 
 type Servizio struct {
@@ -80,15 +84,18 @@ func soloAmministratore(r identita.Richiedente, azione string) error {
 	return nil
 }
 
-func (s *Servizio) Impostazioni(ctx context.Context, r identita.Richiedente) (Impostazioni, error) {
-	if err := soloAmministratore(r, "consultare le impostazioni"); err != nil {
-		return Impostazioni{}, err
+// Impostazioni di una sede: l'amministratore le vede per tutte le sedi, operatori e
+// corrieri solo per la propria.
+func (s *Servizio) Impostazioni(ctx context.Context, r identita.Richiedente, idSede int64) (Impostazioni, error) {
+	if r.Ruolo != identita.Amministratore && !(r.Ruolo.HaSede() && r.IDSede == idSede) {
+		return Impostazioni{}, &errori.NonAutorizzato{Messaggio: "le impostazioni di una sede le vedono l'amministratore e chi lavora in quella sede"}
 	}
-	regole, err := s.archivio.Regole(ctx)
+	regole, err := s.archivio.Regole(ctx, idSede)
 	return regole.Impostazioni, err
 }
 
-func (s *Servizio) ModificaImpostazioni(ctx context.Context, r identita.Richiedente, m ModificaImpostazioni) (Impostazioni, error) {
+// ModificaImpostazioni cambia le impostazioni della sede scelta dall'amministratore.
+func (s *Servizio) ModificaImpostazioni(ctx context.Context, r identita.Richiedente, idSede int64, m ModificaImpostazioni) (Impostazioni, error) {
 	if err := soloAmministratore(r, "modificare le impostazioni"); err != nil {
 		return Impostazioni{}, err
 	}
@@ -110,13 +117,12 @@ func (s *Servizio) ModificaImpostazioni(ctx context.Context, r identita.Richiede
 	if err := e.Err(); err != nil {
 		return Impostazioni{}, err
 	}
-	return s.archivio.AggiornaImpostazioni(ctx, m, r.ID)
+	return s.archivio.AggiornaImpostazioni(ctx, idSede, m, r.ID)
 }
 
 // MotiviAttivi è l'elenco per i menu a tendina: lo leggono tutti gli utenti autenticati.
 func (s *Servizio) MotiviAttivi(ctx context.Context) ([]string, error) {
-	regole, err := s.archivio.Regole(ctx)
-	return regole.Motivi, err
+	return s.archivio.MotiviAttivi(ctx)
 }
 
 // Motivi restituisce tutti i motivi, anche quelli disattivati.
@@ -148,7 +154,7 @@ func (s *Servizio) CreaMotivo(ctx context.Context, r identita.Richiedente, descr
 	return s.archivio.CreaMotivo(ctx, testo)
 }
 
-func (s *Servizio) ImpostaMotivoAttivo(ctx context.Context, r identita.Richiedente, id int32, attivo *bool) (Motivo, error) {
+func (s *Servizio) ImpostaMotivoAttivo(ctx context.Context, r identita.Richiedente, id int64, attivo *bool) (Motivo, error) {
 	if err := soloAmministratore(r, "gestire i motivi"); err != nil {
 		return Motivo{}, err
 	}

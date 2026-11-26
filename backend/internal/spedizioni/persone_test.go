@@ -10,7 +10,7 @@ func voceConPersone() VoceElenco {
 	return VoceElenco{
 		ID: 10, IDClienteMittente: 3, IDClienteDestinatario: 7, Mittente: &m,
 		Destinatario: Persona{ID: 7, Nome: "Dora", Cognome: "Destinataria", Email: p("destinatario@test.it"), Telefono: p("+39 3330000006")},
-		IDCorriere:   p(int32(1)), Corriere: &Persona{ID: 1, Nome: "Carlo", Cognome: "Corriere", Telefono: p("+39 3330000003")},
+		IDCorriere:   p(int64(1)), Corriere: &Persona{ID: 1, Nome: "Carlo", Cognome: "Corriere", Telefono: p("+39 3330000003")},
 		IndirizzoRitiro: Indirizzo{Via: "Via Roma", Civico: "1", Citta: p("Trento"), CAP: p("38121"),
 			Regione: p("Trentino-Alto Adige"), Nazione: p("Italia")},
 	}
@@ -26,7 +26,7 @@ func TestDatiPersonePerRuolo(t *testing.T) {
 		}},
 		"amministratore": {func() ([]VoceElenco, error) {
 			s, _ := servizioElenco(voceConPersone())
-			return s.Elenca(ctx, amministratore, filtroBase)
+			return s.Elenca(ctx, amministratore, filtroAmministratore())
 		}},
 	} {
 		voci, err := r.elenca()
@@ -57,7 +57,7 @@ func TestDatiPersonePerRuolo(t *testing.T) {
 		}
 		if m := v.Mittente; m == nil || m.Nome != "Marco" || m.Cognome != "Mittente" || m.Email == nil || m.Telefono == nil {
 			t.Errorf("%s vede nome, cognome, email e telefono del mittente: %+v", nome, m)
-		} else if idAtteso := map[string]int32{"corriere": 3, "cliente": 0}[nome]; m.ID != idAtteso {
+		} else if idAtteso := map[string]int64{"corriere": 3, "cliente": 0}[nome]; m.ID != idAtteso {
 			t.Errorf("%s: id del mittente %d, atteso %d (il cliente non lo riceve)", nome, m.ID, idAtteso)
 		}
 		if d.ID != 7 || d.Nome != "Dora" || d.Cognome != "Destinataria" || d.Email == nil || d.Telefono == nil {

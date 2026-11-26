@@ -57,7 +57,7 @@ func TestAssegnataDa(t *testing.T) {
 
 	for nome, chi := range map[string]map[string]string{"corriere": comeCorriere(f.idCorriere1), "operatore": comeOperatore(f)} {
 		a, _ := f.dettaglio(t, id, chi, 200).corpo["assegnata_da"].(map[string]any)
-		if a == nil || int32(a["id"].(float64)) != f.idOperatore || a["nome"] != "operatore" || a["cognome"] != "Test" ||
+		if a == nil || int64(a["id"].(float64)) != f.idOperatore || a["nome"] != "operatore" || a["cognome"] != "Test" ||
 			a["email"] != f.emailDi("operatore") || a["telefono"] == nil {
 			t.Errorf("%s vede chi ha assegnato la spedizione (id, nome, cognome, email, telefono): %v", nome, a)
 		}

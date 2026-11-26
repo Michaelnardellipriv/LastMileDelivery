@@ -1,0 +1,45 @@
+# Microservizio spedizioni: spedizioni, note, storico, impostazioni delle sedi, motivi,
+# posizione dei corrieri. Usa SOLO il database delle spedizioni; nomi, sedi e indirizzi
+# li chiede al servizio utenti (/interno). È la parte che riceve più richieste (corrieri,
+# posizioni GPS): si scala da sola, senza toccare il servizio utenti.
+#
+# Database delle spedizioni: uno per gruppo di sedi (mappa sede → database,
+# docs/microservizi.md). Qui c'è il gruppo 0 (db-spedizioni-svc, DATABASE_URL); un gruppo
+# in più si aggiunge con k8s/esempi/gruppo-spedizioni-1.yaml e la chiave DATABASE_URL_1 in
+# spedizioni-secret. L'initContainer aspetta solo il gruppo 0: un altro gruppo che all'avvio
+# non risponde non ferma il servizio (le sue sedi hanno 503 finché non torna); un database
+# che dichiara il gruppo sbagliato sì.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spedizioni
+  labels: { app: spedizioni }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: spedizioni } }
+  template:
+    metadata: { labels: { app: spedizioni } }
+    spec:
+      initContainers:
+        - name: aspetta-db
+          image: localhost:32000/lastmile/db-spedizioni:2.4.0
+          command: ["sh", "-c", "until pg_isready -h db-spedizioni-svc -p 5432; do echo 'database spedizioni non ancora pronto'; sleep 2; done"]
+      containers:
+        - name: spedizioni
+          image: localhost:32000/lastmile/spedizioni:2.5.0
+          ports: [{ containerPort: 8080 }]
+          envFrom:
+            - configMapRef: { name: backend-config }       # URL_SERVIZIO_UTENTI, LISTEN_ADDR...
+            - secretRef: { name: backend-comune-secret }   # JWT_SEGRETO, CHIAVE_INTERNA (uguali per i due servizi)
+            - secretRef: { name: spedizioni-secret }       # DATABASE_URL (gruppo 0), DATABASE_URL_<n> (altri gruppi)
+          readinessProbe:
+            httpGet: { path: /ready, port: 8080 }
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /health, port: 8080 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 50m, memory: 32Mi }
+            limits: { memory: 128Mi }

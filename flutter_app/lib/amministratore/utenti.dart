@@ -1,6 +1,7 @@
-// Gestione degli utenti: corrieri, operatori e clienti, con ricerca e filtri per ruolo e
-// stato. Corrieri e operatori si creano qui (con il ruolo, che poi non si cambia), i
-// clienti li crea l'operatore. Per tutti: modifica dei dati, nuova password,
+// Gestione degli utenti: corrieri, operatori e clienti, con ricerca e filtri per ruolo,
+// stato e sede. Corrieri e operatori si creano qui, con il ruolo (che poi non si cambia)
+// e la sede in cui lavorano (che l'amministratore può cambiare); i clienti li crea
+// l'operatore e non hanno sede. Per tutti: modifica dei dati, nuova password,
 // disattivazione e riattivazione; di un cliente solo mittente (non accede all'app) il
 // backend accetta solo i dati. La pagina non valida nulla: manda ciò che è scritto e
 // mostra gli errori del backend.
@@ -12,7 +13,10 @@ import 'api.dart';
 
 class UtentiPage extends StatefulWidget {
   final ApiAmministratore api;
-  const UtentiPage({super.key, required this.api});
+
+  /// Cambia quando l'elenco delle sedi cambia: si rilegge per filtri e moduli.
+  final int versioneSedi;
+  const UtentiPage({super.key, required this.api, this.versioneSedi = 0});
   @override
   State<UtentiPage> createState() => _UtentiPageState();
 }
@@ -21,6 +25,8 @@ class _UtentiPageState extends State<UtentiPage> {
   final _q = TextEditingController();
   String? _ruolo;
   bool? _attivo;
+  int? _idSede;
+  List<Sede> _sedi = [];
   int _pagina = 1;
   Pagina<UtenteGestito>? _risultato;
   Object? _errore;
@@ -31,7 +37,26 @@ class _UtentiPageState extends State<UtentiPage> {
   @override
   void initState() {
     super.initState();
+    _caricaSedi();
     _carica();
+  }
+
+  @override
+  void didUpdateWidget(UtentiPage vecchio) {
+    super.didUpdateWidget(vecchio);
+    if (vecchio.versioneSedi != widget.versioneSedi) {
+      _caricaSedi();
+      _carica(pagina: _pagina); // il nome di una sede può essere cambiato
+    }
+  }
+
+  Future<void> _caricaSedi() async {
+    try {
+      final r = await api.sedi();
+      if (mounted) setState(() => _sedi = r.dati);
+    } catch (e) {
+      registraErrore(e); // senza sedi restano utilizzabili ricerca e modifica dei dati
+    }
   }
 
   Future<void> _carica({int pagina = 1}) async {
@@ -40,7 +65,7 @@ class _UtentiPageState extends State<UtentiPage> {
       _errore = null;
     });
     try {
-      final r = await api.utenti(FiltroUtenti(q: _q.text, ruolo: _ruolo, attivo: _attivo), pagina: pagina);
+      final r = await api.utenti(FiltroUtenti(q: _q.text, ruolo: _ruolo, attivo: _attivo, idSede: _idSede), pagina: pagina);
       if (!mounted) return;
       if (r.oltreLaFine) return await _carica(pagina: r.totalePagine);
       setState(() {
@@ -55,12 +80,12 @@ class _UtentiPageState extends State<UtentiPage> {
   }
 
   Future<void> _nuovo() async {
-    final creato = await showDialog<UtenteGestito>(context: context, builder: (_) => DialogoUtente(api: api));
+    final creato = await showDialog<UtenteGestito>(context: context, builder: (_) => DialogoUtente(api: api, sedi: _sedi));
     if (creato != null) _carica(pagina: _pagina);
   }
 
   Future<void> _modifica(UtenteGestito u) async {
-    final fatto = await showDialog<UtenteGestito>(context: context, builder: (_) => DialogoUtente(api: api, utente: u));
+    final fatto = await showDialog<UtenteGestito>(context: context, builder: (_) => DialogoUtente(api: api, utente: u, sedi: _sedi));
     if (fatto == null || !mounted) return;
     avviso(context, 'Dati di ${fatto.nomeCompleto} aggiornati');
     _carica(pagina: _pagina);
@@ -146,6 +171,23 @@ class _UtentiPageState extends State<UtentiPage> {
               },
             ),
           ),
+          SizedBox(
+            width: 200,
+            child: DropdownButtonFormField<int?>(
+              value: _idSede,
+              isDense: true,
+              isExpanded: true,
+              decoration: const InputDecoration(labelText: 'Sede', isDense: true, border: OutlineInputBorder()),
+              items: [
+                const DropdownMenuItem(value: null, child: Text('Tutte')),
+                for (final s in _sedi) DropdownMenuItem(value: s.id, child: Text(s.nome, overflow: TextOverflow.ellipsis)),
+              ],
+              onChanged: (id) {
+                setState(() => _idSede = id);
+                _carica();
+              },
+            ),
+          ),
           FilledButton.tonalIcon(onPressed: _attesa ? null : () => _carica(), icon: const Icon(Icons.search), label: const Text('Cerca')),
           FilledButton.icon(onPressed: _nuovo, icon: const Icon(Icons.person_add_alt_1), label: const Text('Nuovo utente')),
         ]),
@@ -173,7 +215,8 @@ class _UtentiPageState extends State<UtentiPage> {
             backgroundColor: colori.errorContainer,
           ),
       ]),
-      subtitle: Text('${u.email} · ${u.telefono}\nid utente ${u.id} · id ${u.ruolo} ${u.idRuolo}'),
+      subtitle: Text('${u.email} · ${u.telefono}\n'
+          '${u.haSede ? 'sede ${u.sede ?? u.idSede} · ' : ''}id utente ${u.id} · id ${u.ruolo} ${u.idRuolo}'),
       isThreeLine: true,
       trailing: Row(mainAxisSize: MainAxisSize.min, children: [
         IconButton(tooltip: 'Modifica dati', onPressed: _attesa ? null : () => _modifica(u), icon: const Icon(Icons.edit_outlined)),
@@ -216,11 +259,15 @@ class _UtentiPageState extends State<UtentiPage> {
 
 /// Creazione (senza [utente]) o modifica di un corriere o di un operatore.
 /// In modifica partono solo i campi cambiati; la password solo se si sceglie di
-/// reimpostarla. Il ruolo si sceglie solo alla creazione.
+/// reimpostarla. Il ruolo si sceglie solo alla creazione; la sede alla creazione e poi
+/// si può cambiare (i clienti non hanno sede).
 class DialogoUtente extends StatefulWidget {
   final ApiAmministratore api;
   final UtenteGestito? utente;
-  const DialogoUtente({super.key, required this.api, this.utente});
+
+  /// Sedi tra cui scegliere; quelle disattivate compaiono ma il backend non le accetta.
+  final List<Sede> sedi;
+  const DialogoUtente({super.key, required this.api, this.utente, this.sedi = const []});
   @override
   State<DialogoUtente> createState() => _DialogoUtenteState();
 }
@@ -229,6 +276,7 @@ class _DialogoUtenteState extends State<DialogoUtente> {
   static const _nomiCampi = ['nome', 'cognome', 'prefisso', 'nr_telefono', 'email', 'password'];
   final _campi = Campi(_nomiCampi);
   String? _ruolo;
+  late int? _idSede = widget.utente?.idSede;
   bool _nuovaPassword = false;
   late String _chiave = widget.api.nuovaChiave();
   Object? _errore;
@@ -255,6 +303,7 @@ class _DialogoUtenteState extends State<DialogoUtente> {
     if (u == null) {
       return {
         if (_ruolo != null) 'ruolo': _ruolo,
+        if (_idSede != null) 'id_sede': _idSede,
         for (final n in _nomiCampi) n: _campi[n],
       };
     }
@@ -262,6 +311,7 @@ class _DialogoUtenteState extends State<DialogoUtente> {
       for (final e in u.dati.entries)
         if (_campi[e.key] != e.value) e.key: _campi[e.key],
       if (_nuovaPassword) 'password': _campi['password'],
+      if (u.haSede && _idSede != u.idSede) 'id_sede': _idSede,
     };
   }
 
@@ -298,7 +348,12 @@ class _DialogoUtenteState extends State<DialogoUtente> {
   @override
   Widget build(BuildContext context) {
     final u = widget.utente;
-    final mostrati = {..._nomiCampi.where((n) => n != 'password' || _creazione || _nuovaPassword), if (_creazione) 'ruolo'};
+    final conSede = _creazione || u!.haSede;
+    final mostrati = {
+      ..._nomiCampi.where((n) => n != 'password' || _creazione || _nuovaPassword),
+      if (_creazione) 'ruolo',
+      if (conSede) 'id_sede',
+    };
     final errore = erroreGenerale(context, _errore, campiMostrati: mostrati);
     return AlertDialog(
       title: Text(_creazione ? 'Nuovo corriere o operatore' : 'Modifica ${u!.nomeCompleto}'),
@@ -327,6 +382,33 @@ class _DialogoUtenteState extends State<DialogoUtente> {
                 child: InputDecorator(
                   decoration: const InputDecoration(labelText: 'Ruolo', helperText: 'Il ruolo non si cambia', border: OutlineInputBorder()),
                   child: Text('${u!.descrizioneRuolo} · id utente ${u.id} · id ${u.ruolo} ${u.idRuolo}'),
+                ),
+              ),
+            if (conSede)
+              SizedBox(
+                width: 492,
+                child: DropdownButtonFormField<int>(
+                  value: widget.sedi.any((s) => s.id == _idSede) ? _idSede : null,
+                  isExpanded: true,
+                  decoration: InputDecoration(
+                    labelText: 'Sede',
+                    helperText: _creazione
+                        ? 'La sede in cui lavora: vede e gestisce solo le spedizioni di quella città'
+                        : 'Un corriere con spedizioni ancora aperte non cambia sede',
+                    helperMaxLines: 2,
+                    errorText: erroreCampo(_errore, 'id_sede'),
+                    errorMaxLines: 3,
+                    border: const OutlineInputBorder(),
+                  ),
+                  items: [
+                    for (final s in widget.sedi)
+                      DropdownMenuItem(
+                        value: s.id,
+                        enabled: s.attiva || s.id == u?.idSede,
+                        child: Text('${s.nome} · ${s.citta}${s.attiva ? '' : ' (disattivata)'}'),
+                      ),
+                  ],
+                  onChanged: (id) => setState(() => _idSede = id),
                 ),
               ),
             _campi.campo('nome', 'Nome', _errore),

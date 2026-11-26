@@ -1,4 +1,4 @@
-// Modello, regole di business e client API (rispecchiano db/schema_LastMileDb.sql).
+// Modello, regole di business e client API (rispecchiano db/globale/schema.sql e db/spedizioni/schema.sql).
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -195,6 +195,15 @@ class Store extends ChangeNotifier {
     sessione = s;
     avviso = null;
     notifyListeners();
+  }
+
+  /// Token rinnovato dall'area riservata: si tiene in memoria e sul dispositivo (un ricaricamento
+  /// della pagina riparte da questo). Niente notifyListeners: la sessione è la stessa.
+  Future<void> aggiornaToken(String token, DateTime? scadeIl) async {
+    final s = sessione;
+    if (s == null) return;
+    sessione = s.conToken(token, scadeIl);
+    await _storage.salva(sessione!);
   }
 
   /// Logout (demo o backend): azzera lo stato e cancella il token dal dispositivo.

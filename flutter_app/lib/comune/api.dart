@@ -67,6 +67,7 @@ class Autore {
   Autore(this.ruolo, this.id, this.nome, this.cognome);
   factory Autore.daJson(Map<String, dynamic> j) =>
       Autore(j['ruolo'] as String? ?? '', j['id'] as int? ?? 0, j['nome'] as String?, j['cognome'] as String?);
+
   /// Chi ha fatto l'azione: nome, cognome, ruolo e id.
   String get testo => nome == null ? '$ruolo · id $id' : '$nome $cognome ($ruolo · id $id)';
 }
@@ -83,14 +84,37 @@ class Nota {
       j['motivo'] as String?, _data(j['creata_il'])!, j['autore'] == null ? null : Autore.daJson(j['autore'] as Map<String, dynamic>));
 }
 
+/// Sede operativa di una città (GET /api/sedi): le sue spedizioni hanno ritiro e
+/// consegna in quella città. Una sede disattivata non accetta nuove spedizioni né nuovi
+/// corrieri o operatori.
+/// [gruppoSpedizioni] è il database delle spedizioni che la sede usa (0 = principale):
+/// si sceglie alla creazione e poi non cambia.
+class Sede {
+  final int id;
+  final String nome;
+  final Indirizzo indirizzo; // dà anche città, regione e nazione della sede
+  final bool attiva;
+  final int gruppoSpedizioni;
+  Sede(this.id, this.nome, this.indirizzo, [this.attiva = true, this.gruppoSpedizioni = 0]);
+  factory Sede.daJson(Map<String, dynamic> j) => Sede(j['id'] as int, j['nome'] as String? ?? '',
+      Indirizzo.daJson(j['indirizzo'] as Map<String, dynamic>? ?? const {}), j['attiva'] as bool? ?? true,
+      j['gruppo_spedizioni'] as int? ?? 0);
+  String get citta => indirizzo.citta ?? '';
+}
+
 /// Voce di GET /api/spedizioni o dettaglio di GET /api/spedizioni/{id}.
 class Spedizione {
   final int id;
+
+  /// Sede che gestisce la spedizione e il suo nome.
+  final int? idSede;
+  final String? sede;
   final String codOrdine, stato;
   final bool isReso;
   final DateTime creataIl, richiestaIl;
   final DateTime? ritirataIl, conclusaIl, annullataIl;
   final Persona? mittente, corriere;
+
   /// Operatore che ha fatto l'assegnazione attuale (assente per il cliente).
   final Persona? assegnataDa;
   final Persona destinatario;
@@ -101,6 +125,8 @@ class Spedizione {
 
   Spedizione({
     required this.id,
+    this.idSede,
+    this.sede,
     required this.codOrdine,
     required this.stato,
     required this.isReso,
@@ -122,26 +148,28 @@ class Spedizione {
   });
 
   factory Spedizione.daJson(Map<String, dynamic> j) => Spedizione(
-    id: j['id'] as int,
-    codOrdine: j['cod_ordine'] as String,
-    stato: j['stato'] as String,
-    isReso: j['is_reso'] as bool? ?? false,
-    creataIl: _data(j['creata_il'])!,
-    richiestaIl: _data(j['dataora_richiesta_spedizione'])!,
-    ritirataIl: _data(j['ritirata_il']),
-    conclusaIl: _data(j['conclusa_il']),
-    annullataIl: _data(j['annullata_il']),
-    mittente: j['mittente'] == null ? null : Persona.daJson(j['mittente'] as Map<String, dynamic>),
-    destinatario: Persona.daJson(j['destinatario'] as Map<String, dynamic>? ?? {'id': j['id_cliente_destinatario']}),
-    corriere: j['corriere'] == null ? null : Persona.daJson(j['corriere'] as Map<String, dynamic>),
-    assegnataDa: j['assegnata_da'] == null ? null : Persona.daJson(j['assegnata_da'] as Map<String, dynamic>),
-    idCorriere: j['id_corriere'] as int?,
-    ritiro: Indirizzo.daJson(j['indirizzo_ritiro'] as Map<String, dynamic>),
-    consegna: Indirizzo.daJson(j['indirizzo_spedizione'] as Map<String, dynamic>),
-    note: [for (final n in (j['note'] as List? ?? const [])) Nota.daJson(n as Map<String, dynamic>)],
-    tentativiRitiro: j['tentativi_ritiro_falliti'] as int?,
-    tentativiConsegna: j['tentativi_consegna_falliti'] as int?,
-  );
+        id: j['id'] as int,
+        idSede: j['id_sede'] as int?,
+        sede: j['sede'] as String?,
+        codOrdine: j['cod_ordine'] as String,
+        stato: j['stato'] as String,
+        isReso: j['is_reso'] as bool? ?? false,
+        creataIl: _data(j['creata_il'])!,
+        richiestaIl: _data(j['dataora_richiesta_spedizione'])!,
+        ritirataIl: _data(j['ritirata_il']),
+        conclusaIl: _data(j['conclusa_il']),
+        annullataIl: _data(j['annullata_il']),
+        mittente: j['mittente'] == null ? null : Persona.daJson(j['mittente'] as Map<String, dynamic>),
+        destinatario: Persona.daJson(j['destinatario'] as Map<String, dynamic>? ?? {'id': j['id_cliente_destinatario']}),
+        corriere: j['corriere'] == null ? null : Persona.daJson(j['corriere'] as Map<String, dynamic>),
+        assegnataDa: j['assegnata_da'] == null ? null : Persona.daJson(j['assegnata_da'] as Map<String, dynamic>),
+        idCorriere: j['id_corriere'] as int?,
+        ritiro: Indirizzo.daJson(j['indirizzo_ritiro'] as Map<String, dynamic>),
+        consegna: Indirizzo.daJson(j['indirizzo_spedizione'] as Map<String, dynamic>),
+        note: [for (final n in (j['note'] as List? ?? const [])) Nota.daJson(n as Map<String, dynamic>)],
+        tentativiRitiro: j['tentativi_ritiro_falliti'] as int?,
+        tentativiConsegna: j['tentativi_consegna_falliti'] as int?,
+      );
 }
 
 /// Una pagina di un elenco, con i totali calcolati dal backend
@@ -153,8 +181,8 @@ class Pagina<T> {
 
   factory Pagina.daJson(Map<String, dynamic> j, T Function(Map<String, dynamic>) daJson, {int pagina = 1, int perPagina = 20}) {
     final dati = [for (final v in j['dati'] as List) daJson(v as Map<String, dynamic>)];
-    return Pagina(dati, j['pagina'] as int? ?? pagina, j['per_pagina'] as int? ?? perPagina,
-        j['totale_elementi'] as int? ?? dati.length, j['totale_pagine'] as int? ?? 1);
+    return Pagina(dati, j['pagina'] as int? ?? pagina, j['per_pagina'] as int? ?? perPagina, j['totale_elementi'] as int? ?? dati.length,
+        j['totale_pagine'] as int? ?? 1);
   }
 
   bool get haPrecedente => pagina > 1;
@@ -215,17 +243,23 @@ class Posizioni {
 class UtenteSessione {
   final int idUtente, id;
   final String ruolo, nome, cognome, email;
-  UtenteSessione(this.idUtente, this.id, this.ruolo, this.nome, this.cognome, this.email);
+
+  /// Sede di operatori e corrieri (null per clienti e amministratori).
+  final int? idSede;
+  UtenteSessione(this.idUtente, this.id, this.ruolo, this.nome, this.cognome, this.email, [this.idSede]);
   factory UtenteSessione.daJson(Map<String, dynamic> j) => UtenteSessione(j['id_utente'] as int, j['id'] as int, j['ruolo'] as String,
-      j['nome'] as String? ?? '', j['cognome'] as String? ?? '', j['email'] as String? ?? '');
+      j['nome'] as String? ?? '', j['cognome'] as String? ?? '', j['email'] as String? ?? '', j['id_sede'] as int?);
   String get nomeCompleto => '$nome $cognome'.trim();
 }
 
 class FiltroSpedizioni {
   final String? stato, codOrdine;
   final int? idCorriere;
+
+  /// Solo per l'amministratore: operatori e corrieri vedono già solo la propria sede.
+  final int? idSede;
   final DateTime? dal, al;
-  const FiltroSpedizioni({this.stato, this.codOrdine, this.idCorriere, this.dal, this.al});
+  const FiltroSpedizioni({this.stato, this.codOrdine, this.idCorriere, this.idSede, this.dal, this.al});
 }
 
 String dataIso(DateTime d) =>
@@ -244,6 +278,23 @@ class ApiSessione {
   UtenteSessione? utente;
   void Function()? alScadereDelToken;
 
+  /// Scadenza del token e sua durata. Il token è breve (15 minuti): il servizio spedizioni
+  /// se ne fida fino alla scadenza, quindi è il tempo massimo in cui un utente disattivato
+  /// può ancora lavorare. Si rinnova da solo (POST /api/auth/rinnova) a metà della durata,
+  /// finché il backend dice che l'utente è attivo. La scadenza è calcolata con l'orologio
+  /// di questo dispositivo (adesso + durata_secondi), non confrontando la scade_il del
+  /// server con un orologio che può essere sbagliato.
+  DateTime? scadeIl;
+  Duration? _durata;
+  Timer? _timerRinnovo;
+  Future<bool>? _rinnovoInCorso;
+
+  /// Cambia a ogni [esci]: un rinnovo partito prima del logout non riapre la sessione.
+  int _generazione = 0;
+
+  /// Chi ha una copia del token e deve ricevere quello nuovo (es. il worker del GPS).
+  final List<void Function(String token)> alRinnovoToken = [];
+
   ApiSessione({required String base, http.Client? client})
       : base = base.endsWith('/') ? base.substring(0, base.length - 1) : base,
         _http = client ?? http.Client();
@@ -254,7 +305,12 @@ class ApiSessione {
       : base = altra.base,
         _http = altra._http,
         token = altra.token,
-        utente = altra.utente;
+        utente = altra.utente,
+        scadeIl = altra.scadeIl,
+        _durata = altra._durata {
+    // da qui in poi rinnova questa sessione, non quella del login
+    altra._fermaRinnovo();
+  }
 
   String nuovaChiave() => List.generate(16, (_) => _caso.nextInt(256).toRadixString(16).padLeft(2, '0')).join();
 
@@ -266,14 +322,156 @@ class ApiSessione {
   Future<UtenteSessione> login(String email, String password) async {
     final j = await chiama('POST', '/api/auth/login', corpo: {'email': email, 'password': password}) as Map<String, dynamic>;
     final u = UtenteSessione.daJson(j['utente'] as Map<String, dynamic>);
-    token = j['token'] as String;
+    _nuovaSessione(j);
     utente = u;
     return u;
   }
 
+  /// Parte da un token già ottenuto (login unico, auth/login_page.dart): la durata che resta si
+  /// ricava da [scadeIl], così il rinnovo automatico sa quando partire. Dal primo rinnovo in poi
+  /// vale la durata che dice il backend (durata_secondi).
+  void usaToken(String token, {DateTime? scadeIl}) {
+    this.token = token;
+    final resta = scadeIl?.difference(DateTime.now().toUtc());
+    if (resta != null && resta > Duration.zero) {
+      _durata = resta;
+      this.scadeIl = DateTime.now().add(resta);
+    } else {
+      // già scaduto (o senza scadenza): si rinnova subito, il backend accetta un token appena scaduto
+      _durata = const Duration(seconds: 2);
+      this.scadeIl = DateTime.now();
+    }
+  }
+
+  void _nuovaSessione(Map<String, dynamic> j) {
+    token = j['token'] as String;
+    final adesso = DateTime.now();
+    final secondi = j['durata_secondi'];
+    Duration? durata = secondi is int && secondi > 0 ? Duration(seconds: secondi) : null;
+    // backend senza durata_secondi: si ricava da scade_il (vale se l'orologio è giusto)
+    durata ??= DateTime.tryParse(j['scade_il'] as String? ?? '')?.difference(adesso);
+    if (durata != null && durata > Duration.zero) {
+      _durata = durata;
+      scadeIl = adesso.add(durata);
+    } else {
+      _durata = null;
+      scadeIl = null;
+    }
+  }
+
+  /// Rinnovo automatico a metà della durata del token, finché la sessione è aperta. Lo
+  /// avvia l'area riservata dopo il login; [esci] lo ferma. Se un rinnovo non riesce
+  /// (rete assente) si riprova ogni 30 secondi: il backend rinnova anche un token appena
+  /// scaduto, finché la sessione non supera la durata massima (DURATA_SESSIONE).
+  void avviaRinnovoAutomatico({Duration minimo = const Duration(seconds: 5)}) {
+    _fermaRinnovo();
+    final durata = _durata, scade = scadeIl;
+    if (durata == null || scade == null || token == null) return;
+    var attesa = scade.subtract(durata ~/ 2).difference(DateTime.now());
+    if (attesa < minimo) attesa = minimo;
+    final generazione = _generazione;
+    _timerRinnovo = Timer(attesa, () async {
+      final riuscito = await rinnova();
+      if (generazione == _generazione && token != null) {
+        avviaRinnovoAutomatico(minimo: riuscito ? const Duration(seconds: 5) : const Duration(seconds: 30));
+      }
+    });
+  }
+
+  void _fermaRinnovo() {
+    _timerRinnovo?.cancel();
+    _timerRinnovo = null;
+  }
+
+  /// Vero se il token ha superato metà della sua durata (o è già scaduto).
+  bool get tokenDaRinnovare {
+    final durata = _durata, scade = scadeIl;
+    if (token == null || durata == null || scade == null) return false;
+    return DateTime.now().isAfter(scade.subtract(durata ~/ 2));
+  }
+
+  /// Vero se al token manca poco (un minuto, o un quarto della durata se il token è più
+  /// corto di 4 minuti) o è già scaduto.
+  bool get _tokenInScadenza {
+    final scade = scadeIl, durata = _durata;
+    if (token == null || scade == null || durata == null) return false;
+    var margine = const Duration(minutes: 1);
+    if (durata ~/ 4 < margine) margine = durata ~/ 4;
+    return DateTime.now().isAfter(scade.subtract(margine));
+  }
+
+  /// Il token da usare adesso. Se sta per scadere lo si rinnova prima; se ha solo
+  /// superato metà della durata il rinnovo parte in sottofondo e la richiesta non aspetta
+  /// (un servizio utenti lento non rallenta le spedizioni).
+  Future<String?> tokenValido() async {
+    if (_tokenInScadenza) {
+      await rinnova();
+    } else if (tokenDaRinnovare) {
+      unawaited(rinnova());
+    }
+    return token;
+  }
+
+  /// Rinnova il token se ha superato metà della durata ([forza]: comunque).
+  Future<void> rinnovaSeServe({bool forza = false}) async {
+    if (forza || tokenDaRinnovare) await rinnova();
+  }
+
+  /// Chiede un token nuovo (POST /api/auth/rinnova); più chiamate insieme ne fanno una
+  /// sola. Vero se è arrivato. Se il backend lo rifiuta (401: sessione oltre la durata
+  /// massima o password cambiata; 403: utente disattivato) la sessione si chiude; se non
+  /// risponde si riprova più tardi.
+  Future<bool> rinnova() {
+    if (token == null) return Future.value(false);
+    return _rinnovoInCorso ??= _rinnova().whenComplete(() => _rinnovoInCorso = null);
+  }
+
+  Future<bool> _rinnova() async {
+    final generazione = _generazione;
+    try {
+      final j = await chiama('POST', '/api/auth/rinnova', rinnovo: true) as Map<String, dynamic>;
+      // nel frattempo l'utente è uscito: il token nuovo non serve più
+      if (generazione != _generazione || token == null) return false;
+      _nuovaSessione(j);
+      utente = UtenteSessione.daJson(j['utente'] as Map<String, dynamic>);
+      for (final f in List.of(alRinnovoToken)) {
+        f(token!);
+      }
+      return true;
+    } on ErroreServer catch (e) {
+      if ((e.status == 401 || e.status == 403) && generazione == _generazione && token != null) _fineSessione();
+      return false;
+    } catch (_) {
+      return false; // risposta inattesa: si riprova più tardi
+    }
+  }
+
+  /// Logout: chiude la sessione sul server (POST /api/auth/esci), così il token smette
+  /// subito di valere anche se qualcuno l'avesse copiato, poi esce. Se il server non
+  /// risponde si esce lo stesso: la sessione scadrà da sola.
+  Future<void> logout() async {
+    if (token != null) {
+      try {
+        await chiama('POST', '/api/auth/esci', rinnovo: true);
+      } catch (_) {
+        // rete assente o sessione già chiusa: non cambia niente per l'utente
+      }
+    }
+    esci();
+  }
+
+  void _fineSessione() {
+    esci();
+    alScadereDelToken?.call();
+  }
+
   void esci() {
+    _generazione++;
+    _fermaRinnovo();
     token = null;
     utente = null;
+    scadeIl = null;
+    _durata = null;
   }
 
   // ───── spedizioni: chiamate comuni a più ruoli ─────
@@ -285,6 +483,7 @@ class ApiSessione {
     final j = await chiama('GET', '/api/spedizioni', query: {
       if (f.stato != null) 'stato': f.stato!,
       if (f.idCorriere != null) 'id_corriere': '${f.idCorriere}',
+      if (f.idSede != null) 'id_sede': '${f.idSede}',
       if (f.dal != null) 'dal': dataIso(f.dal!),
       if (f.al != null) 'al': dataIso(f.al!),
       if (f.codOrdine != null && f.codOrdine!.isNotEmpty) 'cod_ordine': f.codOrdine!,
@@ -295,6 +494,21 @@ class ApiSessione {
   }
 
   Future<Spedizione> dettaglio(int id) async => Spedizione.daJson(await chiama('GET', '/api/spedizioni/$id') as Map<String, dynamic>);
+
+  /// Una sede: l'amministratore le vede tutte, operatori e corrieri solo la propria.
+  Future<Sede> sede(int id) async => Sede.daJson(await chiama('GET', '/api/sedi/$id') as Map<String, dynamic>);
+
+  /// Sedi (GET /api/sedi): l'amministratore le vede tutte, operatori e corrieri solo la
+  /// propria. [attiva] filtra per stato (null = tutte).
+  Future<Pagina<Sede>> sedi({String q = '', bool? attiva, int pagina = 1, int perPagina = 100}) async {
+    final j = await chiama('GET', '/api/sedi', query: {
+      if (q.trim().isNotEmpty) 'q': q.trim(),
+      if (attiva != null) 'attiva': '$attiva',
+      'pagina': '$pagina',
+      'per_pagina': '$perPagina',
+    }) as Map<String, dynamic>;
+    return Pagina.daJson(j, Sede.daJson, pagina: pagina, perPagina: perPagina);
+  }
 
   /// Storico delle modifiche (operatori e amministratori).
   Future<List<VoceStorico>> storico(int id) async {
@@ -351,7 +565,10 @@ class ApiSessione {
 
   /// Chiamata HTTP autenticata: restituisce il JSON della risposta o lancia [ErroreServer].
   @protected
-  Future<Object?> chiama(String metodo, String percorso, {Map<String, String>? query, Object? corpo, String? chiave}) async {
+  Future<Object?> chiama(String metodo, String percorso,
+      {Map<String, String>? query, Object? corpo, String? chiave, bool rinnovo = false, bool riprova = true}) async {
+    // un utente attivo non vede mai scadere il token (vedi tokenValido)
+    if (!rinnovo && token != null) await tokenValido();
     final uri = Uri.parse('$base$percorso').replace(queryParameters: query == null || query.isEmpty ? null : query);
     final intestazioni = {
       'Accept': 'application/json',
@@ -377,9 +594,27 @@ class ApiSessione {
     if (r.statusCode >= 200 && r.statusCode < 300) {
       return testo.isEmpty ? null : jsonDecode(testo);
     }
-    if (r.statusCode == 401 && token != null) {
-      esci();
-      alScadereDelToken?.call();
+    if (r.statusCode == 401 && token != null && !rinnovo) {
+      // token scaduto (app sospesa o senza rete): si rinnova e si ripete una volta la
+      // richiesta, con la stessa Idempotency-Key.
+      //  - rinnovo rifiutato (401/403): rinnova() ha già chiuso la sessione;
+      //  - rinnovo non riuscito per la rete: la sessione resta, la richiesta fallisce e si
+      //    riprova più tardi;
+      //  - anche il token appena rinnovato è rifiutato: la sessione non vale, si esce.
+      if (!riprova) {
+        _fineSessione();
+      } else {
+        final vecchio = token;
+        if (await rinnova() && token != null && token != vecchio) {
+          return chiama(metodo, percorso, query: query, corpo: corpo, chiave: chiave, riprova: false);
+        }
+      }
+    }
+    if (r.statusCode == 403 && token != null && !rinnovo) {
+      // 403 può voler dire "account disattivato" (il servizio spedizioni non lo distingue
+      // da un permesso mancante): il rinnovo lo verifica. Se l'utente è disattivato
+      // risponde 403 e rinnova() chiude la sessione; altrimenti dà solo un token nuovo.
+      await rinnova();
     }
     throw _errore(r.statusCode, testo, '$metodo $uri → ${r.statusCode}: $testo');
   }

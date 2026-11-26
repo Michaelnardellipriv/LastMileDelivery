@@ -12,7 +12,7 @@ Backend avviato con `config/dev.env` (vedi `docs/configuration.md`), poi:
     flutter run -d chrome --web-port 5173 --dart-define=API_BASE=http://localhost:8080
 
 Nella pagina iniziale compare "Dati reali dal backend": si sceglie ruolo e ID
-(con `db/seed.sql`: operatore 1, corriere 1, clienti 1 e 2) e l'elenco arriva da
+(con `db/globale/seed.sql`: operatore 1, corriere 1, clienti 1 e 2) e l'elenco arriva da
 `GET /api/spedizioni`, con l'header `X-Id-<Ruolo>` che il backend richiede.
 
 - `--web-port 5173` è obbligatoria: deve coincidere con `CORS_ORIGIN` del backend,

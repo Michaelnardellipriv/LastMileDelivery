@@ -81,7 +81,7 @@ func TestNomeAutoreInStoricoENote(t *testing.T) {
 		d := f.dettaglio(t, id, comeOperatore(f), 200)
 		note := d.corpo["note"].([]any)
 		a := note[len(note)-1].(map[string]any)["autore"].(map[string]any)
-		if a["nome"] != "corriere1" || a["cognome"] != "Test" || int32(a["id"].(float64)) != f.idCorriere1 {
+		if a["nome"] != "corriere1" || a["cognome"] != "Test" || int64(a["id"].(float64)) != f.idCorriere1 {
 			t.Fatalf("la nota mostra nome, cognome e id del corriere: %v", a)
 		}
 		r := f.invia(t, http.MethodPost, id, "/note", c1, map[string]any{"nota": "seconda nota"}, 201)

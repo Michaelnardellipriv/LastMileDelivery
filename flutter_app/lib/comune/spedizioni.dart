@@ -1,6 +1,7 @@
-// Elenco di tutte le spedizioni con i filtri per stato, corriere, data e riferimento,
-// comune a operatori e amministratori: cambia solo il dettaglio che si apre
-// (con le azioni per l'operatore, in sola lettura per l'amministratore).
+// Elenco delle spedizioni con i filtri per stato, corriere, data e riferimento, comune a
+// operatori e amministratori: cambia solo il dettaglio che si apre (con le azioni per
+// l'operatore, in sola lettura per l'amministratore). L'amministratore sceglie sempre una
+// sede (la prima attiva all'inizio) e vede le spedizioni di quella sola sede.
 // Su schermo largo il dettaglio sta a destra dell'elenco, su schermo stretto si apre
 // in una pagina a parte.
 import 'package:flutter/material.dart';
@@ -14,7 +15,17 @@ class SpedizioniPage extends StatefulWidget {
 
   /// Dettaglio della spedizione [id]; [alCambio] aggiorna l'elenco dopo una modifica.
   final Widget Function(int id, VoidCallback alCambio) dettaglio;
-  const SpedizioniPage({super.key, required this.api, required this.dettaglio});
+
+  /// Mostra la scelta della sede: solo per l'amministratore, che guarda sempre una sede
+  /// alla volta (non c'è l'elenco di tutte le sedi insieme: ogni gruppo di sedi ha il suo
+  /// database delle spedizioni). Operatori e corrieri vedono già solo la propria.
+  final bool filtroSede;
+
+  /// Cresce a ogni modifica delle sedi (solo con [filtroSede]): si rilegge l'elenco delle
+  /// sedi, tenendo quella scelta se c'è ancora.
+  final int versioneSedi;
+  const SpedizioniPage(
+      {super.key, required this.api, required this.dettaglio, this.filtroSede = false, this.versioneSedi = 0});
   @override
   State<SpedizioniPage> createState() => SpedizioniPageState();
 }
@@ -24,6 +35,15 @@ class SpedizioniPageState extends State<SpedizioniPage> {
   String? _stato;
   Persona? _corriere;
   DateTime? _dal, _al;
+  int? _idSede;
+  List<Sede>? _sedi; // con filtroSede: null finché non arrivano
+  // sedi oltre la prima pagina (con molte città): si cercano con "Cerca un'altra sede…"
+  bool _altreSedi = false;
+  Object? _erroreSedi;
+  // numero dell'ultima richiesta dell'elenco: la risposta di una richiesta superata (es.
+  // l'amministratore ha già scelto un'altra sede) si scarta
+  int _richiesta = 0;
+  static const _cercaSede = -1; // voce della tendina che apre la ricerca
 
   int _pagina = 1;
   static const _perPagina = ApiSessione.perPaginaSpedizioni;
@@ -36,20 +56,70 @@ class SpedizioniPageState extends State<SpedizioniPage> {
   @override
   void initState() {
     super.initState();
-    _carica();
+    // l'amministratore vede le spedizioni solo dopo aver scelto la sede: prima le sedi
+    if (widget.filtroSede) {
+      _caricaSedi();
+    } else {
+      _carica();
+    }
+  }
+
+  @override
+  void didUpdateWidget(SpedizioniPage vecchio) {
+    super.didUpdateWidget(vecchio);
+    if (widget.filtroSede && vecchio.versioneSedi != widget.versioneSedi) _caricaSedi();
+  }
+
+  /// Sede proposta all'amministratore: la prima attiva, altrimenti la prima.
+  static Sede? _sedePredefinita(List<Sede> sedi) => sedi.where((s) => s.attiva).firstOrNull ?? sedi.firstOrNull;
+
+  /// Legge le sedi; tiene quella scelta se c'è ancora, altrimenti sceglie la predefinita,
+  /// e poi legge le spedizioni di quella sede.
+  Future<void> _caricaSedi() async {
+    setState(() => _erroreSedi = null);
+    try {
+      final pagina = await widget.api.sedi();
+      final sedi = pagina.dati;
+      if (!mounted) return;
+      final prima = _idSede;
+      // con più sedi di una pagina, quella scelta con la ricerca può non essere nella prima:
+      // resta in elenco. Con tutte le sedi in pagina, se manca non c'è più.
+      final altre = pagina.totaleElementi > sedi.length;
+      final scelta = altre ? _sedi?.where((s) => s.id == _idSede).firstOrNull : null;
+      setState(() {
+        _sedi = [...sedi, if (scelta != null && !sedi.any((s) => s.id == scelta.id)) scelta];
+        _altreSedi = altre;
+        if (!_sedi!.any((s) => s.id == _idSede)) _idSede = _sedePredefinita(sedi)?.id;
+        if (_idSede == null) _risultato = null; // nessuna sede: nessun elenco
+      });
+      if (_idSede == null) return;
+      // stessa sede di prima: si rilegge la pagina attuale (il nome della sede può essere cambiato)
+      _idSede == prima ? await _carica(pagina: _pagina) : await _carica();
+    } catch (e) {
+      if (!mounted) return;
+      if (_sedi == null) {
+        setState(() => _erroreSedi = e); // senza sedi non si sa quali spedizioni chiedere
+      } else {
+        registraErrore(e); // restano le sedi già lette e l'elenco della sede scelta
+      }
+    }
   }
 
   FiltroSpedizioni get _filtro =>
-      FiltroSpedizioni(stato: _stato, idCorriere: _corriere?.id, dal: _dal, al: _al, codOrdine: _codOrdine.text);
+      FiltroSpedizioni(stato: _stato, idCorriere: _corriere?.id, idSede: _idSede, dal: _dal, al: _al, codOrdine: _codOrdine.text);
 
   Future<void> _carica({int pagina = 1}) async {
+    // l'amministratore chiede sempre le spedizioni di una sede: senza sede scelta nessuna richiesta
+    if (widget.filtroSede && _idSede == null) return;
+    final questa = ++_richiesta;
     setState(() {
       _attesa = true;
       _errore = null;
     });
     try {
       final r = await widget.api.spedizioni(_filtro, pagina: pagina, perPagina: _perPagina);
-      if (!mounted) return;
+      // superata da una richiesta più recente (altra sede, altri filtri): non si mostra
+      if (!mounted || questa != _richiesta) return;
       // Dopo una modifica la pagina attuale può non esistere più: si va all'ultima.
       if (r.oltreLaFine) return await _carica(pagina: r.totalePagine);
       setState(() {
@@ -57,12 +127,33 @@ class SpedizioniPageState extends State<SpedizioniPage> {
         _pagina = pagina;
       });
     } catch (e) {
-      if (mounted) setState(() => _errore = e);
+      if (mounted && questa == _richiesta) setState(() => _errore = e);
     } finally {
-      if (mounted) setState(() => _attesa = false);
+      if (mounted && questa == _richiesta) setState(() => _attesa = false);
     }
   }
 
+  /// Con più sedi di quante ne stanno nella tendina: l'amministratore cerca la sede per nome
+  /// o città (GET /api/sedi?q=), e quella scelta entra nella tendina.
+  Future<void> _scegliAltraSede() async {
+    final sede = await showDialog<Sede>(
+      context: context,
+      builder: (_) => DialogoRicerca<Sede>(
+        titolo: 'Scegli la sede',
+        cerca: (q) => widget.api.sedi(q: q, perPagina: 20),
+        titoloVoce: (s) => s.attiva ? s.nome : '${s.nome} (disattivata)',
+        sottotitoloVoce: (s) => s.citta,
+      ),
+    );
+    if (sede == null || !mounted || sede.id == _idSede) return;
+    setState(() {
+      if (!(_sedi ?? const <Sede>[]).any((s) => s.id == sede.id)) _sedi = [...?_sedi, sede];
+      _idSede = sede.id;
+    });
+    _carica();
+  }
+
+  /// Azzera i filtri ma non la sede: l'amministratore ne ha sempre una scelta.
   void _azzera() {
     setState(() {
       _stato = null;
@@ -135,6 +226,33 @@ class SpedizioniPageState extends State<SpedizioniPage> {
               },
             ),
           ),
+          if (widget.filtroSede && _idSede != null)
+            SizedBox(
+              width: 190,
+              child: DropdownButtonFormField<int>(
+                value: _idSede,
+                isDense: true,
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: 'Sede', isDense: true, border: OutlineInputBorder()),
+                // solo sedi: non c'è la voce "tutte"
+                items: [
+                  for (final s in _sedi ?? const <Sede>[])
+                    DropdownMenuItem(
+                        value: s.id, child: Text(s.attiva ? s.nome : '${s.nome} (disattivata)', overflow: TextOverflow.ellipsis)),
+                  if (_altreSedi)
+                    const DropdownMenuItem(value: _cercaSede, child: Text('Cerca un\'altra sede…', overflow: TextOverflow.ellipsis)),
+                ],
+                onChanged: (id) {
+                  if (id == _cercaSede) {
+                    _scegliAltraSede();
+                    return;
+                  }
+                  if (id == null || id == _idSede) return;
+                  setState(() => _idSede = id);
+                  _carica();
+                },
+              ),
+            ),
           InputChip(
             avatar: const Icon(Icons.person_search, size: 18),
             label: Text(_corriere == null ? 'Corriere: tutti' : 'Corriere: ${_corriere!.nomeCompleto}'),
@@ -169,33 +287,46 @@ class SpedizioniPageState extends State<SpedizioniPage> {
         ]),
       );
 
+  Widget _conRiprova(Object errore, VoidCallback riprova) => Center(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Padding(padding: const EdgeInsets.all(16), child: Text(testoErrore(errore), textAlign: TextAlign.center)),
+          OutlinedButton(onPressed: riprova, child: const Text('Riprova')),
+        ]),
+      );
+
+  /// Con filtroSede, ciò che va al posto dell'elenco finché non c'è una sede scelta.
+  Widget? _senzaSede() {
+    if (!widget.filtroSede || _idSede != null) return null;
+    if (_erroreSedi != null) return _conRiprova(_erroreSedi!, _caricaSedi);
+    if (_sedi == null) return const Center(child: CircularProgressIndicator());
+    return const Center(child: Text('Nessuna sede: creane una dalla sezione Sedi.'));
+  }
+
   Widget _elenco() {
     final r = _risultato;
+    final senzaSede = _senzaSede();
     return Column(children: [
       _filtri(),
       if (_attesa) const LinearProgressIndicator() else const SizedBox(height: 4),
       Expanded(
-        child: _errore != null
-            ? Center(
-                child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  Padding(padding: const EdgeInsets.all(16), child: Text(testoErrore(_errore!), textAlign: TextAlign.center)),
-                  OutlinedButton(onPressed: () => _carica(pagina: _pagina), child: const Text('Riprova')),
-                ]),
-              )
-            : r == null
-                ? const SizedBox()
-                : r.dati.isEmpty
-                    ? const Center(child: Text('Nessuna spedizione con questi filtri'))
-                    : RefreshIndicator(
-                        onRefresh: () => _carica(pagina: _pagina),
-                        child: ListView.separated(
-                          itemCount: r.dati.length,
-                          separatorBuilder: (_, __) => const Divider(height: 1),
-                          itemBuilder: (_, i) => _voce(r.dati[i]),
-                        ),
-                      ),
+        child: senzaSede != null
+            ? senzaSede
+            : _errore != null
+                ? _conRiprova(_errore!, () => _carica(pagina: _pagina))
+                : r == null
+                    ? const SizedBox()
+                    : r.dati.isEmpty
+                        ? const Center(child: Text('Nessuna spedizione con questi filtri'))
+                        : RefreshIndicator(
+                            onRefresh: () => _carica(pagina: _pagina),
+                            child: ListView.separated(
+                              itemCount: r.dati.length,
+                              separatorBuilder: (_, __) => const Divider(height: 1),
+                              itemBuilder: (_, i) => _voce(r.dati[i]),
+                            ),
+                          ),
       ),
-      if (r != null) BarraPagine(pagina: r, attesa: _attesa, vaiA: (p) => _carica(pagina: p)),
+      if (r != null && senzaSede == null) BarraPagine(pagina: r, attesa: _attesa, vaiA: (p) => _carica(pagina: p)),
     ]);
   }
 

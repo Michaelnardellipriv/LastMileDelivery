@@ -141,11 +141,12 @@ class Campi {
   Campi(List<String> nomi) : c = {for (final n in nomi) n: TextEditingController()};
   String operator [](String n) => c[n]!.text;
   Widget campo(String nome, String etichetta, Object? errore,
-          {bool password = false, String? suggerimento, double larghezza = 240, TextInputType? tastiera}) =>
+          {bool password = false, String? suggerimento, double larghezza = 240, TextInputType? tastiera, bool soloLettura = false}) =>
       SizedBox(
         width: larghezza,
         child: TextField(
           controller: c[nome],
+          readOnly: soloLettura,
           obscureText: password,
           keyboardType: tastiera,
           decoration: InputDecoration(

@@ -1,0 +1,14 @@
+# .dart_tool contiene anche il profilo di Chrome usato da "flutter run" (cookie, cronologia):
+# non deve finire nell'immagine
+.dart_tool
+build
+.idea
+*.iml
+.flutter-plugins
+.flutter-plugins-dependencies
+test
+Dockerfile
+.dockerignore
+.env
+.git
+config

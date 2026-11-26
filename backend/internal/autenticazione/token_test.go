@@ -18,7 +18,7 @@ func firmatarioDiProva(adesso time.Time) *Firmatario {
 func TestTokenFirmaEVerifica(t *testing.T) {
 	adesso := time.Date(2026, 11, 9, 10, 0, 0, 0, time.UTC)
 	f := firmatarioDiProva(adesso)
-	corriere := identita.Richiedente{Ruolo: identita.Corriere, ID: 5}
+	corriere := identita.Richiedente{Ruolo: identita.Corriere, ID: 5, IDSede: 3, Sessione: "sessione-1"}
 
 	token, scadenza, err := f.Firma(12, corriere)
 	if err != nil {
@@ -29,7 +29,7 @@ func TestTokenFirmaEVerifica(t *testing.T) {
 	}
 	r, err := f.Verifica(token)
 	if err != nil || r != corriere {
-		t.Fatalf("il token restituisce ruolo e id: %+v %v", r, err)
+		t.Fatalf("il token restituisce ruolo, id, sede e sessione: %+v %v", r, err)
 	}
 
 	f.adesso = func() time.Time { return adesso.Add(time.Hour) }
@@ -41,12 +41,13 @@ func TestTokenFirmaEVerifica(t *testing.T) {
 func TestTokenNonValidi(t *testing.T) {
 	adesso := time.Date(2026, 11, 9, 10, 0, 0, 0, time.UTC)
 	f := firmatarioDiProva(adesso)
-	token, _, _ := f.Firma(12, identita.Richiedente{Ruolo: identita.Operatore, ID: 1})
+	token, _, _ := f.Firma(12, identita.Richiedente{Ruolo: identita.Operatore, ID: 1, Sessione: "s"})
 	parti := strings.Split(token, ".")
+	senzaSessione, _, _ := f.Firma(12, identita.Richiedente{Ruolo: identita.Operatore, ID: 1})
 
 	altro := NuovoFirmatario([]byte("un-altro-segreto-lungo-almeno-32-caratteri"), time.Hour)
 	altro.adesso = f.adesso
-	tokenAltro, _, _ := altro.Firma(12, identita.Richiedente{Ruolo: identita.Operatore, ID: 1})
+	tokenAltro, _, _ := altro.Firma(12, identita.Richiedente{Ruolo: identita.Operatore, ID: 1, Sessione: "s"})
 
 	corpoAmministratore := base64.RawURLEncoding.EncodeToString([]byte(`{"sub":"12","ruolo":"amministratore","id":1,"iat":0,"exp":9999999999}`))
 	senzaAlgoritmo := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
@@ -58,6 +59,7 @@ func TestTokenNonValidi(t *testing.T) {
 		"corpo cambiato":            parti[0] + "." + corpoAmministratore + "." + parti[2],
 		"algoritmo none":            senzaAlgoritmo + "." + parti[1] + ".",
 		"firma troncata":            token[:len(token)-2],
+		"senza sessione":            senzaSessione,
 	} {
 		if _, err := f.Verifica(tk); err == nil {
 			t.Errorf("%s: il token va rifiutato", nome)

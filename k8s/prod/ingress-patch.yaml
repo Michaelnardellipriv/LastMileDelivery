@@ -1,0 +1,15 @@
+# Nome vero e certificato di una CA riconosciuta. cert-manager (installato nel cluster,
+# vedi docs/deployment.md) legge l'annotazione, chiede il certificato a Let's Encrypt e
+# lo mette nel Secret lastmile-prod-tls, rinnovandolo prima che scada.
+- op: replace
+  path: /spec/rules/0/host
+  value: lastmile.veloce24.example
+- op: replace
+  path: /spec/tls/0/hosts/0
+  value: lastmile.veloce24.example
+- op: replace
+  path: /spec/tls/0/secretName
+  value: lastmile-prod-tls
+- op: add
+  path: /metadata/annotations/cert-manager.io~1cluster-issuer
+  value: letsencrypt

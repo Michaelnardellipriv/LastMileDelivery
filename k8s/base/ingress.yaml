@@ -1,0 +1,57 @@
+# Unico punto d'ingresso: stesso host per frontend e microservizi, così il browser non fa
+# richieste tra origini diverse (niente CORS) e l'app usa lo stesso indirizzo per l'API.
+#
+# I percorsi /api si dividono tra i due microservizi: risponde chi ha i dati. Sono le
+# stesse regole di server.PerSpedizioni (backend/internal/server), usate in sviluppo.
+# Le rotte /interno (chiamate tra i due servizi) non sono qui: da fuori non si vedono.
+#
+# use-regex (ingress-nginx): i percorsi sono espressioni regolari che valgono come
+# prefisso, e nginx prova prima i più lunghi: /api/sedi/1/impostazioni va alle spedizioni,
+# /api/sedi/1 agli utenti. Per questo pathType è ImplementationSpecific.
+#
+# HTTPS: il controller termina il TLS con il certificato del Secret lastmile-tls (in TEST
+# auto-firmato, vedi docs/deployment.md) e rimanda le richieste http:// a https://.
+# Dopo l'Ingress il traffico verso i Service resta HTTP, dentro il cluster.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: lastmile-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [lastmile.test]
+      secretName: lastmile-tls   # il Secret lo crea chi gestisce il cluster: chiave mai nel repository
+  rules:
+    - host: lastmile.test
+      http:
+        paths:
+          # ---- servizio spedizioni ----
+          - path: /api/sedi/[^/]+/impostazioni
+            pathType: ImplementationSpecific
+            backend: { service: { name: spedizioni-svc, port: { number: 8080 } } }
+          - path: /api/spedizioni
+            pathType: ImplementationSpecific
+            backend: { service: { name: spedizioni-svc, port: { number: 8080 } } }
+          - path: /api/corrieri/posizion      # posizione (POST) e posizioni (GET)
+            pathType: ImplementationSpecific
+            backend: { service: { name: spedizioni-svc, port: { number: 8080 } } }
+          - path: /api/impostazioni
+            pathType: ImplementationSpecific
+            backend: { service: { name: spedizioni-svc, port: { number: 8080 } } }
+          - path: /api/motivi
+            pathType: ImplementationSpecific
+            backend: { service: { name: spedizioni-svc, port: { number: 8080 } } }
+          - path: /api/indirizzi              # indirizzi di ritiro e consegna (database del gruppo)
+            pathType: ImplementationSpecific
+            backend: { service: { name: spedizioni-svc, port: { number: 8080 } } }
+          # ---- servizio utenti: login, rinnovo, utenti, clienti, corrieri, sedi ----
+          - path: /api
+            pathType: ImplementationSpecific
+            backend: { service: { name: utenti-svc, port: { number: 8080 } } }
+          # ---- frontend ----
+          - path: /
+            pathType: ImplementationSpecific
+            backend: { service: { name: frontend-svc, port: { number: 80 } } }

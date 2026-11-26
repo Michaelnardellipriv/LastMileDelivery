@@ -1,14 +1,32 @@
+# I due database per lo sviluppo in locale (stesso .env: stesse credenziali per i due).
+#   globale     -> localhost:${DB_PORT:-5432}             DATABASE_URL
+#   spedizioni  -> localhost:${DB_SPEDIZIONI_PORT:-5433}  DATABASE_SPEDIZIONI_URL
+# Qui c'è il solo gruppo 0 delle spedizioni. Un secondo gruppo di sedi (database
+# delle spedizioni del gruppo 1, DATABASE_SPEDIZIONI_URL_1) è nel docker-compose.yml
+# principale, profilo "gruppo1" (vedi README.md).
 services:
-  db:
-    build: .
-    image: spedizioni-db
-    container_name: spedizioni-db
+  db-globale:
+    build: { context: ., args: { PARTE: globale } }
+    image: lastmile-db-globale
+    container_name: lastmile-db-globale
     restart: unless-stopped
     env_file: .env
     ports:
       - "${DB_PORT:-5432}:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - dati-globale:/var/lib/postgresql/data
+
+  db-spedizioni:
+    build: { context: ., args: { PARTE: spedizioni } }
+    image: lastmile-db-spedizioni
+    container_name: lastmile-db-spedizioni
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "${DB_SPEDIZIONI_PORT:-5433}:5432"
+    volumes:
+      - dati-spedizioni:/var/lib/postgresql/data
 
 volumes:
-  pgdata:
+  dati-globale:
+  dati-spedizioni:

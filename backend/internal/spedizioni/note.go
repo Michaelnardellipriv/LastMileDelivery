@@ -11,13 +11,13 @@ import (
 )
 
 type Nota struct {
-	ID          int32
+	ID          int64
 	Testo       string
 	IsInterna   bool
 	Motivo      *string
 	CreataIl    time.Time
-	IDOperatore *int32
-	IDCorriere  *int32
+	IDOperatore *int64
+	IDCorriere  *int64
 	// nome e cognome di chi ha scritto la nota
 	NomeAutore    *string
 	CognomeAutore *string
@@ -25,7 +25,7 @@ type Nota struct {
 
 var statiNoteCorriere = []Stato{Ritirata, InConsegna}
 
-func (s *Servizio) AggiungiNota(ctx context.Context, r identita.Richiedente, id int32, testo *string) (Nota, error) {
+func (s *Servizio) AggiungiNota(ctx context.Context, r identita.Richiedente, id int64, testo *string) (Nota, error) {
 	if r.Ruolo != identita.Operatore && r.Ruolo != identita.Corriere {
 		return Nota{}, &errori.NonAutorizzato{Messaggio: "solo operatori logistici e corrieri possono scrivere note"}
 	}
@@ -34,7 +34,7 @@ func (s *Servizio) AggiungiNota(ctx context.Context, r identita.Richiedente, id 
 	if err := e.Err(); err != nil {
 		return Nota{}, err
 	}
-	return s.archivio.AggiungiNota(ctx, id, r, strings.TrimSpace(*testo), func(attuale Spedizione) error {
+	return s.archivio.AggiungiNota(ctx, r.Ambito(), id, r, strings.TrimSpace(*testo), func(attuale Spedizione) error {
 		if r.Ruolo != identita.Corriere {
 			return nil
 		}

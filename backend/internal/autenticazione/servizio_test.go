@@ -11,10 +11,37 @@ import (
 	"lastmiledelivery/backend/internal/identita"
 )
 
+// sessioniFinte: le sessioni del login, come nella tabella sessioni del database.
+type sessioniFinte struct {
+	aperte map[string]bool
+	nuove  int
+	fine   time.Time // fine delle sessioni (zero: nessun limite)
+}
+
+func (s *sessioniFinte) Apri(_ context.Context, _ int64, _ identita.Richiedente, _ string) (string, error) {
+	s.nuove++
+	id := "sessione-" + string(rune('0'+s.nuove))
+	s.aperte[id] = true
+	return id, nil
+}
+
+func (s *sessioniFinte) Valida(_ context.Context, r identita.Richiedente) (time.Time, error) {
+	if !s.aperte[r.Sessione] {
+		return time.Time{}, &errori.NonAutenticato{Messaggio: "sessione chiusa o scaduta: rifare il login"}
+	}
+	return s.fine, nil
+}
+
+func (s *sessioniFinte) Chiudi(_ context.Context, id, _ string) error {
+	s.aperte[id] = false
+	return nil
+}
+
 type archivioFinto struct {
-	destinatari map[int32]bool // clienti con almeno una spedizione in arrivo
+	tranne      string         // sessione lasciata aperta dall'ultimo cambio di password
+	destinatari map[int64]bool // clienti con almeno una spedizione in arrivo
 	account     map[string]Account
-	recuperi    map[string]int32
+	recuperi    map[string]int64
 	recenti     int
 	nuovoHash   string
 }
@@ -24,14 +51,14 @@ func (a *archivioFinto) PerEmail(_ context.Context, email string) (Account, bool
 	return acc, ok, nil
 }
 
-func (a *archivioFinto) DestinatarioDiSpedizioni(_ context.Context, idCliente int32) (bool, error) {
+func (a *archivioFinto) DestinatarioDiSpedizioni(_ context.Context, idCliente int64) (bool, error) {
 	return a.destinatari[idCliente], nil
 }
 
 func (a *archivioFinto) PerRuolo(_ context.Context, r identita.Richiedente) (Account, error) {
 	for _, acc := range a.account {
 		for _, ruolo := range acc.Ruoli {
-			if ruolo == r {
+			if ruolo.Ruolo == r.Ruolo && ruolo.ID == r.ID {
 				return acc, nil
 			}
 		}
@@ -39,7 +66,8 @@ func (a *archivioFinto) PerRuolo(_ context.Context, r identita.Richiedente) (Acc
 	return Account{}, &errori.NonAutenticato{Messaggio: "utente non riconosciuto"}
 }
 
-func (a *archivioFinto) AggiornaPassword(_ context.Context, idUtente int32, hash string) error {
+func (a *archivioFinto) AggiornaPassword(_ context.Context, idUtente int64, hash, tranne string) error {
+	a.tranne = tranne
 	for email, acc := range a.account {
 		if acc.IDUtente == idUtente {
 			acc.PwdHash = hash
@@ -49,11 +77,11 @@ func (a *archivioFinto) AggiornaPassword(_ context.Context, idUtente int32, hash
 	return nil
 }
 
-func (a *archivioFinto) RecuperiRecenti(context.Context, int32, time.Time) (int, error) {
+func (a *archivioFinto) RecuperiRecenti(context.Context, int64, time.Time) (int, error) {
 	return a.recenti, nil
 }
 
-func (a *archivioFinto) CreaRecupero(_ context.Context, idUtente int32, tokenHash string, _ time.Time) error {
+func (a *archivioFinto) CreaRecupero(_ context.Context, idUtente int64, tokenHash string, _ time.Time) error {
 	a.recuperi[tokenHash] = idUtente
 	return nil
 }
@@ -104,6 +132,8 @@ var (
 	corriere  = identita.Richiedente{Ruolo: identita.Corriere, ID: 3}
 )
 
+var sessioniDiProva *sessioniFinte
+
 func servizioDiProva(t *testing.T) (*Servizio, *archivioFinto, *postinoFinto) {
 	t.Helper()
 	hash, err := hashPassword("Password123")
@@ -119,11 +149,12 @@ func servizioDiProva(t *testing.T) (*Servizio, *archivioFinto, *postinoFinto) {
 			"disattivato@test.it":  {IDUtente: 15, Nome: "Dario", Email: "disattivato@test.it", PwdHash: hash, Ruoli: []identita.Richiedente{{Ruolo: identita.Corriere, ID: 30}}},
 			"mittente@test.it":     {IDUtente: 14, Nome: "Marco", Email: "mittente@test.it", PwdHash: hash, Attivo: true, Ruoli: []identita.Richiedente{{Ruolo: identita.Cliente, ID: 20}}},
 		},
-		destinatari: map[int32]bool{cliente.ID: true},
-		recuperi:    map[string]int32{},
+		destinatari: map[int64]bool{cliente.ID: true},
+		recuperi:    map[string]int64{},
 	}
 	postino := &postinoFinto{}
-	s := NuovoServizio(a, firmatarioDiProva(time.Now()), postino, "https://app.test/reimposta")
+	sessioniDiProva = &sessioniFinte{aperte: map[string]bool{}}
+	s := NuovoServizio(a, sessioniDiProva, firmatarioDiProva(time.Now()), postino, "https://app.test/reimposta")
 	return s, a, postino
 }
 
@@ -133,10 +164,11 @@ func TestLogin(t *testing.T) {
 
 	for email, atteso := range map[string]identita.Richiedente{"operatore@test.it": operatore, "Destinatario@Test.it": cliente} {
 		sess, err := s.Login(ctx, p(email), p("Password123"), nil)
-		if err != nil || sess.Ruolo != atteso || sess.Token == "" {
+		if err != nil || sess.Ruolo.Ruolo != atteso.Ruolo || sess.Ruolo.ID != atteso.ID || sess.Token == "" {
 			t.Fatalf("%s: login riuscito con il suo ruolo: %+v %v", email, sess, err)
 		}
-		if r, err := s.firmatario.Verifica(sess.Token); err != nil || r != atteso {
+		if r, err := s.firmatario.Verifica(sess.Token); err != nil || r.Ruolo != atteso.Ruolo || r.ID != atteso.ID ||
+			r.Sessione == "" || !sessioniDiProva.aperte[r.Sessione] {
 			t.Fatalf("%s: il token identifica l'utente: %+v %v", email, r, err)
 		}
 	}
@@ -202,7 +234,7 @@ func TestLoginConPiuRuoli(t *testing.T) {
 		t.Fatalf("con più ruoli va indicato quale: %v", err)
 	}
 	sess, err := s.Login(ctx, p("doppio@test.it"), p("Password123"), p("corriere"))
-	if err != nil || sess.Ruolo != corriere {
+	if err != nil || sess.Ruolo.Ruolo != corriere.Ruolo || sess.Ruolo.ID != corriere.ID {
 		t.Fatalf("login come corriere: %+v %v", sess, err)
 	}
 	if _, err := s.Login(ctx, p("doppio@test.it"), p("Password123"), p("amministratore")); tipoErrore(err) != "403" {
@@ -268,5 +300,77 @@ func TestRecuperoPassword(t *testing.T) {
 	a.recenti = maxRecuperiPerOra
 	if err := s.RichiediRecupero(ctx, p("operatore@test.it")); err != nil || postino.destinatario != "" {
 		t.Fatalf("troppe richieste nell'ultima ora: nessuna mail: %v %q", err, postino.destinatario)
+	}
+}
+
+// Il rinnovo dà un nuovo token, con la stessa sessione, solo se la sessione è ancora
+// aperta (anche con un token appena scaduto) e l'utente è attivo; il logout chiude la
+// sessione e da lì il token non si rinnova più.
+func TestRinnovaEdEsci(t *testing.T) {
+	ctx := context.Background()
+	s, _, _ := servizioDiProva(t)
+	login := time.Date(2026, 11, 24, 8, 0, 0, 0, time.UTC)
+	adesso := login
+	s.firmatario.adesso = func() time.Time { return adesso }
+	s.firmatario.ConDurataSessione(12 * time.Hour)
+
+	sess, err := s.Login(ctx, p("operatore@test.it"), p("Password123"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adesso = login.Add(3 * time.Hour) // il token (1 ora) è scaduto, la sessione no
+	nuovo, err := s.Rinnova(ctx, sess.Token)
+	if err != nil || nuovo.Token == "" || nuovo.Ruolo.Sessione != sess.Ruolo.Sessione {
+		t.Fatalf("token scaduto, sessione aperta: nuovo token della stessa sessione, ottenuto %+v %v", nuovo, err)
+	}
+	if r, err := s.firmatario.Verifica(nuovo.Token); err != nil || r.Sessione != sess.Ruolo.Sessione {
+		t.Fatalf("il nuovo token porta la sessione: %+v %v", r, err)
+	}
+	// un token scaduto da più della durata di una sessione non si rinnova (la fine della
+	// sessione nel database è controllata dai test di integrazione)
+	adesso = login.Add(17 * time.Hour)
+	if _, err := s.Rinnova(ctx, nuovo.Token); tipoErrore(err) != "401" {
+		t.Fatalf("token scaduto da più della durata della sessione: atteso 401, ottenuto %v", err)
+	}
+
+	// il logout accetta un token scaduto (dentro la durata della sessione) e chiude la sessione
+	adesso = login.Add(3 * time.Hour)
+	if err := s.Esci(ctx, sess.Token); err != nil {
+		t.Fatalf("logout con token scaduto: %v", err)
+	}
+	if err := s.Esci(ctx, "abc.def.ghi"); tipoErrore(err) != "401" {
+		t.Fatalf("logout con token non valido: atteso 401, ottenuto %v", err)
+	}
+	adesso = login
+	if _, err := s.Rinnova(ctx, sess.Token); tipoErrore(err) != "401" {
+		t.Fatalf("dopo il logout: atteso 401, ottenuto %v", err)
+	}
+	if _, err := s.Rinnova(ctx, "abc.def.ghi"); tipoErrore(err) != "401" {
+		t.Fatalf("token non valido: atteso 401, ottenuto %v", err)
+	}
+
+	// utente disattivato con una sessione ancora aperta: 403
+	disattivato := identita.Richiedente{Ruolo: identita.Corriere, ID: 30, Sessione: "aperta"}
+	sessioniDiProva.aperte["aperta"] = true
+	tok, _, _ := s.firmatario.Firma(15, disattivato)
+	if _, err := s.Rinnova(ctx, tok); tipoErrore(err) != "403" {
+		t.Fatalf("utente disattivato: atteso 403, ottenuto %v", err)
+	}
+}
+
+// Cambiando la password, l'utente chiude le altre sue sessioni (un token rubato smette di
+// valere) ma resta dentro con quella da cui l'ha cambiata.
+func TestCambioPasswordChiudeLeAltreSessioni(t *testing.T) {
+	ctx := context.Background()
+	s, archivio, _ := servizioDiProva(t)
+	sess, err := s.Login(ctx, p("operatore@test.it"), p("Password123"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CambiaPassword(ctx, sess.Ruolo, p("Password123"), p("PasswordNuova9")); err != nil {
+		t.Fatal(err)
+	}
+	if archivio.tranne != sess.Ruolo.Sessione {
+		t.Fatalf("resta aperta solo la sessione da cui si cambia la password: %q", archivio.tranne)
 	}
 }

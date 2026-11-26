@@ -9,28 +9,28 @@ import (
 
 type richiestaCrea struct {
 	CodOrdine             *string `json:"cod_ordine"`
-	IDClienteMittente     *int32  `json:"id_cliente_mittente"`
-	IDClienteDestinatario *int32  `json:"id_cliente_destinatario"`
-	IDIndirizzoRitiro     *int32  `json:"id_indirizzo_ritiro"`
-	IDIndirizzoSpedizione *int32  `json:"id_indirizzo_spedizione"`
+	IDClienteMittente     *int64  `json:"id_cliente_mittente"`
+	IDClienteDestinatario *int64  `json:"id_cliente_destinatario"`
+	IDIndirizzoRitiro     *int64  `json:"id_indirizzo_ritiro"`
+	IDIndirizzoSpedizione *int64  `json:"id_indirizzo_spedizione"`
 	DataoraRichiesta      *string `json:"dataora_richiesta_spedizione"`
 	// decisa dal sistema: se arriva viene rifiutata con un messaggio chiaro
 	RitirataIl any    `json:"ritirata_il"`
-	IDCorriere *int32 `json:"id_corriere"`
+	IDCorriere *int64 `json:"id_corriere"`
 }
 
 type richiestaModifica struct {
 	IsReso                *bool   `json:"is_reso"`
-	IDClienteMittente     *int32  `json:"id_cliente_mittente"`
-	IDClienteDestinatario *int32  `json:"id_cliente_destinatario"`
-	IDIndirizzoRitiro     *int32  `json:"id_indirizzo_ritiro"`
-	IDIndirizzoSpedizione *int32  `json:"id_indirizzo_spedizione"`
+	IDClienteMittente     *int64  `json:"id_cliente_mittente"`
+	IDClienteDestinatario *int64  `json:"id_cliente_destinatario"`
+	IDIndirizzoRitiro     *int64  `json:"id_indirizzo_ritiro"`
+	IDIndirizzoSpedizione *int64  `json:"id_indirizzo_spedizione"`
 	DataoraRichiesta      *string `json:"dataora_richiesta_spedizione"`
 	RitirataIl            any     `json:"ritirata_il"`
 }
 
 type richiestaAssegnazione struct {
-	IDCorriere *int32 `json:"id_corriere"`
+	IDCorriere *int64 `json:"id_corriere"`
 }
 
 type richiestaTentativo struct {
@@ -50,18 +50,19 @@ type richiestaStato struct {
 }
 
 type spedizioneDTO struct {
-	ID                       int32      `json:"id"`
+	ID                       int64      `json:"id"`
+	IDSede                   int64      `json:"id_sede"`
 	CodOrdine                string     `json:"cod_ordine"`
 	Stato                    string     `json:"stato"`
 	IsReso                   bool       `json:"is_reso"`
 	CreataIl                 time.Time  `json:"creata_il"`
 	DataoraRichiesta         time.Time  `json:"dataora_richiesta_spedizione"`
 	RitirataIl               *time.Time `json:"ritirata_il"`
-	IDClienteMittente        int32      `json:"id_cliente_mittente"`
-	IDClienteDestinatario    int32      `json:"id_cliente_destinatario"`
-	IDIndirizzoRitiro        int32      `json:"id_indirizzo_ritiro"`
-	IDIndirizzoSpedizione    int32      `json:"id_indirizzo_spedizione"`
-	IDCorriere               *int32     `json:"id_corriere"`
+	IDClienteMittente        int64      `json:"id_cliente_mittente"`
+	IDClienteDestinatario    int64      `json:"id_cliente_destinatario"`
+	IDIndirizzoRitiro        int64      `json:"id_indirizzo_ritiro"`
+	IDIndirizzoSpedizione    int64      `json:"id_indirizzo_spedizione"`
+	IDCorriere               *int64     `json:"id_corriere"`
 	AnnullataIl              *time.Time `json:"annullata_il"`
 	TentativiRitiroFalliti   int        `json:"tentativi_ritiro_falliti"`
 	TentativiConsegnaFalliti int        `json:"tentativi_consegna_falliti"`
@@ -91,7 +92,7 @@ func leggiData(e *errori.Validazione, campo, v string) (time.Time, bool) {
 
 func versoDTO(s Spedizione) spedizioneDTO {
 	d := spedizioneDTO{
-		ID: s.ID, CodOrdine: s.CodOrdine, Stato: s.Stato.String(), IsReso: s.IsReso,
+		ID: s.ID, IDSede: s.IDSede, CodOrdine: s.CodOrdine, Stato: s.Stato.String(), IsReso: s.IsReso,
 		CreataIl: s.CreataIl.UTC(), DataoraRichiesta: s.DataoraRichiesta.UTC(),
 		IDClienteMittente: s.IDClienteMittente, IDClienteDestinatario: s.IDClienteDestinatario,
 		IDIndirizzoRitiro: s.IDIndirizzoRitiro, IDIndirizzoSpedizione: s.IDIndirizzoSpedizione,
@@ -112,7 +113,7 @@ func (req richiestaCrea) versoDominio() (NuovaSpedizione, *errori.Validazione) {
 	} else {
 		n.CodOrdine = *req.CodOrdine
 	}
-	intero := func(campo string, p *int32, dest *int32) {
+	intero := func(campo string, p *int64, dest *int64) {
 		if p == nil {
 			e.Aggiungi(campo, "obbligatorio")
 			return
@@ -162,7 +163,7 @@ type indirizzoDTO struct {
 }
 
 type personaDTO struct {
-	ID       *int32  `json:"id,omitempty"`
+	ID       *int64  `json:"id,omitempty"`
 	Nome     string  `json:"nome"`
 	Cognome  string  `json:"cognome"`
 	Email    *string `json:"email,omitempty"`
@@ -183,7 +184,7 @@ func versoIndirizzoDTO(i Indirizzo) indirizzoDTO {
 }
 
 type notaDTO struct {
-	ID        int32      `json:"id"`
+	ID        int64      `json:"id"`
 	Nota      string     `json:"nota,omitempty"`
 	IsInterna bool       `json:"is_interna"`
 	Motivo    *string    `json:"motivo"`
@@ -201,20 +202,22 @@ func versoNotaDTO(n Nota) notaDTO {
 }
 
 type voceElencoDTO struct {
-	ID                    int32        `json:"id"`
+	ID                    int64        `json:"id"`
+	IDSede                int64        `json:"id_sede"`
+	Sede                  string       `json:"sede"`
 	CodOrdine             string       `json:"cod_ordine"`
 	Stato                 string       `json:"stato"`
 	IsReso                bool         `json:"is_reso"`
 	CreataIl              time.Time    `json:"creata_il"`
 	DataoraRichiesta      time.Time    `json:"dataora_richiesta_spedizione"`
 	RitirataIl            *time.Time   `json:"ritirata_il"`
-	IDClienteMittente     *int32       `json:"id_cliente_mittente,omitempty"`
-	IDClienteDestinatario int32        `json:"id_cliente_destinatario"`
+	IDClienteMittente     *int64       `json:"id_cliente_mittente,omitempty"`
+	IDClienteDestinatario int64        `json:"id_cliente_destinatario"`
 	IndirizzoRitiro       indirizzoDTO `json:"indirizzo_ritiro"`
 	IndirizzoSpedizione   indirizzoDTO `json:"indirizzo_spedizione"`
 	Mittente              *personaDTO  `json:"mittente,omitempty"`
 	Destinatario          personaDTO   `json:"destinatario"`
-	IDCorriere            *int32       `json:"id_corriere,omitempty"`
+	IDCorriere            *int64       `json:"id_corriere,omitempty"`
 	Corriere              *personaDTO  `json:"corriere,omitempty"`
 	AssegnataDa           *personaDTO  `json:"assegnata_da,omitempty"`
 	ConclusaIl            *time.Time   `json:"conclusa_il"`
@@ -252,7 +255,7 @@ func versoVoceDTO(v VoceElenco) voceElencoDTO {
 		note[j] = versoNotaDTO(n)
 	}
 	var corriere, mittente, assegnante *personaDTO
-	var idMittente *int32
+	var idMittente *int64
 	if v.Corriere != nil {
 		c := versoPersonaDTO(*v.Corriere)
 		corriere = &c
@@ -266,7 +269,7 @@ func versoVoceDTO(v VoceElenco) voceElencoDTO {
 		mittente, idMittente = &m, m.ID
 	}
 	return voceElencoDTO{
-		ID: v.ID, CodOrdine: v.CodOrdine, Stato: v.Stato.String(), IsReso: v.IsReso,
+		ID: v.ID, IDSede: v.IDSede, Sede: v.NomeSede, CodOrdine: v.CodOrdine, Stato: v.Stato.String(), IsReso: v.IsReso,
 		CreataIl: v.CreataIl.UTC(), DataoraRichiesta: v.DataoraRichiesta.UTC(), RitirataIl: inUTC(v.RitirataIl),
 		IDClienteMittente: idMittente, IDClienteDestinatario: v.IDClienteDestinatario,
 		IndirizzoRitiro:     versoIndirizzoDTO(v.IndirizzoRitiro),
@@ -307,13 +310,13 @@ func inUTC(t *time.Time) *time.Time {
 
 type autoreDTO struct {
 	Ruolo   string  `json:"ruolo"`
-	ID      int32   `json:"id"`
+	ID      int64   `json:"id"`
 	Nome    *string `json:"nome,omitempty"`
 	Cognome *string `json:"cognome,omitempty"`
 }
 
 type voceStoricoDTO struct {
-	ID            int32          `json:"id"`
+	ID            int64          `json:"id"`
 	Operazione    string         `json:"operazione"`
 	ValoreVecchio map[string]any `json:"valore_vecchio"`
 	ValoreNuovo   map[string]any `json:"valore_nuovo"`
@@ -325,7 +328,7 @@ type rispostaStorico struct {
 	Dati []voceStoricoDTO `json:"dati"`
 }
 
-func autoreDa(idOperatore, idCorriere *int32) *autoreDTO {
+func autoreDa(idOperatore, idCorriere *int64) *autoreDTO {
 	switch {
 	case idOperatore != nil:
 		return &autoreDTO{Ruolo: string(identita.Operatore), ID: *idOperatore}

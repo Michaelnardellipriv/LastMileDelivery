@@ -10,6 +10,7 @@ import (
 	"lastmiledelivery/backend/internal/autenticazione"
 	"lastmiledelivery/backend/internal/errori"
 	"lastmiledelivery/backend/internal/identita"
+	"lastmiledelivery/backend/internal/indirizzo"
 )
 
 const (
@@ -24,16 +25,11 @@ var (
 	formatoEmail    = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
 
 	// indirizzi
-	contieneLettera  = regexp.MustCompile(`\p{L}`)
-	formatoCivico    = regexp.MustCompile(`^(?i:snc|[0-9]{1,5}(?: ?[/-]? ?[a-z0-9]{1,3})?)$`)
-	formatoLuogo     = regexp.MustCompile(`^\p{L}[\p{L} '’.-]*$`)
-	formatoCAPItalia = regexp.MustCompile(`^[0-9]{5}$`)
-	formatoCAPEstero = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9 -]{1,8})[A-Za-z0-9]$`)
 )
 
 type Cliente struct {
-	ID         int32
-	IDUtente   int32
+	ID         int64
+	IDUtente   int64
 	Nome       string
 	Cognome    string
 	Email      string
@@ -59,8 +55,9 @@ type EsitoCliente struct {
 }
 
 type Corriere struct {
-	ID         int32
-	IDUtente   int32
+	ID         int64
+	IDUtente   int64
+	IDSede     int64
 	Nome       string
 	Cognome    string
 	Email      string
@@ -69,7 +66,8 @@ type Corriere struct {
 }
 
 type Indirizzo struct {
-	ID      int32
+	ID      int64
+	IDCitta int64
 	Via     string
 	Civico  string
 	Citta   string
@@ -91,21 +89,26 @@ type Ricerca struct {
 	Testo     string
 	Pagina    int
 	PerPagina int
+	// IDSede limita la ricerca a una sede (corrieri, utenti, indirizzi della sua città)
+	IDSede *int64
 }
 
 type archivio interface {
 	CercaClienti(ctx context.Context, r Ricerca) ([]Cliente, int, error)
 	// EmailUsata dice se l'email è già di un utente diverso da escludi (0 = nessuno escluso).
-	EmailUsata(ctx context.Context, email string, escludi int32) (bool, error)
+	EmailUsata(ctx context.Context, email string, escludi int64) (bool, error)
 	CreaCliente(ctx context.Context, c Cliente, pwdHash string) (Cliente, error)
 	CercaCorrieri(ctx context.Context, r Ricerca) ([]Corriere, int, error)
-	CercaIndirizzi(ctx context.Context, r Ricerca) ([]Indirizzo, int, error)
-	TrovaOCreaIndirizzo(ctx context.Context, i Indirizzo) (Indirizzo, bool, error)
 	CercaUtenti(ctx context.Context, r RicercaUtenti) ([]Utente, int, error)
-	CreaUtente(ctx context.Context, ruolo identita.Ruolo, c Cliente, pwdHash string) (Utente, error)
+	CreaUtente(ctx context.Context, ruolo identita.Ruolo, idSede int64, c Cliente, pwdHash string) (Utente, error)
 	// UtentePerID: corriere, operatore o cliente; NonTrovato per gli altri (amministratori).
-	UtentePerID(ctx context.Context, idUtente int32) (Utente, error)
-	ModificaUtente(ctx context.Context, idUtente int32, d DatiUtente) (Utente, error)
+	UtentePerID(ctx context.Context, idUtente int64) (Utente, error)
+	ModificaUtente(ctx context.Context, idUtente int64, d DatiUtente) (Utente, error)
+	CercaSedi(ctx context.Context, r RicercaSedi) ([]Sede, int, error)
+	Sede(ctx context.Context, id int64) (Sede, error)
+	// CreaSede: gruppo è il database delle spedizioni della sede (deve averne uno)
+	CreaSede(ctx context.Context, nome string, i Indirizzo, gruppo int) (Sede, error)
+	ModificaSede(ctx context.Context, id int64, d DatiSede) (Sede, error)
 }
 
 type Servizio struct {
@@ -235,6 +238,8 @@ var errEmailUsata = &errori.Conflitto{
 }
 
 // CercaCorrieri restituisce i corrieri della pagina richiesta e quanti sono in tutto.
+// L'operatore vede solo i corrieri della sua sede (gli unici a cui può assegnare);
+// l'amministratore tutti, con il filtro per sede facoltativo.
 func (s *Servizio) CercaCorrieri(ctx context.Context, r identita.Richiedente, ric Ricerca) ([]Corriere, int, error) {
 	if r.Ruolo != identita.Operatore && r.Ruolo != identita.Amministratore {
 		return nil, 0, &errori.NonAutorizzato{Messaggio: "l'elenco dei corrieri è consultabile solo da operatori e amministratori"}
@@ -242,7 +247,28 @@ func (s *Servizio) CercaCorrieri(ctx context.Context, r identita.Richiedente, ri
 	if err := validaRicerca(ric); err != nil {
 		return nil, 0, err
 	}
+	ric, err := limitaAllaSede(r, ric)
+	if err != nil {
+		return nil, 0, err
+	}
 	return s.archivio.CercaCorrieri(ctx, ric)
+}
+
+// limitaAllaSede: operatori e corrieri cercano solo nella propria sede; l'amministratore
+// può filtrare su qualunque sede o vederle tutte.
+func limitaAllaSede(r identita.Richiedente, ric Ricerca) (Ricerca, error) {
+	if r.Ruolo == identita.Amministratore {
+		if ric.IDSede != nil && *ric.IDSede <= 0 {
+			return ric, &errori.Validazione{Dettagli: []errori.ErroreCampo{{Campo: "id_sede", Messaggio: "deve essere un id positivo"}}}
+		}
+		return ric, nil
+	}
+	if ric.IDSede != nil && *ric.IDSede != r.IDSede {
+		return ric, &errori.NonAutorizzato{Messaggio: "il filtro per sede è per gli amministratori: si vede solo la propria sede"}
+	}
+	sede := r.IDSede
+	ric.IDSede = &sede
+	return ric, nil
 }
 
 func (s *Servizio) inviaCredenziali(ctx context.Context, nome, email, password, presentazione string) bool {
@@ -252,66 +278,18 @@ func (s *Servizio) inviaCredenziali(ctx context.Context, nome, email, password, 
 		"Password: " + password + "\n\n" +
 		"Ti consigliamo di cambiare la password dopo il primo accesso.\n"
 	if err := s.postino.Invia(ctx, email, oggettoMailAccount, testo); err != nil {
-		log.Printf("nuovo account %s: invio della mail con le credenziali fallito: %v", email, err)
+		// nel log niente email (dato personale) né password
+		log.Printf("nuovo account: invio della mail con le credenziali fallito: %v", err)
 		return false
 	}
 	return true
 }
 
-// CercaIndirizzi restituisce gli indirizzi della pagina richiesta e quanti sono in tutto.
-func (s *Servizio) CercaIndirizzi(ctx context.Context, r identita.Richiedente, ric Ricerca) ([]Indirizzo, int, error) {
-	if err := puoConsultare(r); err != nil {
-		return nil, 0, err
-	}
-	if err := validaRicerca(ric); err != nil {
-		return nil, 0, err
-	}
-	return s.archivio.CercaIndirizzi(ctx, ric)
-}
-
-func (s *Servizio) TrovaOCreaIndirizzo(ctx context.Context, r identita.Richiedente, n NuovoIndirizzo) (Indirizzo, bool, error) {
-	if err := soloOperatore(r, "inserire un indirizzo"); err != nil {
-		return Indirizzo{}, false, err
-	}
-	e := &errori.Validazione{}
-	i := Indirizzo{
-		Via:     testo(e, "via", n.Via, 150),
-		Civico:  testo(e, "civico", n.Civico, 10),
-		Citta:   testo(e, "citta", n.Citta, 100),
-		CAP:     testo(e, "cap", n.CAP, 10),
-		Regione: testo(e, "regione", n.Regione, 100),
-		Nazione: testo(e, "nazione", n.Nazione, 100),
-	}
-	controllaIndirizzo(e, i)
-	if err := e.Err(); err != nil {
-		return Indirizzo{}, false, err
-	}
-	return s.archivio.TrovaOCreaIndirizzo(ctx, i)
-}
-
-// controllaIndirizzo verifica il formato dei campi già presenti (quelli mancanti
-// li ha già segnalati testo come obbligatori).
-func controllaIndirizzo(e *errori.Validazione, i Indirizzo) {
-	if i.Via != "" && !contieneLettera.MatchString(i.Via) {
-		e.Aggiungi("via", "deve contenere il nome della via, non solo numeri o simboli")
-	}
-	if i.Civico != "" && !formatoCivico.MatchString(i.Civico) {
-		e.Aggiungi("civico", "formato non valido: numero con eventuale lettera o barra, es. 12, 12A, 12/B, oppure SNC")
-	}
-	for _, c := range []struct{ campo, valore string }{
-		{"citta", i.Citta}, {"regione", i.Regione}, {"nazione", i.Nazione},
-	} {
-		if c.valore != "" && !formatoLuogo.MatchString(c.valore) {
-			e.Aggiungi(c.campo, "solo lettere, spazi, apostrofi, punti e trattini")
-		}
-	}
-	switch {
-	case i.CAP == "":
-	case strings.EqualFold(i.Nazione, "Italia"):
-		if !formatoCAPItalia.MatchString(i.CAP) {
-			e.Aggiungi("cap", "in Italia il CAP è di 5 cifre, es. 38121")
-		}
-	case !formatoCAPEstero.MatchString(i.CAP):
-		e.Aggiungi("cap", "formato non valido: da 3 a 10 tra lettere, cifre, spazi e trattini")
-	}
+// validaIndirizzo controlla i campi dell'indirizzo di una sede; prefisso precede il nome
+// dei campi negli errori (es. "indirizzo."). Le regole sono in internal/indirizzo, comuni
+// con gli indirizzi delle spedizioni.
+func validaIndirizzo(e *errori.Validazione, prefisso string, n NuovoIndirizzo) Indirizzo {
+	d := indirizzo.Valida(e, prefisso, indirizzo.Nuovo{Via: n.Via, Civico: n.Civico, Citta: n.Citta, CAP: n.CAP,
+		Regione: n.Regione, Nazione: n.Nazione})
+	return Indirizzo{Via: d.Via, Civico: d.Civico, Citta: d.Citta, CAP: d.CAP, Regione: d.Regione, Nazione: d.Nazione}
 }

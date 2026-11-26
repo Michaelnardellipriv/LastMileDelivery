@@ -1,11 +1,13 @@
 // Area amministratori (pagina web), aperta dopo il login unico di area_riservata.dart:
-// tutte le spedizioni con dettaglio e storico in sola lettura, gestione di corrieri e
-// operatori, configurazione (parametri e motivi).
+// le spedizioni di una sede alla volta (la sede si sceglie sempre) con dettaglio e
+// storico in sola lettura, gestione di utenti e sedi, configurazione (parametri di ogni sede e
+// motivi).
 import 'package:flutter/material.dart';
 
 import '../comune/spedizioni.dart';
 import 'api.dart';
 import 'configurazione.dart';
+import 'sedi.dart';
 import 'spedizioni.dart';
 import 'utenti.dart';
 
@@ -23,17 +25,26 @@ class HomeAmministratore extends StatefulWidget {
 class _HomeAmministratoreState extends State<HomeAmministratore> {
   int _sezione = 0;
 
+  /// Cresce a ogni modifica delle sedi: spedizioni, utenti e configurazione rileggono l'elenco.
+  int _versioneSedi = 0;
+
   @override
   Widget build(BuildContext context) {
     final api = widget.api;
     final pagine = [
-      SpedizioniPage(api: api, dettaglio: (id, _) => DettaglioSolaLettura(api: api, id: id)),
-      UtentiPage(api: api),
-      ConfigurazionePage(api: api),
+      SpedizioniPage(
+          api: api,
+          filtroSede: true,
+          versioneSedi: _versioneSedi,
+          dettaglio: (id, _) => DettaglioSolaLettura(api: api, id: id)),
+      UtentiPage(api: api, versioneSedi: _versioneSedi),
+      SediPage(api: api, alCambio: () => setState(() => _versioneSedi++)),
+      ConfigurazionePage(api: api, versioneSedi: _versioneSedi),
     ];
     const voci = [
       (Icons.local_shipping_outlined, 'Spedizioni'),
       (Icons.manage_accounts_outlined, 'Utenti'),
+      (Icons.store_mall_directory_outlined, 'Sedi'),
       (Icons.tune, 'Configurazione'),
     ];
     final largo = MediaQuery.sizeOf(context).width >= 900;

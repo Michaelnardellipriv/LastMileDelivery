@@ -3,9 +3,11 @@
 package apitest
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -18,13 +20,8 @@ func telefonoUnico() string {
 func TestCreazioneSpedizioneDaGUI(t *testing.T) {
 	f := preparaFixture(t)
 	op, admin, c1, dest := comeOperatore(f), comeAmministratore(f), comeCorriere(f.idCorriere1), comeCliente(f.idDestinatario)
-	// nazione unica per ogni esecuzione, ma solo lettere (il backend rifiuta le cifre nei nomi dei luoghi)
-	nazione := "Italia " + strings.Map(func(r rune) rune {
-		if r >= '0' && r <= '9' {
-			return 'g' + (r - '0')
-		}
-		return r
-	}, f.suffisso)
+	// gli indirizzi stanno nella città della sede dell'operatore (Trento, nella nazione della fixture)
+	nazione := f.nazione
 
 	nuovoCliente := func(email string, password any) map[string]any {
 		c := map[string]any{"nome": "Giulia", "cognome": "Nuova", "prefisso": "+39", "nr_telefono": telefonoUnico(), "email": email}
@@ -34,7 +31,7 @@ func TestCreazioneSpedizioneDaGUI(t *testing.T) {
 		return c
 	}
 	nuovoIndirizzo := func(via, civico, citta, cap string) map[string]any {
-		return map[string]any{"via": via, "civico": civico, "citta": citta, "cap": cap, "regione": "Lombardia", "nazione": nazione}
+		return map[string]any{"via": via, "civico": civico, "citta": citta, "cap": cap, "regione": "Regione", "nazione": nazione}
 	}
 
 	var idMittente, idDestinatario, idRitiro, idConsegna int
@@ -67,12 +64,12 @@ func TestCreazioneSpedizioneDaGUI(t *testing.T) {
 
 	t.Run("email_unica_tra_i_ruoli", func(t *testing.T) {
 		email := "corriere.gui." + f.suffisso + "@test.it"
-		var idUtente int32
+		var idUtente int64
 		if err := f.db.QueryRow(t.Context(), `INSERT INTO utenti (nome, cognome, prefisso, nr_telefono, email, pwd_hash)
 			VALUES ('Corriere', 'Gui', '+39', $1, $2, '!') RETURNING id`, telefonoUnico(), email).Scan(&idUtente); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := f.db.Exec(t.Context(), `INSERT INTO corrieri (id_utente) VALUES ($1)`, idUtente); err != nil {
+		if _, err := f.db.Exec(t.Context(), `INSERT INTO corrieri (id_utente, id_sede) VALUES ($1, $2)`, idUtente, f.idSede); err != nil {
 			t.Fatal(err)
 		}
 		f.impostaPassword(t, email, "PasswordCorriere2")
@@ -103,7 +100,7 @@ func TestCreazioneSpedizioneDaGUI(t *testing.T) {
 			if r := f.chiama(t, http.MethodPost, "/api/clienti", nuovoCliente("x."+f.suffisso+"@test.it", "PasswordProva1"), chi); r.stato != 403 {
 				t.Errorf("solo l'operatore crea clienti: ottenuto %d", r.stato)
 			}
-			if r := f.chiama(t, http.MethodPost, "/api/indirizzi", nuovoIndirizzo("Via X", "1", "Milano", "20100"), chi); r.stato != 403 {
+			if r := f.chiama(t, http.MethodPost, "/api/indirizzi", nuovoIndirizzo("Via X", "1", "Trento", "38100"), chi); r.stato != 403 {
 				t.Errorf("solo l'operatore inserisce indirizzi: ottenuto %d", r.stato)
 			}
 		}
@@ -118,26 +115,42 @@ func TestCreazioneSpedizioneDaGUI(t *testing.T) {
 	})
 
 	t.Run("indirizzi_trova_o_crea", func(t *testing.T) {
-		r := f.chiama(t, http.MethodPost, "/api/indirizzi", nuovoIndirizzo("Via Dante", "7", "Milano", "20121"), op)
+		// un indirizzo fuori dalla città della sede non serve: ritiro e consegna restano in città
+		if r := f.chiama(t, http.MethodPost, "/api/indirizzi", nuovoIndirizzo("Via Dante", "7", "Milano", "20121"), op); r.stato != 400 ||
+			!contiene(campiInErrore(r), "citta") {
+			t.Fatalf("indirizzo a Milano per una sede di Trento: atteso 400 su citta, ottenuto %d %s", r.stato, r.grezzo)
+		}
+		r := f.chiama(t, http.MethodPost, "/api/indirizzi", nuovoIndirizzo("Via Dante", "7", "Trento", "38122"), op)
 		if r.stato != http.StatusCreated {
 			t.Fatalf("nuovo indirizzo: atteso 201, ottenuto %d %s", r.stato, r.grezzo)
 		}
 		idRitiro = int(r.corpo["id"].(float64))
-		if r.corpo["citta"] != "Milano" || r.corpo["regione"] != "Lombardia" || r.corpo["nazione"] != nazione {
+		if r.corpo["citta"] != "Trento" || r.corpo["regione"] != "Regione" || r.corpo["nazione"] != nazione {
 			t.Fatalf("indirizzo completo: %s", r.grezzo)
 		}
-		r = f.chiama(t, http.MethodPost, "/api/indirizzi", nuovoIndirizzo(" via dante ", "7", "milano", "20121"), op)
+		r = f.chiama(t, http.MethodPost, "/api/indirizzi", nuovoIndirizzo(" via dante ", "7", "trento", "38122"), op)
 		if r.stato != http.StatusOK || int(r.corpo["id"].(float64)) != idRitiro || r.corpo["via"] != "Via Dante" {
 			t.Fatalf("stesso indirizzo scritto diversamente: atteso 200 con lo stesso id, ottenuto %d %s", r.stato, r.grezzo)
 		}
-		r = f.chiama(t, http.MethodPost, "/api/indirizzi", nuovoIndirizzo("Corso Como", "2", "Milano", "20121"), op)
+		r = f.chiama(t, http.MethodPost, "/api/indirizzi", nuovoIndirizzo("Corso Como", "2", "Trento", "38122"), op)
 		if r.stato != http.StatusCreated {
 			t.Fatalf("secondo indirizzo nella stessa città: %d %s", r.stato, r.grezzo)
 		}
 		idConsegna = int(r.corpo["id"].(float64))
 		if n := f.conta(t, `SELECT count(*) FROM citta c JOIN regioni r ON r.id = c.id_regione JOIN nazioni n ON n.id = r.id_nazione
-			WHERE n.nome = $1`, nazione); n != 1 {
+			WHERE n.nome = $1 AND c.nome = 'Trento'`, nazione); n != 1 {
 			t.Errorf("città, regione e nazione non vanno duplicate: trovate %d città", n)
+		}
+		// gli indirizzi di ritiro e consegna stanno nel database delle spedizioni (gruppo
+		// della sede), con la sede; nel database globale restano solo quelli delle sedi
+		var idSedeIndirizzo int64
+		if err := f.sped.QueryRow(context.Background(), `SELECT id_sede FROM indirizzi WHERE id = $1`, idRitiro).Scan(&idSedeIndirizzo); err != nil ||
+			idSedeIndirizzo != f.idSede {
+			t.Errorf("l'indirizzo è nel database delle spedizioni, della sede dell'operatore: %d %v", idSedeIndirizzo, err)
+		}
+		if n := f.conta(t, `SELECT count(*) FROM indirizzi WHERE lower(via) = 'via dante' AND civico = '7' AND id_citta IN
+			(SELECT c.id FROM citta c JOIN regioni r ON r.id = c.id_regione JOIN nazioni n ON n.id = r.id_nazione WHERE n.nome = $1)`, nazione); n != 0 {
+			t.Errorf("nel database globale non si crea più: %d", n)
 		}
 	})
 
@@ -148,7 +161,15 @@ func TestCreazioneSpedizioneDaGUI(t *testing.T) {
 			if r.stato != 200 || len(dati) != 1 || int(dati[0].(map[string]any)["id"].(float64)) != idDestinatario {
 				t.Errorf("ricerca cliente per email: %d %s", r.stato, r.grezzo)
 			}
-			r = f.chiama(t, http.MethodGet, "/api/indirizzi?q="+url.QueryEscape("dante"), nil, chi)
+			percorso := "/api/indirizzi?q=" + url.QueryEscape("dante")
+			if fmt.Sprint(chi) == fmt.Sprint(admin) {
+				// l'amministratore sceglie sempre la sede (gli indirizzi sono nel suo database)
+				if r := f.chiama(t, http.MethodGet, percorso, nil, chi); r.stato != 400 || !contiene(campiInErrore(r), "id_sede") {
+					t.Errorf("amministratore senza sede: atteso 400 su id_sede, ottenuto %d %s", r.stato, r.grezzo)
+				}
+				percorso += "&id_sede=" + strconv.FormatInt(f.idSede, 10)
+			}
+			r = f.chiama(t, http.MethodGet, percorso, nil, chi)
 			trovato := false
 			for _, d := range r.corpo["dati"].([]any) {
 				if int(d.(map[string]any)["id"].(float64)) == idRitiro {
@@ -169,7 +190,7 @@ func TestCreazioneSpedizioneDaGUI(t *testing.T) {
 				t.Fatalf("ricerca corriere per email: %d %s", r.stato, r.grezzo)
 			}
 			c := dati[0].(map[string]any)
-			if int32(c["id"].(float64)) != f.idCorriere1 || c["nome"] != "corriere1" || c["email"] != f.emailDi("corriere1") || c["nr_telefono"] == nil {
+			if int64(c["id"].(float64)) != f.idCorriere1 || c["nome"] != "corriere1" || c["email"] != f.emailDi("corriere1") || c["nr_telefono"] == nil {
 				t.Errorf("dati del corriere: %v", c)
 			}
 			r = f.chiama(t, http.MethodGet, "/api/corrieri?per_pagina=100", nil, chi)
@@ -197,7 +218,7 @@ func TestCreazioneSpedizioneDaGUI(t *testing.T) {
 		}
 		d := f.dettaglio(t, int(r.corpo["id"].(float64)), op, 200).corpo
 		ritiro := d["indirizzo_ritiro"].(map[string]any)
-		if ritiro["via"] != "Via Dante" || ritiro["citta"] != "Milano" || ritiro["nazione"] != nazione ||
+		if ritiro["via"] != "Via Dante" || ritiro["citta"] != "Trento" || ritiro["nazione"] != nazione ||
 			int(d["destinatario"].(map[string]any)["id"].(float64)) != idDestinatario ||
 			int(d["mittente"].(map[string]any)["id"].(float64)) != idMittente {
 			t.Fatalf("il dettaglio mostra i dati inseriti: %v", d)
@@ -212,7 +233,7 @@ func TestCreazioneSpedizioneDaGUI(t *testing.T) {
 		corpo["id_indirizzo_ritiro"], corpo["id_indirizzo_spedizione"] = idRitiro, idConsegna
 		corpo["id_corriere"] = f.idCorriere2
 		r := f.chiama(t, http.MethodPost, "/api/spedizioni", corpo, op)
-		if r.stato != http.StatusCreated || r.corpo["stato"] != "assegnata" || int32(r.corpo["id_corriere"].(float64)) != f.idCorriere2 {
+		if r.stato != http.StatusCreated || r.corpo["stato"] != "assegnata" || int64(r.corpo["id_corriere"].(float64)) != f.idCorriere2 {
 			t.Fatalf("con id_corriere la spedizione nasce assegnata: %d %s", r.stato, r.grezzo)
 		}
 		id := int(r.corpo["id"].(float64))

@@ -2,47 +2,79 @@ package idempotenza
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
-	"sync"
 	"time"
 
 	"lastmiledelivery/backend/internal/httpx"
 	"lastmiledelivery/backend/internal/identita"
 )
 
-const durataChiave = 24 * time.Hour
+const (
+	// per quanto tempo una risposta resta ripetibile con la stessa chiave
+	durataChiave = 24 * time.Hour
+	// una richiesta "in corso" più vecchia di così è stata abbandonata (replica caduta,
+	// panic...): la chiave si può riusare. Il server chiude comunque le richieste dopo 15s.
+	durataInCorso = time.Minute
+	ogniPulizia   = 10 * time.Minute
+)
+
+// Esito della prenotazione di una chiave.
+type Esito int
+
+const (
+	// Nuova: la chiave non era mai stata usata, la richiesta va eseguita
+	Nuova Esito = iota
+	// InCorso: un'altra richiesta con la stessa chiave non è ancora finita
+	InCorso
+	// CorpoDiverso: la chiave è già stata usata con dati diversi
+	CorpoDiverso
+	// Completata: la richiesta è già stata eseguita, c'è la sua risposta
+	Completata
+)
+
+type Risposta struct {
+	Stato  int
+	Header http.Header
+	Corpo  []byte
+}
+
+// archivio salva le chiavi nel database: così una richiesta ripetuta trova la risposta
+// anche se il bilanciatore la manda a un'altra replica o dopo un riavvio.
+type archivio interface {
+	Prenota(ctx context.Context, chiave string, hashCorpo []byte, durata, durataInCorso time.Duration) (Esito, Risposta, error)
+	Completa(ctx context.Context, chiave string, r Risposta) error
+	Libera(ctx context.Context, chiave string) error
+	Pulisci(ctx context.Context, durata time.Duration) (int64, error)
+}
 
 type Registro struct {
-	mu   sync.Mutex
-	voci map[string]*voce
+	archivio archivio
 }
 
-type voce struct {
-	hashCorpo [32]byte
-	inCorso   bool
-	creata    time.Time
-	stato     int
-	header    http.Header
-	corpo     []byte
+func NuovoRegistro(a archivio) *Registro {
+	return &Registro{archivio: a}
 }
 
-func NuovoRegistro() *Registro {
-	reg := &Registro{voci: map[string]*voce{}}
-	go func() {
-		for range time.Tick(10 * time.Minute) {
-			reg.mu.Lock()
-			for k, v := range reg.voci {
-				if !v.inCorso && time.Since(v.creata) > durataChiave {
-					delete(reg.voci, k)
-				}
+// PuliziaPeriodica cancella le chiavi scadute finché ctx non viene chiuso. Ogni replica
+// la esegue: la DELETE è la stessa, farla due volte non fa danni.
+func (reg *Registro) PuliziaPeriodica(ctx context.Context) {
+	t := time.NewTicker(ogniPulizia)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if _, err := reg.archivio.Pulisci(ctx, durataChiave); err != nil && ctx.Err() == nil {
+				log.Println("pulizia delle chiavi di idempotenza fallita:", err)
 			}
-			reg.mu.Unlock()
 		}
-	}()
-	return reg
+	}
 }
 
 func (reg *Registro) Middleware(next http.Handler) http.Handler {
@@ -65,50 +97,46 @@ func (reg *Registro) Middleware(next http.Handler) http.Handler {
 		r.Body = io.NopCloser(bytes.NewReader(corpo))
 		hash := sha256.Sum256(corpo)
 		rich := identita.DalContesto(r.Context())
-		id := string(rich.Ruolo) + ":" + strconv.Itoa(int(rich.ID)) + ":" + r.Method + " " + r.URL.Path + ":" + chiave
+		id := string(rich.Ruolo) + ":" + strconv.FormatInt(rich.ID, 10) + ":" + r.Method + " " + r.URL.Path + ":" + chiave
 
-		reg.mu.Lock()
-		v, esiste := reg.voci[id]
-		if esiste && !v.inCorso && time.Since(v.creata) > durataChiave {
-			esiste = false
+		esito, salvata, err := reg.archivio.Prenota(r.Context(), id, hash[:], durataChiave, durataInCorso)
+		if err != nil {
+			httpx.RispondiErrore(w, r, err)
+			return
 		}
-		switch {
-		case esiste && v.hashCorpo != hash:
-			reg.mu.Unlock()
+		switch esito {
+		case CorpoDiverso:
 			httpx.ScriviErrore(w, http.StatusConflict, "Idempotency-Key già usata per una richiesta con dati diversi")
 			return
-		case esiste && v.inCorso:
-			reg.mu.Unlock()
+		case InCorso:
 			httpx.ScriviErrore(w, http.StatusConflict, "una richiesta con questa Idempotency-Key è ancora in corso")
 			return
-		case esiste:
-			reg.mu.Unlock()
-			for k, valori := range v.header {
+		case Completata:
+			for k, valori := range salvata.Header {
 				w.Header()[k] = valori
 			}
 			w.Header().Set("Idempotent-Replayed", "true")
-			w.WriteHeader(v.stato)
-			w.Write(v.corpo)
+			w.WriteHeader(salvata.Stato)
+			w.Write(salvata.Corpo)
 			return
 		}
-		reg.voci[id] = &voce{hashCorpo: hash, inCorso: true, creata: time.Now()}
-		reg.mu.Unlock()
 
 		copia := &registratore{ResponseWriter: w, stato: http.StatusOK}
 		next.ServeHTTP(copia, r)
 
-		reg.mu.Lock()
-		defer reg.mu.Unlock()
+		// anche se il client ha chiuso la connessione, l'esito va salvato
+		ctx := context.WithoutCancel(r.Context())
 		// Si ricorda solo una richiesta riuscita (2xx): una richiesta rifiutata (dati non
 		// validi, conflitto, permessi...) non ha cambiato nulla, quindi chi corregge i dati
 		// può rimandarla con la stessa chiave senza ricevere 409.
 		if copia.stato < 200 || copia.stato >= 300 {
-			delete(reg.voci, id)
+			if err := reg.archivio.Libera(ctx, id); err != nil {
+				log.Printf("idempotenza: liberazione della chiave fallita: %v", err)
+			}
 			return
 		}
-		reg.voci[id] = &voce{
-			hashCorpo: hash, creata: time.Now(),
-			stato: copia.stato, header: copia.Header().Clone(), corpo: copia.corpo.Bytes(),
+		if err := reg.archivio.Completa(ctx, id, Risposta{Stato: copia.stato, Header: copia.Header().Clone(), Corpo: copia.corpo.Bytes()}); err != nil {
+			log.Printf("idempotenza: salvataggio della risposta fallito: %v", err)
 		}
 	})
 }

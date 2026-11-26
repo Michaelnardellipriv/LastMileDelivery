@@ -1,5 +1,11 @@
 # Modello dati — Gestione spedizioni
 
+> Le tabelle stanno in **due database**: quello **globale** (utenti e ruoli, geografia,
+> indirizzi, sedi, recupero password: `db/globale/schema.sql`) e quello delle **spedizioni**
+> (spedizioni, assegnazioni, note, tentativi, storico, impostazioni, motivi, posizioni:
+> `db/spedizioni/schema.sql`). I riferimenti dal secondo al primo sono solo id, senza chiave
+> esterna: li controlla il servizio spedizioni (vedi `docs/microservizi.md`).
+
 |  |  |
 | :---- | :---- |
 | **Team** | GLS |

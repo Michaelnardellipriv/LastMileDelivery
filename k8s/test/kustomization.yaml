@@ -1,0 +1,8 @@
+# Ambiente TEST: i manifest di k8s/base così come sono (namespace default, host
+# lastmile.test con certificato auto-firmato, immagini caricate nel cluster con i dati di
+# prova). Valori non sensibili: k8s/base/configmap.yaml.
+#   kubectl apply -k k8s/test
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../base

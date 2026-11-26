@@ -7,14 +7,17 @@ import (
 	"time"
 
 	"lastmiledelivery/backend/internal/configurazione"
+	"lastmiledelivery/backend/internal/database"
 	"lastmiledelivery/backend/internal/errori"
 	"lastmiledelivery/backend/internal/identita"
 )
 
+const sedeTrento, sedeBolzano = 10, 20
+
 var (
-	operatore = identita.Richiedente{Ruolo: identita.Operatore, ID: 1}
-	corriere1 = identita.Richiedente{Ruolo: identita.Corriere, ID: 1}
-	corriere2 = identita.Richiedente{Ruolo: identita.Corriere, ID: 2}
+	operatore = identita.Richiedente{Ruolo: identita.Operatore, ID: 1, IDSede: sedeTrento}
+	corriere1 = identita.Richiedente{Ruolo: identita.Corriere, ID: 1, IDSede: sedeTrento}
+	corriere2 = identita.Richiedente{Ruolo: identita.Corriere, ID: 2, IDSede: sedeTrento}
 )
 
 func p[T any](v T) *T { return &v }
@@ -32,7 +35,7 @@ var regoleTest = configurazione.Regole{
 
 type regoleFisse configurazione.Regole
 
-func (r regoleFisse) Regole(context.Context) (configurazione.Regole, error) {
+func (r regoleFisse) Regole(context.Context, int64) (configurazione.Regole, error) {
 	return configurazione.Regole(r), nil
 }
 
@@ -45,10 +48,7 @@ func servizioTest() *Servizio {
 func inStato(stato Stato) Spedizione {
 	s := Spedizione{ID: 10, Stato: stato, IDIndirizzoRitiro: 1, IDIndirizzoSpedizione: 2}
 	if stato != Creata && stato != Annullata {
-		s.IDCorriere = p(int32(1))
-	}
-	if stato == InConsegna {
-		s.UsciteInConsegna = 1
+		s.IDCorriere = p(int64(1))
 	}
 	return s
 }
@@ -57,6 +57,7 @@ func tipoErrore(err error) string {
 	var v *errori.Validazione
 	var na *errori.NonAutorizzato
 	var c *errori.Conflitto
+	var rif *errori.RiferimentoNonTrovato
 	switch {
 	case err == nil:
 		return "nessuno"
@@ -66,6 +67,8 @@ func tipoErrore(err error) string {
 		return "403"
 	case errors.As(err, &c):
 		return "409"
+	case errors.As(err, &rif):
+		return "riferimento"
 	}
 	return err.Error()
 }
@@ -102,7 +105,8 @@ func TestCambioStato(t *testing.T) {
 		{"corriere annulla", corriere1, Assegnata, annulla, "403"},
 		{"corriere non assegnato", corriere2, Assegnata, CambioStato{Stato: Ritirata}, "403"},
 
-		{"operatore riporta in ritirata", operatore, InConsegna, CambioStato{Stato: Ritirata}, "nessuno"},
+		// senza un tentativo fallito in questa uscita: vedi TestRitornoInRitirataSoloDopoUnTentativoFallito
+		{"operatore riporta in ritirata senza tentativo", operatore, InConsegna, CambioStato{Stato: Ritirata}, "409"},
 		{"corriere riporta in ritirata", corriere1, InConsegna, CambioStato{Stato: Ritirata}, "403"},
 	}
 	for _, c := range casi {
@@ -152,30 +156,30 @@ func TestAssegnazione(t *testing.T) {
 	for _, c := range casi {
 		attuale := inStato(c.da)
 		if c.da == Ritirata {
-			attuale.TentativiConsegnaFalliti, attuale.UsciteInConsegna = 1, 1
+			attuale.TentativiConsegnaFalliti = 1
 		}
-		m, err := decidiAssegnazione(regoleTest, attuale, p(int32(2)))
+		m, err := decidiAssegnazione(regoleTest, attuale, p(int64(2)))
 		if err != nil || m.NuovoStato != c.atteso || *m.NuovoCorriere != 2 {
 			t.Fatalf("assegnazione da %q: %+v %v", c.da, m, err)
 		}
 	}
-	if m, _ := decidiAssegnazione(regoleTest, inStato(Assegnata), p(int32(1))); !m.NessunaModifica {
+	if m, _ := decidiAssegnazione(regoleTest, inStato(Assegnata), p(int64(1))); !m.NessunaModifica {
 		t.Fatal("riassegnare allo stesso corriere deve essere senza effetto")
 	}
 	for _, stato := range []Stato{InConsegna, Consegnata, Annullata, Persa} {
-		if _, err := decidiAssegnazione(regoleTest, inStato(stato), p(int32(2))); tipoErrore(err) != "409" {
+		if _, err := decidiAssegnazione(regoleTest, inStato(stato), p(int64(2))); tipoErrore(err) != "409" {
 			t.Errorf("assegnazione in %q: atteso 409, ottenuto %v", stato, err)
 		}
 	}
 	esauriti := inStato(Assegnata)
 	esauriti.TentativiRitiroFalliti = 3
-	if _, err := decidiAssegnazione(regoleTest, esauriti, p(int32(2))); tipoErrore(err) != "409" {
+	if _, err := decidiAssegnazione(regoleTest, esauriti, p(int64(2))); tipoErrore(err) != "409" {
 		t.Fatalf("dopo 3 ritiri falliti non si riassegna: %v", err)
 	}
-	if _, err := decidiAssegnazione(regoleTest, inStato(Ritirata), p(int32(2))); tipoErrore(err) != "409" {
+	if _, err := decidiAssegnazione(regoleTest, inStato(Ritirata), p(int64(2))); tipoErrore(err) != "409" {
 		t.Fatalf("ritirata senza tentativi di consegna falliti: non si riassegna: %v", err)
 	}
-	if _, _, err := s.Assegna(context.Background(), corriere1, 10, p(int32(2))); tipoErrore(err) != "403" {
+	if _, _, err := s.Assegna(context.Background(), corriere1, 10, p(int64(2))); tipoErrore(err) != "403" {
 		t.Fatalf("un corriere non può assegnare: %v", err)
 	}
 	if _, _, err := s.Assegna(context.Background(), operatore, 10, nil); tipoErrore(err) != "400" {
@@ -233,18 +237,21 @@ func TestTentativiDiConsegna(t *testing.T) {
 	tentativo := TentativoFallito{Tipo: TentativoConsegna, Nota: p("nessuno in casa"), Motivo: p("destinatario assente")}
 	attuale := inStato(InConsegna)
 
+	// un tentativo per uscita: ogni volta l'operatore la riporta in ritirata e il corriere la
+	// rimette in consegna (nuova uscita, TentativoInUscita falso); al 3° (regoleTest) non consegnata
 	attese := []Stato{InConsegna, InConsegna, NonConsegnata}
 	for falliti, atteso := range attese {
 		attuale.TentativiConsegnaFalliti = falliti
-		attuale.UsciteInConsegna = falliti + 1
+		attuale.TentativoInUscita = false
 		m, err := decidiTentativo(regoleTest, corriere1, attuale, tentativo)
 		if err != nil || m.NuovoStato != atteso || m.Tentativo != TentativoConsegna || *m.Nota.Motivo != "destinatario assente" {
 			t.Fatalf("tentativo di consegna %d: atteso %q, ottenuto %+v %v", falliti+1, atteso, m, err)
 		}
 	}
 
+	// secondo tentativo nella stessa uscita: rifiutato, bisogna tornare in ritirata
 	stessaUscita := inStato(InConsegna)
-	stessaUscita.TentativiConsegnaFalliti = 1
+	stessaUscita.TentativiConsegnaFalliti, stessaUscita.TentativoInUscita = 1, true
 	if _, err := decidiTentativo(regoleTest, corriere1, stessaUscita, tentativo); tipoErrore(err) != "409" {
 		t.Fatalf("un secondo tentativo nella stessa uscita va rifiutato: %v", err)
 	}
@@ -291,7 +298,7 @@ func TestValidaTentativo(t *testing.T) {
 func TestModificaDati(t *testing.T) {
 	s := servizioTest()
 	nuovaData := s.adesso().Add(48 * time.Hour)
-	d := DatiSpedizione{IDIndirizzoSpedizione: p(int32(5)), DataoraRichiesta: &nuovaData}
+	d := DatiSpedizione{IDIndirizzoSpedizione: p(int64(5)), DataoraRichiesta: &nuovaData}
 
 	for _, stato := range []Stato{Creata, Assegnata} {
 		m, err := decidiDati(inStato(stato), d)
@@ -304,16 +311,16 @@ func TestModificaDati(t *testing.T) {
 			t.Errorf("modifica in %q: atteso 409, ottenuto %v", stato, err)
 		}
 	}
-	if _, err := decidiDati(inStato(Creata), DatiSpedizione{IDIndirizzoSpedizione: p(int32(1))}); tipoErrore(err) != "400" {
+	if _, err := decidiDati(inStato(Creata), DatiSpedizione{IDIndirizzoSpedizione: p(int64(1))}); tipoErrore(err) != "400" {
 		t.Fatalf("indirizzo di spedizione uguale a quello di ritiro: %v", err)
 	}
-	if m, _ := decidiDati(inStato(Creata), DatiSpedizione{IDIndirizzoRitiro: p(int32(1))}); !m.NessunaModifica {
+	if m, _ := decidiDati(inStato(Creata), DatiSpedizione{IDIndirizzoRitiro: p(int64(1))}); !m.NessunaModifica {
 		t.Fatal("stessi valori: nessuna modifica")
 	}
 
 	for nome, dati := range map[string]DatiSpedizione{
 		"nessun campo":  {},
-		"id non valido": {IDClienteMittente: p(int32(0))},
+		"id non valido": {IDClienteMittente: p(int64(0))},
 	} {
 		if tipoErrore(s.validaDati(dati)) != "400" {
 			t.Errorf("%s: atteso 400", nome)
@@ -391,21 +398,43 @@ func TestDataRichiestaMaiNelFuturo(t *testing.T) {
 
 func TestNienteConsegnaDopoUnTentativoFallitoNellaStessaUscita(t *testing.T) {
 	consegna := CambioStato{Stato: Consegnata}
-
-	// prima uscita, tentativo fallito: l'uscita è chiusa, non si può consegnare
+	// tentativo fallito in questa uscita: l'uscita è chiusa, non si consegna
 	attuale := inStato(InConsegna)
-	attuale.UsciteInConsegna, attuale.TentativiConsegnaFalliti = 1, 1
+	attuale.TentativiConsegnaFalliti, attuale.TentativoInUscita = 1, true
 	if _, err := decidiStato(regoleTest, corriere1, attuale, consegna); tipoErrore(err) != "409" {
 		t.Fatalf("consegna dopo un tentativo fallito nella stessa uscita: atteso 409, ottenuto %v", err)
 	}
-	// l'operatore la riporta in ritirata e il corriere la rimette in consegna: nuova uscita
-	attuale.UsciteInConsegna = 2
+	// nuova uscita (dopo il ritorno in ritirata): la consegna è ammessa
+	attuale.TentativoInUscita = false
 	if m, err := decidiStato(regoleTest, corriere1, attuale, consegna); err != nil || m.NuovoStato != Consegnata {
 		t.Fatalf("nella nuova uscita la consegna è ammessa: %+v %v", m, err)
 	}
-	// senza tentativi falliti si consegna normalmente
 	if m, err := decidiStato(regoleTest, corriere1, inStato(InConsegna), consegna); err != nil || m.NuovoStato != Consegnata {
-		t.Fatalf("consegna alla prima uscita: %+v %v", m, err)
+		t.Fatalf("consegna senza tentativi falliti: %+v %v", m, err)
+	}
+}
+
+func TestRitornoInRitirataSoloDopoUnTentativoFallito(t *testing.T) {
+	ritiro := CambioStato{Stato: Ritirata}
+	// in consegna senza tentativi falliti in questa uscita: l'operatore non la riporta indietro
+	if _, err := decidiStato(regoleTest, operatore, inStato(InConsegna), ritiro); tipoErrore(err) != "409" {
+		t.Fatalf("in ritirata senza un tentativo fallito: atteso 409, ottenuto %v", err)
+	}
+	// tentativi falliti solo in un'uscita precedente: non bastano
+	vecchio := inStato(InConsegna)
+	vecchio.TentativiConsegnaFalliti, vecchio.TentativoInUscita = 1, false
+	if _, err := decidiStato(regoleTest, operatore, vecchio, ritiro); tipoErrore(err) != "409" {
+		t.Fatalf("tentativo di un'uscita precedente: atteso 409, ottenuto %v", err)
+	}
+	// con un tentativo fallito in questa uscita sì
+	fallita := inStato(InConsegna)
+	fallita.TentativiConsegnaFalliti, fallita.TentativoInUscita = 1, true
+	if m, err := decidiStato(regoleTest, operatore, fallita, ritiro); err != nil || m.NuovoStato != Ritirata {
+		t.Fatalf("in ritirata dopo un tentativo fallito: %+v %v", m, err)
+	}
+	// resta un'azione dell'operatore
+	if _, err := decidiStato(regoleTest, corriere1, fallita, ritiro); tipoErrore(err) != "403" {
+		t.Fatalf("il corriere non la riporta in ritirata: %v", err)
 	}
 }
 
@@ -422,7 +451,7 @@ func TestResoSoloNegliStatiAmmessi(t *testing.T) {
 			t.Errorf("reso in %q: atteso 409, ottenuto %v", stato, err)
 		}
 	}
-	if _, err := decidiDati(inStato(Persa), DatiSpedizione{IsReso: p(true), IDIndirizzoSpedizione: p(int32(5))}); tipoErrore(err) != "409" {
+	if _, err := decidiDati(inStato(Persa), DatiSpedizione{IsReso: p(true), IDIndirizzoSpedizione: p(int64(5))}); tipoErrore(err) != "409" {
 		t.Fatalf("su una spedizione persa si imposta solo is_reso: %v", err)
 	}
 	gia := inStato(Annullata)
@@ -477,5 +506,47 @@ func TestMotivoObbligatorio(t *testing.T) {
 	m, _ := decidiStato(regoleTest, operatore, inStato(Ritirata), CambioStato{Stato: Persa, Motivo: p("smarrita durante il trasporto"), Nota: p("non è nel furgone")})
 	if m.Nota.Testo != "non è nel furgone" || *m.Nota.Motivo != "smarrita durante il trasporto" {
 		t.Fatalf("nota e motivo vanno salvati insieme: %+v", m.Nota)
+	}
+}
+
+// corrieri delle sedi: 1 e 2 a Trento, 3 a Bolzano
+var sediCorrieri = map[int64]int64{1: sedeTrento, 2: sedeTrento, 3: sedeBolzano}
+
+func TestAssegnazioneSoloACorrieriDellaStessaSede(t *testing.T) {
+	a := &archivioElenco{attuale: inStato(Creata), sedeCorriere: sediCorrieri}
+	s := NuovoServizio(a, regoleFisse(regoleTest))
+
+	if _, _, err := s.Assegna(context.Background(), operatore, 10, p(int64(3))); tipoErrore(err) != "409" {
+		t.Fatalf("un corriere di Bolzano non riceve spedizioni di Trento: atteso 409, ottenuto %v", err)
+	}
+	if a.aggiornata {
+		t.Fatal("la spedizione non va toccata")
+	}
+	if _, _, err := s.Assegna(context.Background(), operatore, 10, p(int64(99))); tipoErrore(err) != "riferimento" {
+		t.Fatalf("corriere inesistente: atteso riferimento non trovato, ottenuto %v", err)
+	}
+	if _, _, err := s.Assegna(context.Background(), operatore, 10, p(int64(2))); err != nil || !a.aggiornata {
+		t.Fatalf("un corriere della stessa sede si assegna: %v", err)
+	}
+	if a.ambito != database.SoloSede(sedeTrento) {
+		t.Fatalf("la spedizione si cerca solo nella sede dell'operatore: %+v", a.ambito)
+	}
+}
+
+func TestCreazioneNellaSedeDellOperatore(t *testing.T) {
+	a := &archivioElenco{sedeCorriere: sediCorrieri}
+	s := NuovoServizio(a, regoleFisse(regoleTest))
+	s.adesso = func() time.Time { return time.Date(2026, 10, 27, 10, 0, 0, 0, time.UTC) }
+	nuova := NuovaSpedizione{CodOrdine: "ORD-1", IDClienteMittente: 1, IDClienteDestinatario: 2,
+		IDIndirizzoRitiro: 3, IDIndirizzoSpedizione: 4, DataoraRichiesta: time.Date(2026, 10, 27, 9, 0, 0, 0, time.UTC)}
+
+	if sped, err := s.Crea(context.Background(), operatore, nuova); err != nil || a.sedeCreata != sedeTrento || sped.IDSede != sedeTrento {
+		t.Fatalf("la spedizione nasce nella sede dell'operatore: %d %v", a.sedeCreata, err)
+	}
+	conCorriere := nuova
+	conCorriere.IDCorriere = p(int64(3))
+	a.creata = nil
+	if _, err := s.Crea(context.Background(), operatore, conCorriere); tipoErrore(err) != "409" || a.creata != nil {
+		t.Fatalf("non si crea una spedizione già affidata a un corriere di un'altra sede: %v", err)
 	}
 }

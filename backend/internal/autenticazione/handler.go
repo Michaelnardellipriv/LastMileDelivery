@@ -2,6 +2,7 @@ package autenticazione
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"lastmiledelivery/backend/internal/httpx"
@@ -18,6 +19,11 @@ func NuovoHandler(s *Servizio) *Handler {
 
 func (h *Handler) Registra(rotte *httpx.Rotte, identifica httpx.Middleware) {
 	rotte.Gestisci(http.MethodPost, "/api/auth/login", http.HandlerFunc(h.login))
+	// senza il middleware di identità: il rinnovo accetta anche un token appena scaduto
+	// e fa da sé i controlli (Servizio.Rinnova)
+	rotte.Gestisci(http.MethodPost, "/api/auth/rinnova", http.HandlerFunc(h.rinnova))
+	// anche il logout accetta un token appena scaduto (Servizio.Esci)
+	rotte.Gestisci(http.MethodPost, "/api/auth/esci", http.HandlerFunc(h.esci))
 	rotte.Gestisci(http.MethodPost, "/api/auth/cambio-password", http.HandlerFunc(h.cambiaPassword), identifica)
 	rotte.Gestisci(http.MethodPost, "/api/auth/recupero-password", http.HandlerFunc(h.richiediRecupero))
 	rotte.Gestisci(http.MethodPost, "/api/auth/reimposta-password", http.HandlerFunc(h.reimpostaPassword))
@@ -44,19 +50,24 @@ type richiestaReimposta struct {
 }
 
 type utenteDTO struct {
-	IDUtente int32  `json:"id_utente"`
+	IDUtente int64  `json:"id_utente"`
 	Ruolo    string `json:"ruolo"`
-	ID       int32  `json:"id"`
-	Nome     string `json:"nome"`
-	Cognome  string `json:"cognome"`
-	Email    string `json:"email"`
+	ID       int64  `json:"id"`
+	// sede di operatori e corrieri; assente per clienti e amministratori
+	IDSede  *int64 `json:"id_sede,omitempty"`
+	Nome    string `json:"nome"`
+	Cognome string `json:"cognome"`
+	Email   string `json:"email"`
 }
 
 type sessioneDTO struct {
 	Token   string    `json:"token"`
 	Tipo    string    `json:"tipo"`
 	ScadeIl time.Time `json:"scade_il"`
-	Utente  utenteDTO `json:"utente"`
+	// durata del token in secondi: l'app programma il rinnovo con il proprio orologio,
+	// senza confrontare scade_il con un orologio del dispositivo che può essere sbagliato
+	DurataSecondi int       `json:"durata_secondi"`
+	Utente        utenteDTO `json:"utente"`
 }
 
 type messaggioDTO struct {
@@ -73,14 +84,60 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		httpx.RispondiErrore(w, r, err)
 		return
 	}
+	scriviSessione(w, s)
+}
+
+// rinnova: nuovo token a partire da quello in Authorization (anche appena scaduto).
+func (h *Handler) rinnova(w http.ResponseWriter, r *http.Request) {
+	token, ok := tokenDaRichiesta(w, r)
+	if !ok {
+		return
+	}
+	s, err := h.servizio.Rinnova(r.Context(), token)
+	if err != nil {
+		httpx.RispondiErrore(w, r, err)
+		return
+	}
+	scriviSessione(w, s)
+}
+
+// tokenDaRichiesta: il token in Authorization; se manca risponde 401.
+func tokenDaRichiesta(w http.ResponseWriter, r *http.Request) (string, bool) {
+	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if !ok || strings.TrimSpace(token) == "" {
+		w.Header().Set("WWW-Authenticate", "Bearer")
+		httpx.ScriviErrore(w, http.StatusUnauthorized, "serve il token: Authorization: Bearer <token>")
+		return "", false
+	}
+	return strings.TrimSpace(token), true
+}
+
+func scriviSessione(w http.ResponseWriter, s Sessione) {
 	w.Header().Set("Cache-Control", "no-store")
+	var idSede *int64
+	if s.Ruolo.Ruolo.HaSede() {
+		idSede = &s.Ruolo.IDSede
+	}
 	httpx.ScriviJSON(w, http.StatusOK, sessioneDTO{
-		Token: s.Token, Tipo: "Bearer", ScadeIl: s.Scadenza.UTC(),
+		Token: s.Token, Tipo: "Bearer", ScadeIl: s.Scadenza.UTC(), DurataSecondi: int(time.Until(s.Scadenza).Round(time.Second).Seconds()),
 		Utente: utenteDTO{
-			IDUtente: s.Account.IDUtente, Ruolo: string(s.Ruolo.Ruolo), ID: s.Ruolo.ID,
+			IDUtente: s.Account.IDUtente, Ruolo: string(s.Ruolo.Ruolo), ID: s.Ruolo.ID, IDSede: idSede,
 			Nome: s.Account.Nome, Cognome: s.Account.Cognome, Email: s.Account.Email,
 		},
 	})
+}
+
+// esci: logout, la sessione del token si chiude e il token non vale più.
+func (h *Handler) esci(w http.ResponseWriter, r *http.Request) {
+	token, ok := tokenDaRichiesta(w, r)
+	if !ok {
+		return
+	}
+	if err := h.servizio.Esci(r.Context(), token); err != nil {
+		httpx.RispondiErrore(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Handler) cambiaPassword(w http.ResponseWriter, r *http.Request) {

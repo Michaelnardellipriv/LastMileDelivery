@@ -1,31 +1,78 @@
-# Ambiente DEV completo sul portatile: database + backend.
+# Ambiente DEV completo sul portatile: i due database + il backend.
 #   docker compose --env-file config/dev.env up --build
-# Il backend parte solo quando il database è pronto (healthcheck in db/Dockerfile):
+# Il backend è il server di sviluppo (cmd/server): i due microservizi nello stesso
+# processo, ognuno con il suo database, sulla porta 8080. In Kubernetes invece girano
+# separati (k8s/), con l'Ingress che smista i percorsi.
+# Il backend parte solo quando i database sono pronti (healthcheck in db/Dockerfile):
 # senza, la prima connessione fallisce con "connection refused" (lezione 6).
 services:
-  db:
-    build: ./db
-    image: lastmile/db:dev
+  db-globale:
+    build: { context: ./db, args: { PARTE: globale } }
+    image: lastmile/db-globale:dev
     env_file: config/dev.env
     ports:
       - "${DB_PORT:-5432}:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - dati-globale:/var/lib/postgresql/data
 
-  backend:
-    build: ./backend
-    image: lastmile/backend:dev
+  db-spedizioni:
+    build: { context: ./db, args: { PARTE: spedizioni } }
+    image: lastmile/db-spedizioni:dev
+    env_file: config/dev.env
+    ports:
+      - "${DB_SPEDIZIONI_PORT:-5433}:5432"
+    volumes:
+      - dati-spedizioni:/var/lib/postgresql/data
+
+  # FACOLTATIVO: database delle spedizioni del gruppo di sedi 1 (mappa sede → database,
+  # docs/microservizi.md). Parte solo con il profilo "gruppo1":
+  #   DATABASE_SPEDIZIONI_URL_1="postgres://lastmile_app:<APP_DB_PASSWORD>@db-spedizioni-1:5432/lastmile?sslmode=disable" \
+  #     docker compose --env-file config/dev.env --profile gruppo1 up --build
+  # Senza dati di prova (DATI=nessuno: i dati di prova sono delle sedi del gruppo 0) e con
+  # GRUPPO_SPEDIZIONI=1: gli id partono da 10^12 + 1. Le sedi del gruppo 1 le crea
+  # l'amministratore con POST /api/sedi e "gruppo_spedizioni": 1.
+  db-spedizioni-1:
+    profiles: [gruppo1]
+    build: { context: ./db, args: { PARTE: spedizioni, DATI: nessuno } }
+    image: lastmile/db-spedizioni:dev-vuoto
     env_file: config/dev.env
     environment:
-      # dentro la rete dei container il database si chiama "db", non "localhost"
-      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=disable
+      GRUPPO_SPEDIZIONI: "1"
+    ports:
+      - "${DB_SPEDIZIONI_1_PORT:-5434}:5432"
+    volumes:
+      - dati-spedizioni-1:/var/lib/postgresql/data
+
+  backend:
+    build: { context: ./backend, args: { SERVIZIO: server } }
+    image: lastmile/backend:dev
+    # se all'avvio un database non risponde in tempo (PC carico) il backend esce: lo si
+    # riavvia invece di lasciarlo fermo
+    restart: on-failure
+    env_file: config/dev.env
+    environment:
+      # dentro la rete dei container i database si chiamano come i servizi, non "localhost";
+      # il backend usa l'utente normale (non POSTGRES_USER, che è superutente): così la
+      # Row-Level Security sulle sedi vale anche per lui
+      DATABASE_URL: postgres://${APP_DB_USER}:${APP_DB_PASSWORD}@db-globale:5432/${POSTGRES_DB}?sslmode=disable
+      DATABASE_SPEDIZIONI_URL: postgres://${APP_DB_USER}:${APP_DB_PASSWORD}@db-spedizioni:5432/${POSTGRES_DB}?sslmode=disable
+      # gruppo 1, solo con il profilo "gruppo1" (vedi db-spedizioni-1): vuota = solo il gruppo 0
+      DATABASE_SPEDIZIONI_URL_1: ${DATABASE_SPEDIZIONI_URL_1:-}
       # dentro il container 127.0.0.1 non è raggiungibile dal PC
       LISTEN_ADDR: 0.0.0.0:8080
     ports:
       - "8080:8080"
     depends_on:
-      db:
+      db-globale:
         condition: service_healthy
+      db-spedizioni:
+        condition: service_healthy
+      # solo con il profilo "gruppo1"; senza, si ignora
+      db-spedizioni-1:
+        condition: service_healthy
+        required: false
 
 volumes:
-  pgdata:
+  dati-globale:
+  dati-spedizioni:
+  dati-spedizioni-1:

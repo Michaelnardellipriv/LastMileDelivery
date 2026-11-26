@@ -14,10 +14,14 @@ import (
 // (corrieri, operatori_logistici o clienti), cioè l'id usato nelle spedizioni.
 // Destinatario c'è solo per i clienti: true se il cliente è stato destinatario di
 // almeno una spedizione (accede all'app), false se è solo mittente.
+// IDSede e NomeSede ci sono solo per corrieri e operatori (la sede in cui lavorano): i
+// clienti non hanno sede, spediscono e ricevono in qualunque città.
 type Utente struct {
-	ID           int32
+	ID           int64
 	Ruolo        identita.Ruolo
-	IDRuolo      int32
+	IDRuolo      int64
+	IDSede       *int64
+	NomeSede     *string
 	Nome         string
 	Cognome      string
 	Email        string
@@ -34,6 +38,8 @@ func (u Utente) soloMittente() bool {
 
 type NuovoUtente struct {
 	Ruolo *string
+	// sede in cui lavora il corriere o l'operatore (obbligatoria)
+	IDSede *int64
 	NuovoCliente
 }
 
@@ -51,11 +57,13 @@ type ModificaUtente struct {
 	Email      *string
 	Password   *string
 	Attivo     *bool
+	// sposta il corriere o l'operatore in un'altra sede
+	IDSede *int64
 }
 
 func (m ModificaUtente) vuota() bool {
 	return m.Nome == nil && m.Cognome == nil && m.Prefisso == nil && m.NrTelefono == nil &&
-		m.Email == nil && m.Password == nil && m.Attivo == nil
+		m.Email == nil && m.Password == nil && m.Attivo == nil && m.IDSede == nil
 }
 
 // DatiUtente sono i campi già validati da salvare; la password è già l'hash.
@@ -67,6 +75,7 @@ type DatiUtente struct {
 	Email      *string
 	PwdHash    *string
 	Attivo     *bool
+	IDSede     *int64
 }
 
 type RicercaUtenti struct {
@@ -93,6 +102,16 @@ func soloAmministratore(r identita.Richiedente, azione string) error {
 		return &errori.NonAutorizzato{Messaggio: "solo un amministratore può " + azione}
 	}
 	return nil
+}
+
+// controllaSede: corrieri e operatori lavorano sempre per una sede.
+func controllaSede(e *errori.Validazione, idSede *int64, obbligatoria bool) {
+	switch {
+	case idSede == nil && obbligatoria:
+		e.Aggiungi("id_sede", "obbligatoria: la sede in cui lavora il corriere o l'operatore")
+	case idSede != nil && *idSede <= 0:
+		e.Aggiungi("id_sede", "deve essere un id positivo")
+	}
 }
 
 func controllaRuolo(e *errori.Validazione, ruolo *string, obbligatorio bool) *identita.Ruolo {
@@ -122,12 +141,17 @@ func controllaRuoloElenco(e *errori.Validazione, ruolo *string) *identita.Ruolo 
 	return &r
 }
 
-// CercaUtenti restituisce corrieri, operatori e clienti, attivi e disattivati, con il totale.
+// CercaUtenti restituisce corrieri, operatori e clienti, attivi e disattivati, con il
+// totale; ric.IDSede filtra corrieri e operatori di una sede (i clienti non hanno sede,
+// quindi con il filtro non compaiono).
 func (s *Servizio) CercaUtenti(ctx context.Context, r identita.Richiedente, ric Ricerca, ruolo *string, attivo *bool) ([]Utente, int, error) {
 	if err := soloAmministratore(r, "consultare gli utenti"); err != nil {
 		return nil, 0, err
 	}
 	if err := validaRicerca(ric); err != nil {
+		return nil, 0, err
+	}
+	if _, err := limitaAllaSede(r, ric); err != nil {
 		return nil, 0, err
 	}
 	e := &errori.Validazione{}
@@ -145,6 +169,7 @@ func (s *Servizio) CreaUtente(ctx context.Context, r identita.Richiedente, n Nuo
 	}
 	e := &errori.Validazione{}
 	ruolo := controllaRuolo(e, n.Ruolo, true)
+	controllaSede(e, n.IDSede, true)
 	c := validaPersona(e, n.NuovoCliente)
 	if err := e.Err(); err != nil {
 		return EsitoUtente{}, err
@@ -153,7 +178,7 @@ func (s *Servizio) CreaUtente(ctx context.Context, r identita.Richiedente, n Nuo
 	if err != nil {
 		return EsitoUtente{}, err
 	}
-	creato, err := s.archivio.CreaUtente(ctx, *ruolo, c, hash)
+	creato, err := s.archivio.CreaUtente(ctx, *ruolo, *n.IDSede, c, hash)
 	if err != nil {
 		return EsitoUtente{}, err
 	}
@@ -171,13 +196,14 @@ func (s *Servizio) CreaUtente(ctx context.Context, r identita.Richiedente, n Nuo
 // Con attivo=false l'utente non entra più e i token che ha già smettono di valere; un
 // corriere disattivato non riceve nuove spedizioni, un cliente disattivato non può
 // essere destinatario di nuove spedizioni. Con una nuova password, l'utente la riceve
-// per mail.
-func (s *Servizio) ModificaUtente(ctx context.Context, r identita.Richiedente, idUtente int32, m ModificaUtente) (Utente, error) {
+// per mail. Con id_sede l'amministratore sposta un corriere o un operatore in un'altra
+// sede attiva; un corriere con spedizioni ancora aperte non si sposta.
+func (s *Servizio) ModificaUtente(ctx context.Context, r identita.Richiedente, idUtente int64, m ModificaUtente) (Utente, error) {
 	switch r.Ruolo {
 	case identita.Amministratore:
 	case identita.Operatore:
-		if m.Attivo != nil || m.Password != nil {
-			return Utente{}, &errori.NonAutorizzato{Messaggio: "solo un amministratore può disattivare un utente o reimpostarne la password"}
+		if m.Attivo != nil || m.Password != nil || m.IDSede != nil {
+			return Utente{}, &errori.NonAutorizzato{Messaggio: "solo un amministratore può disattivare un utente, reimpostarne la password o cambiarne la sede"}
 		}
 	default:
 		return Utente{}, &errori.NonAutorizzato{Messaggio: "solo amministratori e operatori logistici possono modificare gli utenti"}
@@ -201,7 +227,9 @@ func (s *Servizio) ModificaUtente(ctx context.Context, r identita.Richiedente, i
 		NrTelefono: campo("nr_telefono", m.NrTelefono, 15),
 		Email:      campo("email", m.Email, 254),
 		Attivo:     m.Attivo,
+		IDSede:     m.IDSede,
 	}
+	controllaSede(e, m.IDSede, false)
 	valore := func(v *string) string {
 		if v == nil {
 			return ""
@@ -225,6 +253,10 @@ func (s *Servizio) ModificaUtente(ctx context.Context, r identita.Richiedente, i
 	}
 	if bersaglio.soloMittente() && (m.Attivo != nil || m.Password != nil) {
 		return Utente{}, &errori.Conflitto{Messaggio: "un cliente solo mittente non accede all'app: si possono modificare solo i dati"}
+	}
+	if bersaglio.Ruolo == identita.Cliente && m.IDSede != nil {
+		e.Aggiungi("id_sede", "i clienti non hanno una sede: la sede si cambia solo a corrieri e operatori")
+		return Utente{}, e
 	}
 
 	if d.Email != nil {

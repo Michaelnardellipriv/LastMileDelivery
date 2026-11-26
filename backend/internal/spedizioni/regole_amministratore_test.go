@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"lastmiledelivery/backend/internal/configurazione"
+	"lastmiledelivery/backend/internal/identita"
 )
 
 // I limiti di ritiro e di consegna sono indipendenti e vengono dalla configurazione.
@@ -24,11 +25,11 @@ func TestTentativiMassimiDistintiPerRitiroEConsegna(t *testing.T) {
 
 	consegna := TentativoFallito{Tipo: TentativoConsegna, Nota: p("assente"), Motivo: p("destinatario assente")}
 	inConsegna := inStato(InConsegna)
-	inConsegna.TentativiConsegnaFalliti, inConsegna.UsciteInConsegna = 3, 4
+	inConsegna.TentativiConsegnaFalliti = 3 // quarta uscita
 	if m, err := decidiTentativo(regole, corriere1, inConsegna, consegna); err != nil || m.NuovoStato != InConsegna {
 		t.Fatalf("con 5 consegne ammesse il 4° fallimento lascia la spedizione in consegna: %+v %v", m, err)
 	}
-	inConsegna.TentativiConsegnaFalliti, inConsegna.UsciteInConsegna = 4, 5
+	inConsegna.TentativiConsegnaFalliti = 4
 	if m, err := decidiTentativo(regole, corriere1, inConsegna, consegna); err != nil || m.NuovoStato != NonConsegnata {
 		t.Fatalf("il 5° fallimento porta in non consegnata: %+v %v", m, err)
 	}
@@ -52,23 +53,41 @@ func TestMotiviDallaConfigurazione(t *testing.T) {
 	}
 }
 
-func TestGiorniVisibilitaLettiSoloPerIlCliente(t *testing.T) {
+// I giorni di visibilità del cliente sono quelli della sede di ogni spedizione: li
+// applica la query, quindi l'elenco non legge la configurazione per nessun ruolo.
+func TestElencoNonLeggeLaConfigurazione(t *testing.T) {
 	a := &archivioElenco{}
 	contate := 0
 	s := NuovoServizio(a, regoleContate{&contate})
-	s.Elenca(context.Background(), operatore, filtroBase)
-	if contate != 0 {
-		t.Fatal("per l'operatore non serve leggere la configurazione")
+	for _, r := range []identita.Richiedente{operatore, cliente1, amministratore} {
+		s.Elenca(context.Background(), r, filtroBase)
 	}
-	s.Elenca(context.Background(), cliente1, filtroBase)
-	if contate != 1 {
-		t.Fatal("per il cliente i giorni di visibilità si leggono dalla configurazione")
+	if contate != 0 {
+		t.Fatalf("configurazione letta %d volte", contate)
+	}
+}
+
+// Le regole sono quelle della sede di chi lavora sulla spedizione.
+func TestRegoleDellaSedeDelRichiedente(t *testing.T) {
+	a := &archivioElenco{attuale: inStato(InConsegna)}
+	sede := int64(0)
+	s := NuovoServizio(a, regoleDiSede{&sede})
+	s.RegistraTentativo(context.Background(), corriere1, 10, TentativoFallito{Tipo: TentativoConsegna, Nota: p("x"), Motivo: p("altro")})
+	if sede != sedeTrento {
+		t.Fatalf("regole lette per la sede %d, attesa %d", sede, sedeTrento)
 	}
 }
 
 type regoleContate struct{ n *int }
 
-func (r regoleContate) Regole(context.Context) (configurazione.Regole, error) {
+func (r regoleContate) Regole(context.Context, int64) (configurazione.Regole, error) {
 	*r.n++
+	return regoleTest, nil
+}
+
+type regoleDiSede struct{ sede *int64 }
+
+func (r regoleDiSede) Regole(_ context.Context, idSede int64) (configurazione.Regole, error) {
+	*r.sede = idSede
 	return regoleTest, nil
 }

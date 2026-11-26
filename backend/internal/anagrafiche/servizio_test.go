@@ -21,7 +21,49 @@ type archivioFinto struct {
 	utenti     RicercaUtenti
 	modifica   *DatiUtente
 	// proprietari: di chi è un'email di emailUsate, per la modifica dell'utente stesso
-	proprietari map[string]int32
+	proprietari map[string]int64
+	// sedeUtente: la sede passata a CreaUtente
+	sedeUtente int64
+	// luogo: città, regione e nazione della sede restituita da Sede (Trento se vuoto)
+	luogo         *Indirizzo
+	nuovaSede     string
+	indirizzoSede Indirizzo
+	gruppoSede    int
+	ricercaSedi   RicercaSedi
+	modificaSede  *DatiSede
+}
+
+const sedeTrento, sedeBolzano = 10, 20
+
+func (a *archivioFinto) CercaSedi(_ context.Context, r RicercaSedi) ([]Sede, int, error) {
+	a.ricerca = r.Ricerca
+	a.ricercaSedi = r
+	return []Sede{{ID: sedeTrento, Nome: "Veloce24 Trento"}}, 1, nil
+}
+
+func (a *archivioFinto) Sede(_ context.Context, id int64) (Sede, error) {
+	luogo := Indirizzo{Citta: "Trento", Regione: "Trentino-Alto Adige", Nazione: "Italia"}
+	if a.luogo != nil {
+		luogo = *a.luogo
+	}
+	return Sede{ID: id, Nome: "Veloce24", Indirizzo: luogo}, nil
+}
+
+func (a *archivioFinto) CreaSede(_ context.Context, nome string, i Indirizzo, gruppo int) (Sede, error) {
+	a.nuovaSede, a.indirizzoSede, a.gruppoSede = nome, i, gruppo
+	return Sede{ID: 30, Nome: nome, Indirizzo: i, Gruppo: gruppo}, nil
+}
+
+func (a *archivioFinto) ModificaSede(_ context.Context, id int64, d DatiSede) (Sede, error) {
+	a.modificaSede = &d
+	s := Sede{ID: id, Nome: "Veloce24 Trento", Attiva: true}
+	if d.Nome != nil {
+		s.Nome = *d.Nome
+	}
+	if d.Attiva != nil {
+		s.Attiva = *d.Attiva
+	}
+	return s, nil
 }
 
 func (a *archivioFinto) CercaClienti(_ context.Context, r Ricerca) ([]Cliente, int, error) {
@@ -29,7 +71,7 @@ func (a *archivioFinto) CercaClienti(_ context.Context, r Ricerca) ([]Cliente, i
 	return []Cliente{{ID: 1}}, 1, nil
 }
 
-func (a *archivioFinto) EmailUsata(_ context.Context, email string, escludi int32) (bool, error) {
+func (a *archivioFinto) EmailUsata(_ context.Context, email string, escludi int64) (bool, error) {
 	if proprietario, ok := a.proprietari[strings.ToLower(email)]; ok && proprietario == escludi {
 		return false, nil
 	}
@@ -48,47 +90,37 @@ func (a *archivioFinto) CercaCorrieri(_ context.Context, r Ricerca) ([]Corriere,
 	return []Corriere{{ID: 2, Nome: "Carlo"}}, 1, nil
 }
 
-func (a *archivioFinto) CercaIndirizzi(_ context.Context, r Ricerca) ([]Indirizzo, int, error) {
-	a.ricerca = r
-	return nil, 0, nil
-}
-
-func (a *archivioFinto) TrovaOCreaIndirizzo(_ context.Context, i Indirizzo) (Indirizzo, bool, error) {
-	a.indirizzo = i
-	i.ID = 5
-	return i, true, nil
-}
-
 func (a *archivioFinto) CercaUtenti(_ context.Context, r RicercaUtenti) ([]Utente, int, error) {
 	a.utenti = r
 	return []Utente{{ID: 3}}, 1, nil
 }
 
-func (a *archivioFinto) CreaUtente(_ context.Context, ruolo identita.Ruolo, c Cliente, pwdHash string) (Utente, error) {
+func (a *archivioFinto) CreaUtente(_ context.Context, ruolo identita.Ruolo, idSede int64, c Cliente, pwdHash string) (Utente, error) {
 	a.hash = pwdHash
 	a.creati++
+	a.sedeUtente = idSede
 	return Utente{ID: 20, Ruolo: ruolo, IDRuolo: 4, Nome: c.Nome, Cognome: c.Cognome, Email: c.Email,
 		Prefisso: c.Prefisso, NrTelefono: c.NrTelefono, Attivo: true}, nil
 }
 
-// Utenti di prova: 7 corriere, 8 operatore, 30 cliente destinatario, 31 cliente solo
-// mittente; gli altri id non esistono (o sono amministratori).
-func (a *archivioFinto) UtentePerID(_ context.Context, idUtente int32) (Utente, error) {
+// Utenti di prova: 8 operatore, 30 cliente destinatario, 31 cliente solo mittente, 99
+// inesistente (o amministratore); gli altri sono corrieri.
+func (a *archivioFinto) UtentePerID(_ context.Context, idUtente int64) (Utente, error) {
 	si, no := true, false
 	switch idUtente {
-	case 7:
-		return Utente{ID: 7, Ruolo: identita.Corriere}, nil
 	case 8:
 		return Utente{ID: 8, Ruolo: identita.Operatore}, nil
 	case 30:
 		return Utente{ID: 30, Ruolo: identita.Cliente, Destinatario: &si}, nil
 	case 31:
 		return Utente{ID: 31, Ruolo: identita.Cliente, Destinatario: &no}, nil
+	case 99:
+		return Utente{}, &errori.NonTrovato{Messaggio: "nessun corriere, operatore o cliente con questo id utente"}
 	}
-	return Utente{}, &errori.NonTrovato{Messaggio: "nessun corriere, operatore o cliente con questo id utente"}
+	return Utente{ID: idUtente, Ruolo: identita.Corriere}, nil
 }
 
-func (a *archivioFinto) ModificaUtente(_ context.Context, idUtente int32, d DatiUtente) (Utente, error) {
+func (a *archivioFinto) ModificaUtente(_ context.Context, idUtente int64, d DatiUtente) (Utente, error) {
 	a.modifica = &d
 	u := Utente{ID: idUtente, Ruolo: identita.Corriere, Nome: "Carlo", Email: "carlo@test.it", Attivo: true}
 	if d.Nome != nil {
@@ -136,9 +168,9 @@ func tipoErrore(err error) string {
 }
 
 var (
-	operatore      = identita.Richiedente{Ruolo: identita.Operatore, ID: 1}
+	operatore      = identita.Richiedente{Ruolo: identita.Operatore, ID: 1, IDSede: sedeTrento}
 	amministratore = identita.Richiedente{Ruolo: identita.Amministratore, ID: 1}
-	corriere       = identita.Richiedente{Ruolo: identita.Corriere, ID: 1}
+	corriere       = identita.Richiedente{Ruolo: identita.Corriere, ID: 1, IDSede: sedeTrento}
 	cliente        = identita.Richiedente{Ruolo: identita.Cliente, ID: 1}
 )
 
@@ -205,61 +237,6 @@ func TestCreaClienteValidazione(t *testing.T) {
 	}
 }
 
-func TestIndirizzi(t *testing.T) {
-	a := &archivioFinto{}
-	s := NuovoServizio(a, &postinoFinto{})
-	ind, creato, err := s.TrovaOCreaIndirizzo(context.Background(), operatore, NuovoIndirizzo{
-		Via: p(" Via Roma "), Civico: p("1"), Citta: p("Trento"), CAP: p("38121"), Regione: p("Trentino-Alto Adige"), Nazione: p("Italia"),
-	})
-	if err != nil || !creato || ind.ID != 5 || a.indirizzo.Via != "Via Roma" {
-		t.Fatalf("indirizzo creato con i campi ripuliti dagli spazi: %+v %v", ind, err)
-	}
-	if _, _, err := s.TrovaOCreaIndirizzo(context.Background(), operatore, NuovoIndirizzo{Via: p("Via Roma")}); tipoErrore(err) != "400" {
-		t.Fatalf("tutti i campi sono obbligatori: %v", err)
-	}
-	if _, _, err := s.TrovaOCreaIndirizzo(context.Background(), corriere, NuovoIndirizzo{}); tipoErrore(err) != "403" {
-		t.Fatalf("il corriere non inserisce indirizzi: %v", err)
-	}
-}
-
-func TestFormatoIndirizzo(t *testing.T) {
-	s := NuovoServizio(&archivioFinto{}, &postinoFinto{})
-	valido := func() NuovoIndirizzo {
-		return NuovoIndirizzo{Via: p("Via Roma"), Civico: p("12/B"), Citta: p("Sant'Orsola Terme"), CAP: p("38121"),
-			Regione: p("Trentino-Alto Adige"), Nazione: p("Italia")}
-	}
-	if _, _, err := s.TrovaOCreaIndirizzo(context.Background(), operatore, valido()); err != nil {
-		t.Fatalf("indirizzo valido rifiutato: %v", err)
-	}
-	estero := valido()
-	estero.Nazione, estero.CAP, estero.Civico = p("Regno Unito"), p("SW1A 1AA"), p("SNC")
-	if _, _, err := s.TrovaOCreaIndirizzo(context.Background(), operatore, estero); err != nil {
-		t.Fatalf("CAP estero e civico SNC sono ammessi: %v", err)
-	}
-	casi := map[string]struct {
-		campo  string
-		cambia func(*NuovoIndirizzo)
-	}{
-		"via solo numeri":      {"via", func(n *NuovoIndirizzo) { n.Via = p("123") }},
-		"civico con parole":    {"civico", func(n *NuovoIndirizzo) { n.Civico = p("dodici") }},
-		"città con cifre":      {"citta", func(n *NuovoIndirizzo) { n.Citta = p("Trento2") }},
-		"regione con simboli":  {"regione", func(n *NuovoIndirizzo) { n.Regione = p("Trentino#") }},
-		"nazione con cifre":    {"nazione", func(n *NuovoIndirizzo) { n.Nazione = p("1talia") }},
-		"CAP italiano a 4":     {"cap", func(n *NuovoIndirizzo) { n.CAP = p("3812") }},
-		"CAP italiano lettere": {"cap", func(n *NuovoIndirizzo) { n.CAP = p("38A21") }},
-		"CAP estero con #":     {"cap", func(n *NuovoIndirizzo) { n.Nazione, n.CAP = p("Francia"), p("75#01") }},
-	}
-	for nome, c := range casi {
-		n := valido()
-		c.cambia(&n)
-		_, _, err := s.TrovaOCreaIndirizzo(context.Background(), operatore, n)
-		v, ok := err.(*errori.Validazione)
-		if !ok || !v.Segnalato(c.campo) {
-			t.Errorf("%s: atteso errore sul campo %s, ottenuto %v", nome, c.campo, err)
-		}
-	}
-}
-
 func TestRicercheSoloOperatoreEAmministratore(t *testing.T) {
 	a := &archivioFinto{}
 	s := NuovoServizio(a, &postinoFinto{})
@@ -267,9 +244,6 @@ func TestRicercheSoloOperatoreEAmministratore(t *testing.T) {
 	for _, r := range []identita.Richiedente{operatore, amministratore} {
 		if _, _, err := s.CercaClienti(context.Background(), r, ric); err != nil {
 			t.Errorf("%s cerca clienti: %v", r.Ruolo, err)
-		}
-		if _, _, err := s.CercaIndirizzi(context.Background(), r, ric); err != nil {
-			t.Errorf("%s cerca indirizzi: %v", r.Ruolo, err)
 		}
 		if c, _, err := s.CercaCorrieri(context.Background(), r, ric); err != nil || len(c) != 1 {
 			t.Errorf("%s cerca corrieri: %v %v", r.Ruolo, c, err)
@@ -285,5 +259,152 @@ func TestRicercheSoloOperatoreEAmministratore(t *testing.T) {
 	}
 	if _, _, err := s.CercaCorrieri(context.Background(), operatore, Ricerca{Pagina: 0, PerPagina: 20}); tipoErrore(err) != "400" {
 		t.Errorf("pagina 0: %v", err)
+	}
+}
+
+func TestOperatoreCercaSoloNellaSuaSede(t *testing.T) {
+	a := &archivioFinto{}
+	s := NuovoServizio(a, &postinoFinto{})
+	ric := Ricerca{Pagina: 1, PerPagina: 20}
+
+	if _, _, err := s.CercaCorrieri(context.Background(), operatore, ric); err != nil || a.ricerca.IDSede == nil || *a.ricerca.IDSede != sedeTrento {
+		t.Fatalf("l'operatore vede solo i corrieri della sua sede: %+v %v", a.ricerca, err)
+	}
+	altra := ric
+	altra.IDSede = p(int64(sedeBolzano))
+	if _, _, err := s.CercaCorrieri(context.Background(), operatore, altra); tipoErrore(err) != "403" {
+		t.Fatalf("l'operatore non filtra su un'altra sede: %v", err)
+	}
+}
+
+func TestAmministratoreVedeTutteLeSedi(t *testing.T) {
+	a := &archivioFinto{}
+	s := NuovoServizio(a, &postinoFinto{})
+	ric := Ricerca{Pagina: 1, PerPagina: 20}
+
+	if _, _, err := s.CercaCorrieri(context.Background(), amministratore, ric); err != nil || a.ricerca.IDSede != nil {
+		t.Fatalf("senza filtro l'amministratore vede i corrieri di tutte le sedi: %+v %v", a.ricerca, err)
+	}
+	if _, _, err := s.CercaSedi(context.Background(), amministratore, RicercaSedi{Ricerca: ric}); err != nil || a.ricerca.IDSede != nil {
+		t.Fatalf("l'amministratore vede tutte le sedi: %+v %v", a.ricerca, err)
+	}
+	if _, _, err := s.CercaSedi(context.Background(), amministratore, RicercaSedi{Ricerca: ric, Attiva: p(false)}); err != nil ||
+		a.ricercaSedi.Attiva == nil || *a.ricercaSedi.Attiva {
+		t.Fatalf("l'amministratore filtra le sedi disattivate: %+v %v", a.ricercaSedi, err)
+	}
+	filtro := ric
+	filtro.IDSede = p(int64(sedeBolzano))
+	if _, _, err := s.CercaCorrieri(context.Background(), amministratore, filtro); err != nil || *a.ricerca.IDSede != sedeBolzano {
+		t.Fatalf("l'amministratore filtra per sede: %+v %v", a.ricerca, err)
+	}
+	filtro.IDSede = p(int64(0))
+	if _, _, err := s.CercaCorrieri(context.Background(), amministratore, filtro); tipoErrore(err) != "400" {
+		t.Fatalf("sede 0: atteso 400, ottenuto %v", err)
+	}
+}
+
+func TestSediVisibili(t *testing.T) {
+	a := &archivioFinto{}
+	s := NuovoServizio(a, &postinoFinto{})
+	ric := Ricerca{Pagina: 1, PerPagina: 20}
+
+	if _, _, err := s.CercaSedi(context.Background(), operatore, RicercaSedi{Ricerca: ric}); err != nil || *a.ricerca.IDSede != sedeTrento {
+		t.Fatalf("l'operatore vede solo la sua sede: %+v %v", a.ricerca, err)
+	}
+	if _, err := s.Sede(context.Background(), corriere, sedeTrento); err != nil {
+		t.Fatalf("il corriere vede la sua sede: %v", err)
+	}
+	if _, err := s.Sede(context.Background(), corriere, sedeBolzano); tipoErrore(err) != "403" {
+		t.Fatalf("il corriere non vede un'altra sede: %v", err)
+	}
+	if _, err := s.Sede(context.Background(), amministratore, sedeBolzano); err != nil {
+		t.Fatalf("l'amministratore vede ogni sede: %v", err)
+	}
+	if _, _, err := s.CercaSedi(context.Background(), cliente, RicercaSedi{Ricerca: ric}); tipoErrore(err) != "403" {
+		t.Fatalf("il cliente non vede le sedi: %v", err)
+	}
+}
+
+func TestCreaSede(t *testing.T) {
+	a := &archivioFinto{}
+	s := NuovoServizio(a, &postinoFinto{})
+	nuova := func() NuovaSede {
+		return NuovaSede{Nome: p("  Veloce24   Verona "), Indirizzo: NuovoIndirizzo{Via: p("Via Mazzini"), Civico: p("5"),
+			Citta: p("Verona"), CAP: p("37121"), Regione: p("Veneto"), Nazione: p("Italia")}}
+	}
+
+	sede, err := s.CreaSede(context.Background(), amministratore, nuova())
+	if err != nil || a.nuovaSede != "Veloce24 Verona" || a.indirizzoSede.Citta != "Verona" || sede.ID != 30 {
+		t.Fatalf("l'amministratore crea la sede, nome con gli spazi normalizzati: %+v %q %v", sede, a.nuovaSede, err)
+	}
+	if a.gruppoSede != 0 {
+		t.Errorf("senza gruppo la sede va nel database principale (0), ottenuto %d", a.gruppoSede)
+	}
+	conGruppo := nuova()
+	g := 2
+	conGruppo.Gruppo = &g
+	if sede, err := s.CreaSede(context.Background(), amministratore, conGruppo); err != nil || a.gruppoSede != 2 || sede.Gruppo != 2 {
+		t.Errorf("sede nel gruppo 2: %+v %v", sede, err)
+	}
+	for _, r := range []identita.Richiedente{operatore, corriere, cliente} {
+		if _, err := s.CreaSede(context.Background(), r, nuova()); tipoErrore(err) != "403" {
+			t.Errorf("%s non crea sedi: %v", r.Ruolo, err)
+		}
+	}
+	for nome, c := range map[string]struct {
+		cambia func(*NuovaSede)
+		campo  string
+	}{
+		"senza nome":        {func(n *NuovaSede) { n.Nome = nil }, "nome"},
+		"nome troppo lungo": {func(n *NuovaSede) { n.Nome = p(strings.Repeat("x", 101)) }, "nome"},
+		"senza città":       {func(n *NuovaSede) { n.Indirizzo.Citta = nil }, "indirizzo.citta"},
+		"CAP italiano a 4":  {func(n *NuovaSede) { n.Indirizzo.CAP = p("3712") }, "indirizzo.cap"},
+		"gruppo negativo":   {func(n *NuovaSede) { g := -1; n.Gruppo = &g }, "gruppo_spedizioni"},
+		"gruppo oltre 9006": {func(n *NuovaSede) { g := 9007; n.Gruppo = &g }, "gruppo_spedizioni"},
+	} {
+		n := nuova()
+		c.cambia(&n)
+		if _, err := s.CreaSede(context.Background(), amministratore, n); tipoErrore(err) != "400" || !campoSegnalato(err, c.campo) {
+			t.Errorf("%s: atteso 400 sul campo %s, ottenuto %v", nome, c.campo, err)
+		}
+	}
+}
+
+func TestModificaSede(t *testing.T) {
+	ctx := context.Background()
+	a := &archivioFinto{}
+	s := NuovoServizio(a, &postinoFinto{})
+
+	if sede, err := s.ModificaSede(ctx, amministratore, sedeTrento, ModificaSede{Nome: p(" Trento   Centro ")}); err != nil ||
+		*a.modificaSede.Nome != "Trento Centro" || a.modificaSede.Attiva != nil || a.modificaSede.Indirizzo != nil || sede.Nome != "Trento Centro" {
+		t.Fatalf("l'amministratore rinomina la sede, il resto non cambia: %+v %v", a.modificaSede, err)
+	}
+	if sede, err := s.ModificaSede(ctx, amministratore, sedeTrento, ModificaSede{Attiva: p(false)}); err != nil || sede.Attiva ||
+		a.modificaSede.Nome != nil {
+		t.Fatalf("l'amministratore disattiva la sede: %+v %v", a.modificaSede, err)
+	}
+	nuovo := NuovoIndirizzo{Via: p("Via Verdi"), Civico: p("3"), Citta: p("Trento"), CAP: p("38122"), Regione: p("Trentino-Alto Adige"), Nazione: p("Italia")}
+	if _, err := s.ModificaSede(ctx, amministratore, sedeTrento, ModificaSede{Indirizzo: &nuovo}); err != nil ||
+		a.modificaSede.Indirizzo == nil || a.modificaSede.Indirizzo.Via != "Via Verdi" {
+		t.Fatalf("l'amministratore sposta la sede a un altro indirizzo: %+v %v", a.modificaSede, err)
+	}
+
+	for nome, c := range map[string]struct {
+		m     ModificaSede
+		campo string
+	}{
+		"nessun campo":        {ModificaSede{}, "corpo"},
+		"nome vuoto":          {ModificaSede{Nome: p("  ")}, "nome"},
+		"indirizzo senza via": {ModificaSede{Indirizzo: &NuovoIndirizzo{Civico: p("1"), Citta: p("Trento"), CAP: p("38122"), Regione: p("Trentino-Alto Adige"), Nazione: p("Italia")}}, "indirizzo.via"},
+	} {
+		a.modificaSede = nil
+		if _, err := s.ModificaSede(ctx, amministratore, sedeTrento, c.m); tipoErrore(err) != "400" || !campoSegnalato(err, c.campo) || a.modificaSede != nil {
+			t.Errorf("%s: atteso 400 su %s senza salvare, ottenuto %v", nome, c.campo, err)
+		}
+	}
+	for _, r := range []identita.Richiedente{operatore, corriere, cliente} {
+		if _, err := s.ModificaSede(ctx, r, sedeTrento, ModificaSede{Attiva: p(false)}); tipoErrore(err) != "403" {
+			t.Errorf("%s non modifica le sedi: %v", r.Ruolo, err)
+		}
 	}
 }

@@ -69,3 +69,15 @@ type TroppoPresto struct {
 }
 
 func (e *TroppoPresto) Error() string { return e.Messaggio }
+
+// ServizioNonDisponibile: l'altro microservizio non risponde (rete, riavvio, 503).
+type ServizioNonDisponibile struct {
+	Servizio string
+	Causa    error
+}
+
+func (e *ServizioNonDisponibile) Error() string {
+	return "servizio " + e.Servizio + " non disponibile: " + e.Causa.Error()
+}
+
+func (e *ServizioNonDisponibile) Unwrap() error { return e.Causa }

@@ -4,6 +4,7 @@ package apitest
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -17,7 +18,12 @@ func TestDatiClientiECorriere(t *testing.T) {
 
 	voceDallElenco := func(t *testing.T, chi map[string]string) map[string]any {
 		t.Helper()
-		voci, _ := f.elenco(t, chi, "cod_ordine=PERSONE-"+f.suffisso, 200)
+		query := "cod_ordine=PERSONE-" + f.suffisso
+		if chi["X-Id-Amministratore"] != "" {
+			// l'amministratore sceglie sempre una sede
+			query += "&id_sede=" + strconv.FormatInt(f.idSede, 10)
+		}
+		voci, _ := f.elenco(t, chi, query, 200)
 		if voci[id] == nil {
 			t.Fatalf("la spedizione %d deve essere nell'elenco", id)
 		}
@@ -33,7 +39,7 @@ func TestDatiClientiECorriere(t *testing.T) {
 	}
 	destinatarioCompleto := func(t *testing.T, d map[string]any) {
 		t.Helper()
-		if d == nil || int32(d["id"].(float64)) != f.idDestinatario || d["nome"] != "destinatario" || d["cognome"] != "Test" ||
+		if d == nil || int64(d["id"].(float64)) != f.idDestinatario || d["nome"] != "destinatario" || d["cognome"] != "Test" ||
 			d["email"] != f.emailDi("destinatario") || !strings.HasPrefix(d["telefono"].(string), "+39 ") {
 			t.Errorf("destinatario con id, nome, cognome, email e telefono: %v", d)
 		}
@@ -45,7 +51,7 @@ func TestDatiClientiECorriere(t *testing.T) {
 				for _, chiave := range []string{"indirizzo_ritiro", "indirizzo_spedizione"} {
 					ind := v[chiave].(map[string]any)
 					if ind["citta"] != "Trento" || ind["cap"] != "38121" || ind["regione"] != "Regione" ||
-						ind["nazione"] != "Nazione "+f.suffisso || ind["via"] == nil {
+						ind["nazione"] != f.nazione || ind["via"] == nil {
 						t.Errorf("%s: via, civico, città, CAP, regione e nazione: %v", chiave, ind)
 					}
 				}
@@ -57,12 +63,12 @@ func TestDatiClientiECorriere(t *testing.T) {
 		for _, chi := range []map[string]string{op, admin} {
 			for _, v := range viste(t, chi) {
 				m, c := persona(v, "mittente"), persona(v, "corriere")
-				if m == nil || int32(m["id"].(float64)) != f.idMittente || m["nome"] != "mittente" ||
+				if m == nil || int64(m["id"].(float64)) != f.idMittente || m["nome"] != "mittente" ||
 					m["email"] != f.emailDi("mittente") || m["telefono"] == nil || v["id_cliente_mittente"] == nil {
 					t.Errorf("mittente completo: %v", m)
 				}
 				destinatarioCompleto(t, persona(v, "destinatario"))
-				if c == nil || int32(c["id"].(float64)) != f.idCorriere1 || c["nome"] != "corriere1" || c["telefono"] == nil ||
+				if c == nil || int64(c["id"].(float64)) != f.idCorriere1 || c["nome"] != "corriere1" || c["telefono"] == nil ||
 					c["email"] != f.emailDi("corriere1") {
 					t.Errorf("corriere con nome, email e telefono: %v", c)
 				}

@@ -162,6 +162,10 @@ class Sessione {
   final int idRuolo; // utente.id
   final RuoloApi ruolo; // utente.ruolo
   final String nome, cognome, email;
+
+  /// utente.id_sede: la sede di operatori e corrieri (null per clienti e amministratori). Serve,
+  /// per esempio, a proporre città, regione e nazione della sede nel nuovo indirizzo.
+  final int? idSede;
   const Sessione({
     required this.token,
     required this.scadeIl,
@@ -171,6 +175,7 @@ class Sessione {
     required this.nome,
     required this.cognome,
     required this.email,
+    this.idSede,
   });
 
   String get nomeCompleto {
@@ -210,8 +215,25 @@ class Sessione {
       nome: u['nome'] is String ? u['nome'] as String : '',
       cognome: u['cognome'] is String ? u['cognome'] as String : '',
       email: email,
+      idSede: u['id_sede'] is int ? u['id_sede'] as int : null,
     );
   }
+
+  /// La sessione del login (claim `sid` del token): resta la stessa quando il token si rinnova.
+  String get idSessione => (decodificaJwt(token)?['sid'] as String?) ?? token;
+
+  /// La stessa sessione con il token rinnovato (POST /api/auth/rinnova).
+  Sessione conToken(String token, DateTime? scadeIl) => Sessione(
+        token: token,
+        scadeIl: scadeIl?.toUtc(),
+        idUtente: idUtente,
+        idRuolo: idRuolo,
+        ruolo: ruolo,
+        nome: nome,
+        cognome: cognome,
+        email: email,
+        idSede: idSede,
+      );
 
   Map<String, dynamic> toJson() => {
     'token': token,
@@ -222,6 +244,7 @@ class Sessione {
     'nome': nome,
     'cognome': cognome,
     'email': email,
+    if (idSede != null) 'id_sede': idSede,
   };
 
   /// Ricostruisce la sessione salvata su disco; null se manca un campo (anche un salvataggio
@@ -241,6 +264,7 @@ class Sessione {
       nome: j['nome'] is String ? j['nome'] as String : '',
       cognome: j['cognome'] is String ? j['cognome'] as String : '',
       email: email,
+      idSede: j['id_sede'] is int ? j['id_sede'] as int : null,
     );
   }
 }
@@ -438,6 +462,13 @@ class ApiClient {
   /// Chiamata quando il backend rifiuta il token (401): sessione scaduta.
   final void Function()? alScadereDelToken;
 
+  /// Il token attuale, se cambia nel tempo (rinnovo automatico): ha la precedenza su [token].
+  final Future<String?> Function()? tokenAttuale;
+
+  /// Su un 401 prova a rinnovare il token: vero se ne è arrivato uno nuovo (la richiesta
+  /// si ripete una volta). Se manca o non riesce, [alScadereDelToken].
+  final Future<bool> Function()? rinnovaToken;
+
   ApiClient({
     required String base,
     required this.ruolo,
@@ -445,11 +476,19 @@ class ApiClient {
     http.Client? client,
     this.token,
     this.alScadereDelToken,
+    this.tokenAttuale,
+    this.rinnovaToken,
   })  : base = base.endsWith('/') ? base.substring(0, base.length - 1) : base,
         _http = client ?? http.Client();
 
   /// Client autenticato col JWT di una sessione di login (`id` nella tabella del ruolo).
-  factory ApiClient.daSessione(String base, Sessione s, {void Function()? alScadereDelToken, http.Client? client}) =>
+  /// [tokenAttuale] e [rinnovaToken]: il token è breve (15 minuti) e l'area riservata lo
+  /// rinnova da sola; il client legge ogni volta quello attuale.
+  factory ApiClient.daSessione(String base, Sessione s,
+          {void Function()? alScadereDelToken,
+          http.Client? client,
+          Future<String?> Function()? tokenAttuale,
+          Future<bool> Function()? rinnovaToken}) =>
       ApiClient(
         base: base,
         ruolo: s.ruolo,
@@ -457,12 +496,25 @@ class ApiClient {
         token: s.token,
         alScadereDelToken: alScadereDelToken,
         client: client,
+        tokenAttuale: tokenAttuale,
+        rinnovaToken: rinnovaToken,
       );
 
-  Map<String, String> get _intestazioni => {
-    'Accept': 'application/json',
-    if (token != null) 'Authorization': 'Bearer $token' else ruolo.header: '$idUtente',
-  };
+  Future<Map<String, String>> _intestazioni() async {
+    final t = tokenAttuale != null ? await tokenAttuale!() : token;
+    // con un token che arriva dalla sessione, se la sessione è chiusa non si ripiega
+    // sugli header X-Id-* di sviluppo
+    if (t == null && tokenAttuale != null) {
+      alScadereDelToken?.call();
+      throw ErroreApi(401, 'sessione scaduta: rifai il login');
+    }
+    return {
+      'Accept': 'application/json',
+      if (t != null) 'Authorization': 'Bearer $t' else ruolo.header: '$idUtente',
+    };
+  }
+
+  bool get _conToken => token != null || tokenAttuale != null;
 
   /// GET /api/spedizioni — il backend filtra già per ruolo (il corriere vede solo le sue,
   /// il cliente solo quelle di cui è destinatario). [dal] e [al] sono giorni di creazione,
@@ -507,27 +559,36 @@ class ApiClient {
   ///  415 · 500 · 503. Le password non vanno mai scritte nei log.
   Future<void> cambiaPassword({required String attuale, required String nuova}) async {
     // ── CHIAMATA API: il JWT parte in `Authorization: Bearer <token>` (vedi _intestazioni) ──
+    final intestazioni = await _intestazioni();
     final r = await _esegui(() => _http.post(
-      Uri.parse('$base/api/auth/cambio-password'),
-      headers: {..._intestazioni, 'Content-Type': 'application/json'},
-      body: jsonEncode({'password_attuale': attuale, 'nuova_password': nuova}),
-    ));
+          Uri.parse('$base/api/auth/cambio-password'),
+          headers: {...intestazioni, 'Content-Type': 'application/json'},
+          body: jsonEncode({'password_attuale': attuale, 'nuova_password': nuova}),
+        ));
     if (r.statusCode != 204) throw _errore(r);
   }
 
   /// Costruisce l'errore e, se il backend ha risposto 401 a un token, avvisa la UI di tornare al login.
   ErroreApi _errore(http.Response r) {
-    if (r.statusCode == 401 && token != null) alScadereDelToken?.call();
+    if (r.statusCode == 401 && _conToken) alScadereDelToken?.call();
     return ErroreApi.daRisposta(r);
   }
 
-  Future<Map<String, dynamic>> _getJson(Uri uri) async {
+  /// Su un 401 con il token prova prima a rinnovarlo (app rimasta sospesa) e ripete la
+  /// richiesta una volta; se non si può, la sessione è finita ([_errore]).
+  Future<Map<String, dynamic>> _getJson(Uri uri, {bool riprova = true}) async {
     final r = await _get(uri);
+    if (r.statusCode == 401 && _conToken && riprova && rinnovaToken != null && await rinnovaToken!()) {
+      return _getJson(uri, riprova: false);
+    }
     if (r.statusCode != 200) throw _errore(r);
     return jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>;
   }
 
-  Future<http.Response> _get(Uri uri) => _esegui(() => _http.get(uri, headers: _intestazioni));
+  Future<http.Response> _get(Uri uri) async {
+    final intestazioni = await _intestazioni();
+    return _esegui(() => _http.get(uri, headers: intestazioni));
+  }
 
   /// Esegue una richiesta con timeout e traduce gli errori di rete in [ErroreApi] senza status.
   Future<http.Response> _esegui(Future<http.Response> Function() invio) async {

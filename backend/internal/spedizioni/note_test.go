@@ -10,7 +10,7 @@ import (
 
 func TestAggiungiNota(t *testing.T) {
 	ctx := context.Background()
-	assegnataA1 := Spedizione{ID: 10, Stato: InConsegna, IDCorriere: p(int32(1))}
+	assegnataA1 := Spedizione{ID: 10, Stato: InConsegna, IDCorriere: p(int64(1))}
 
 	t.Run("operatore_sempre_interna", func(t *testing.T) {
 		s, a := servizioElenco()
@@ -35,7 +35,7 @@ func TestAggiungiNota(t *testing.T) {
 			t.Errorf("spedizione di un altro corriere: atteso 403, ottenuto %v", err)
 		}
 		for _, stato := range Stati {
-			a.attuale = Spedizione{ID: 10, Stato: stato, IDCorriere: p(int32(1))}
+			a.attuale = Spedizione{ID: 10, Stato: stato, IDCorriere: p(int64(1))}
 			_, err := s.AggiungiNota(ctx, corriere1, 10, p("x"))
 			ammesso := stato == Ritirata || stato == InConsegna
 			if ammesso && err != nil || !ammesso && tipoErrore(err) != "409" {
@@ -106,7 +106,7 @@ func TestNotePubbliche(t *testing.T) {
 	if m, err := decidiTentativo(regoleTest, corriere1, inConsegna, consegna); err != nil || m.NuovoStato != InConsegna || !m.Nota.Pubblica {
 		t.Errorf("il primo tentativo di consegna ha la nota pubblica: %+v %v", m, err)
 	}
-	inConsegna.TentativiConsegnaFalliti, inConsegna.UsciteInConsegna = 2, 3
+	inConsegna.TentativiConsegnaFalliti = 2 // terza uscita, nessun tentativo ancora in questa
 	if m, err := decidiTentativo(regoleTest, corriere1, inConsegna, consegna); err != nil || m.NuovoStato != NonConsegnata || !m.Nota.Pubblica {
 		t.Errorf("l'ultimo tentativo (non consegnata) ha la nota pubblica: %+v %v", m, err)
 	}
@@ -115,8 +115,8 @@ func TestNotePubbliche(t *testing.T) {
 func TestDettaglioVisibilita(t *testing.T) {
 	ctx := context.Background()
 	voce := func() VoceElenco {
-		return VoceElenco{ID: 10, IDCorriere: p(int32(4)),
-			Note: []Nota{{ID: 1, Testo: "dettaglio interno", Motivo: p("furto"), IDOperatore: p(int32(2))}}}
+		return VoceElenco{ID: 10, IDCorriere: p(int64(4)),
+			Note: []Nota{{ID: 1, Testo: "dettaglio interno", Motivo: p("furto"), IDOperatore: p(int64(2))}}}
 	}
 
 	s, a := servizioElenco()

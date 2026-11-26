@@ -13,7 +13,7 @@ import (
 )
 
 type Account struct {
-	IDUtente int32
+	IDUtente int64
 	Nome     string
 	Cognome  string
 	Email    string
@@ -22,16 +22,23 @@ type Account struct {
 	Ruoli    []identita.Richiedente
 }
 
-type Repository struct {
-	db *pgxpool.Pool
+// revocaSessioni chiude le sessioni dell'utente dentro la transazione (package sessioni).
+type revocaSessioni interface {
+	RevocaUtente(ctx context.Context, tx pgx.Tx, idUtente int64, tranne, motivo string) (int, error)
 }
 
-func NuovoRepository(db *pgxpool.Pool) *Repository {
-	return &Repository{db: db}
+type Repository struct {
+	db       *pgxpool.Pool
+	sessioni revocaSessioni
+}
+
+func NuovoRepository(db *pgxpool.Pool, sessioni revocaSessioni) *Repository {
+	return &Repository{db: db, sessioni: sessioni}
 }
 
 const selezioneAccount = `
-	SELECT u.id, u.nome, u.cognome, u.email, u.pwd_hash, u.attivo, o.id, c.id, cl.id, a.id
+	SELECT u.id, u.nome, u.cognome, u.email, u.pwd_hash, u.attivo,
+	       o.id, o.id_sede, c.id, c.id_sede, cl.id, a.id
 	FROM utenti u
 	LEFT JOIN operatori_logistici o ON o.id_utente = u.id
 	LEFT JOIN corrieri c            ON c.id_utente = u.id
@@ -40,16 +47,19 @@ const selezioneAccount = `
 
 func leggiAccount(riga pgx.Row) (Account, error) {
 	var acc Account
-	var op, co, cl, am *int32
-	if err := riga.Scan(&acc.IDUtente, &acc.Nome, &acc.Cognome, &acc.Email, &acc.PwdHash, &acc.Attivo, &op, &co, &cl, &am); err != nil {
+	var op, sedeOp, co, sedeCo, cl, am *int64
+	if err := riga.Scan(&acc.IDUtente, &acc.Nome, &acc.Cognome, &acc.Email, &acc.PwdHash, &acc.Attivo,
+		&op, &sedeOp, &co, &sedeCo, &cl, &am); err != nil {
 		return Account{}, err
 	}
+	nessuna := new(int64)
 	for _, r := range []struct {
 		ruolo identita.Ruolo
-		id    *int32
-	}{{identita.Operatore, op}, {identita.Corriere, co}, {identita.Cliente, cl}, {identita.Amministratore, am}} {
-		if r.id != nil {
-			acc.Ruoli = append(acc.Ruoli, identita.Richiedente{Ruolo: r.ruolo, ID: *r.id})
+		id    *int64
+		sede  *int64
+	}{{identita.Operatore, op, sedeOp}, {identita.Corriere, co, sedeCo}, {identita.Cliente, cl, nessuna}, {identita.Amministratore, am, nessuna}} {
+		if r.id != nil && r.sede != nil {
+			acc.Ruoli = append(acc.Ruoli, identita.Richiedente{Ruolo: r.ruolo, ID: *r.id, IDSede: *r.sede})
 		}
 	}
 	return acc, nil
@@ -85,26 +95,42 @@ func (r *Repository) PerRuolo(ctx context.Context, rich identita.Richiedente) (A
 	return acc, err
 }
 
-func (r *Repository) DestinatarioDiSpedizioni(ctx context.Context, idCliente int32) (bool, error) {
+// DestinatarioDiSpedizioni: le spedizioni sono nell'altro database; quando un cliente
+// diventa destinatario il servizio spedizioni lo segna qui (clienti.destinatario).
+func (r *Repository) DestinatarioDiSpedizioni(ctx context.Context, idCliente int64) (bool, error) {
 	var destinatario bool
-	err := r.db.QueryRow(ctx,
-		`SELECT EXISTS (SELECT 1 FROM spedizioni WHERE id_cliente_destinatario = $1)`, idCliente).Scan(&destinatario)
+	err := r.db.QueryRow(ctx, `SELECT destinatario FROM clienti WHERE id = $1`, idCliente).Scan(&destinatario)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
 	return destinatario, err
 }
 
-func (r *Repository) AggiornaPassword(ctx context.Context, idUtente int32, hash string) error {
-	_, err := r.db.Exec(ctx, `UPDATE utenti SET pwd_hash = $2 WHERE id = $1`, idUtente, hash)
-	return err
+// AggiornaPassword cambia la password e, nella stessa transazione, chiude le sessioni
+// dell'utente tranne tranne (quella con cui l'utente l'ha cambiata).
+func (r *Repository) AggiornaPassword(ctx context.Context, idUtente int64, hash, tranne string) error {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `UPDATE utenti SET pwd_hash = $2 WHERE id = $1`, idUtente, hash); err != nil {
+		return err
+	}
+	if _, err := r.sessioni.RevocaUtente(ctx, tx, idUtente, tranne, identita.MotivoPasswordCambiata); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
-func (r *Repository) RecuperiRecenti(ctx context.Context, idUtente int32, dal time.Time) (int, error) {
+func (r *Repository) RecuperiRecenti(ctx context.Context, idUtente int64, dal time.Time) (int, error) {
 	var n int
 	err := r.db.QueryRow(ctx, `SELECT count(*) FROM recuperi_password WHERE id_utente = $1 AND creato_il >= $2`,
 		idUtente, dal).Scan(&n)
 	return n, err
 }
 
-func (r *Repository) CreaRecupero(ctx context.Context, idUtente int32, tokenHash string, scadenza time.Time) error {
+func (r *Repository) CreaRecupero(ctx context.Context, idUtente int64, tokenHash string, scadenza time.Time) error {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return err
@@ -129,7 +155,7 @@ func (r *Repository) UsaRecupero(ctx context.Context, tokenHash, nuovoHash strin
 		return false, err
 	}
 	defer tx.Rollback(ctx)
-	var idUtente int32
+	var idUtente int64
 	err = tx.QueryRow(ctx, `
 		UPDATE recuperi_password SET usato_il = now()
 		WHERE token_hash = $1 AND usato_il IS NULL AND scade_il > now()
@@ -141,6 +167,10 @@ func (r *Repository) UsaRecupero(ctx context.Context, tokenHash, nuovoHash strin
 		return false, err
 	}
 	if _, err := tx.Exec(ctx, `UPDATE utenti SET pwd_hash = $2 WHERE id = $1`, idUtente, nuovoHash); err != nil {
+		return false, err
+	}
+	// chi ha la vecchia password (o un suo token) non entra più
+	if _, err := r.sessioni.RevocaUtente(ctx, tx, idUtente, "", identita.MotivoPasswordCambiata); err != nil {
 		return false, err
 	}
 	return true, tx.Commit(ctx)

@@ -46,13 +46,13 @@ func LeggiCorpo(w http.ResponseWriter, r *http.Request, dest any) bool {
 	return true
 }
 
-func IDDalPercorso(w http.ResponseWriter, r *http.Request) (int32, bool) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 32)
+func IDDalPercorso(w http.ResponseWriter, r *http.Request) (int64, bool) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id <= 0 {
 		ScriviErrore(w, http.StatusBadRequest, "id non valido: deve essere un numero intero positivo")
 		return 0, false
 	}
-	return int32(id), true
+	return id, true
 }
 
 func leggiJSON(w http.ResponseWriter, r *http.Request, dest any) (string, bool) {
@@ -89,7 +89,7 @@ func leggiJSON(w http.ResponseWriter, r *http.Request, dest any) (string, bool) 
 
 func nomeTipo(t string) string {
 	switch strings.TrimPrefix(t, "*") {
-	case "int32", "int":
+	case "int64", "int32", "int":
 		return "numero intero"
 	case "string":
 		return "stringa"

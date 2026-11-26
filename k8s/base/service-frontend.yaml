@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-svc
+spec:
+  selector:
+    app: frontend
+  ports:
+    - port: 80          # quella che usa l'Ingress
+      targetPort: 8080  # quella su cui ascolta nginx nel container (utente non root)

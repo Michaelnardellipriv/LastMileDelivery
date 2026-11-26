@@ -1,0 +1,60 @@
+# Backup notturno dei database (pg_dump, formato custom) su un volume a parte, con
+# 14 giorni di storia: il globale e quello delle spedizioni di ogni gruppo di sedi
+# (GRUPPI_DB qui sotto). Il volume va copiato anche fuori dal cluster (snapshot del disco
+# o copia su un altro storage): un backup sullo stesso cluster non protegge dalla perdita
+# del cluster. Ripristino: docs/deployment.md, "Backup e ripristino".
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: backup-pvc
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 50Gi
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: backup-database
+spec:
+  schedule: "30 2 * * *"            # ogni notte alle 2:30
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: pg-dump
+              # l'immagine del database contiene pg_dump della stessa versione
+              image: localhost:32000/lastmile/db-globale:2.4.0
+              envFrom:
+                - secretRef: { name: db-secret }   # POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
+              env:
+                # i database da salvare: per ognuno il Service db-<nome>-svc e il file
+                # <nome>-<giorno>.dump. Un gruppo di sedi in più (k8s/esempi/gruppo-spedizioni-1.yaml)
+                # si aggiunge in fondo: "globale spedizioni spedizioni-1 spedizioni-2"
+                - name: GRUPPI_DB
+                  value: "globale spedizioni"
+              command:
+                - sh
+                - -c
+                - |
+                  set -eu
+                  export PGPASSWORD="$POSTGRES_PASSWORD"
+                  giorno=$(date +%F)
+                  for db in $GRUPPI_DB; do
+                    pg_dump -h "db-$db-svc" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc -f "/backup/$db-$giorno.dump"
+                    echo "backup $db: $(du -h /backup/$db-$giorno.dump | cut -f1)"
+                  done
+                  find /backup -name '*.dump' -mtime +14 -delete
+              volumeMounts:
+                - name: backup
+                  mountPath: /backup
+          volumes:
+            - name: backup
+              persistentVolumeClaim: { claimName: backup-pvc }

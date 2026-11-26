@@ -50,7 +50,8 @@ List<Widget> vociNote(List<Nota> note) => [
         ),
     ];
 
-/// Storico delle modifiche, dalla più recente, con chi le ha fatte.
+/// Storico delle modifiche, dalla più recente, con chi le ha fatte. I tentativi falliti del
+/// corriere (operazione `tentativo`) stanno accanto ai cambi di stato, con motivo e nota.
 class SezioneStorico extends StatelessWidget {
   final List<VoceStorico> storico;
   const SezioneStorico(this.storico, {super.key});
@@ -65,6 +66,7 @@ class SezioneStorico extends StatelessWidget {
             leading: Icon(switch (v.operazione) {
               'creazione' => Icons.add_circle_outline,
               'annullamento' => Icons.cancel_outlined,
+              'tentativo' => Icons.report_problem_outlined,
               _ => Icons.edit_outlined,
             }),
             title: Text(descriviModifica(v)),
@@ -74,6 +76,15 @@ class SezioneStorico extends StatelessWidget {
 
   static String descriviModifica(VoceStorico v) {
     if (v.operazione == 'creazione') return 'Spedizione creata';
+    if (v.operazione == 'tentativo') {
+      final tipo = v.dopo['tipo'] == 'ritiro' ? 'ritiro' : 'consegna';
+      final motivo = v.dopo['motivo'] as String?;
+      final nota = v.dopo['nota'] as String?;
+      return [
+        'Tentativo di $tipo fallito${motivo == null || motivo.isEmpty ? '' : ': $motivo'}',
+        if (nota != null && nota.isNotEmpty) nota,
+      ].join('\n');
+    }
     final prima = v.prima ?? const {};
     final cambi = [
       for (final e in v.dopo.entries)

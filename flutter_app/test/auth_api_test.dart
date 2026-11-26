@@ -130,6 +130,17 @@ void main() {
       expect(Sessione.daJsonSalvato({'token': 'x', 'id': 1, 'ruolo': 'cliente', 'nome': 'vecchio formato'}), isNull);
     });
 
+    test("operatore: la sede del login (utente.id_sede) resta nella sessione, anche salvata e riletta", () {
+      final risposta = _rispostaLogin('a.b.c');
+      final utente = {...risposta['utente'] as Map<String, dynamic>, 'ruolo': 'operatore', 'id_sede': 3};
+      final s = Sessione.daRispostaLogin({...risposta, 'utente': utente});
+      expect(s.idSede, 3);
+      expect(Sessione.daJsonSalvato(s.toJson())!.idSede, 3);
+      expect(s.conToken('x.y.z', DateTime.utc(2099)).idSede, 3); // anche dopo un rinnovo del token
+      // cliente: nessuna sede
+      expect(Sessione.daRispostaLogin(_rispostaLogin('a.b.c')).idSede, isNull);
+    });
+
     test('scade_il nel passato: sessione scaduta', () {
       final s = Sessione.daRispostaLogin({..._rispostaLogin('a.b.c'), 'scade_il': '2020-01-01T00:00:00Z'});
       expect(s.scaduta, isTrue);

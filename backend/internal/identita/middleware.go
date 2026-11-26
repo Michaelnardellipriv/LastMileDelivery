@@ -6,11 +6,12 @@ import (
 	"strconv"
 	"strings"
 
+	"lastmiledelivery/backend/internal/audit"
 	"lastmiledelivery/backend/internal/httpx"
 )
 
 type verificaUtente interface {
-	Stato(ctx context.Context, ruolo Ruolo, id int32) (esiste, attivo bool, err error)
+	Stato(ctx context.Context, ruolo Ruolo, id int64) (esiste, attivo bool, idSede int64, err error)
 }
 
 const messaggioDisattivato = "account disattivato: contattare l'amministratore"
@@ -34,7 +35,22 @@ func nonAutenticato(w http.ResponseWriter, messaggio string) {
 	httpx.ScriviErrore(w, http.StatusUnauthorized, messaggio)
 }
 
-func Richiedi(utenti verificaUtente, token verificaToken, ammettiHeaderID bool) httpx.Middleware {
+// controlloSessione: il token è firmato, ma vale solo se la sua sessione è ancora aperta
+// nel database. Restituisce il richiedente con i dati attuali (sede) o un errore: 401 se la
+// sessione è chiusa, scaduta o non esiste, 403 se l'utente è disattivato.
+type controlloSessione interface {
+	Controlla(ctx context.Context, r Richiedente) (Richiedente, error)
+}
+
+// Richiedi identifica chi chiama e lo controlla nel database a ogni richiesta, così una
+// revoca vale subito:
+//   - con un token: firma e scadenza, poi la sessione (sessioni). Sul servizio utenti la
+//     sessione si legge nel database globale (Repository.Controlla: aperta, utente attivo,
+//     sede attuale); sul servizio spedizioni nel suo database (ControlloRevoche: la sessione
+//     non è tra quelle chiuse, che il servizio utenti gli comunica prima di confermare
+//     disattivazioni, cambi di sede, nuove password e logout);
+//   - con un header X-Id-* (solo sviluppo): l'utente deve esistere ed essere attivo (utenti).
+func Richiedi(sessioni controlloSessione, utenti verificaUtente, token verificaToken, ammettiHeaderID bool) httpx.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if autorizzazione := r.Header.Get("Authorization"); autorizzazione != "" {
@@ -48,9 +64,15 @@ func Richiedi(utenti verificaUtente, token verificaToken, ammettiHeaderID bool) 
 					nonAutenticato(w, "token non valido o scaduto: rifare il login")
 					return
 				}
-				// il token resta valido fino alla scadenza: se nel frattempo l'amministratore
-				// ha disattivato l'utente, lo si blocca qui
-				if !utenteAttivo(w, r, utenti, rich) {
+				if rich.Sessione == "" {
+					nonAutenticato(w, "token senza sessione: rifare il login")
+					return
+				}
+				rich, err = sessioni.Controlla(r.Context(), rich)
+				if err != nil {
+					audit.Evento(audit.ConUtente(r.Context(), rich.String()), "accesso_rifiutato",
+						"percorso", r.URL.Path, "motivo", err.Error())
+					httpx.RispondiErrore(w, r, err)
 					return
 				}
 				next.ServeHTTP(w, r.WithContext(NelContesto(r.Context(), rich)))
@@ -80,14 +102,15 @@ func Richiedi(utenti verificaUtente, token verificaToken, ammettiHeaderID bool) 
 				return
 			}
 
-			id, err := strconv.ParseInt(valore, 10, 32)
+			id, err := strconv.ParseInt(valore, 10, 64)
 			if err != nil || id <= 0 {
 				nonAutenticato(w, "utente non identificato")
 				return
 			}
-			rich.ID = int32(id)
+			rich.ID = id
 
-			if !utenteAttivo(w, r, utenti, rich) {
+			rich, ok := utenteAttivo(w, r, utenti, rich)
+			if !ok {
 				return
 			}
 
@@ -96,8 +119,10 @@ func Richiedi(utenti verificaUtente, token verificaToken, ammettiHeaderID bool) 
 	}
 }
 
-func utenteAttivo(w http.ResponseWriter, r *http.Request, utenti verificaUtente, rich Richiedente) bool {
-	esiste, attivo, err := utenti.Stato(r.Context(), rich.Ruolo, rich.ID)
+// utenteAttivo controlla che l'utente esista e sia attivo e gli assegna la sede che ha
+// adesso nel database (quella del token potrebbe essere vecchia).
+func utenteAttivo(w http.ResponseWriter, r *http.Request, utenti verificaUtente, rich Richiedente) (Richiedente, bool) {
+	esiste, attivo, idSede, err := utenti.Stato(r.Context(), rich.Ruolo, rich.ID)
 	switch {
 	case err != nil:
 		httpx.RispondiErrore(w, r, err)
@@ -106,5 +131,6 @@ func utenteAttivo(w http.ResponseWriter, r *http.Request, utenti verificaUtente,
 	case !attivo:
 		httpx.ScriviErrore(w, http.StatusForbidden, messaggioDisattivato)
 	}
-	return err == nil && esiste && attivo
+	rich.IDSede = idSede
+	return rich, err == nil && esiste && attivo
 }
