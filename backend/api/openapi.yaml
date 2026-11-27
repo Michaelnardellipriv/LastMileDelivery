@@ -2,16 +2,32 @@ openapi: 3.0.3
 
 info:
   title: LastMileDelivery API
-  version: "0.33.0"
+  version: "0.47.0"
   description: |
     API per la gestione delle spedizioni di Veloce24.
+
+    **Due servizi, un solo indirizzo.** L'API è servita da due microservizi, ognuno con il
+    suo database: `spedizioni` (`/api/spedizioni`, `/api/corrieri/posizione`,
+    `/api/corrieri/posizioni`, `/api/impostazioni`, `/api/motivi`, `/api/indirizzi`,
+    `/api/sedi/{id}/impostazioni`) e `utenti` (tutto il resto: login, utenti, clienti,
+    corrieri, sedi). L'Ingress manda ogni percorso al servizio giusto: per chi
+    chiama è un'unica API. Se il servizio utenti non risponde, le spedizioni rispondono 503.
 
     Se il contratto e il codice divergono, il contratto ha vinto: va aggiornato
     nello stesso commit del codice.
 
     **Autenticazione.** Si fa il login con `POST /api/auth/login` (email e password) e si
     manda il token ricevuto in ogni richiesta: `Authorization: Bearer <token>`. Il token
-    contiene ruolo e id dell'utente e scade dopo `DURATA_TOKEN` (predefinito 8 ore).
+    contiene ruolo, id, sede e la **sessione** del login (`sid`) e scade dopo `DURATA_TOKEN`
+    (predefinito 15 minuti); si rinnova con `POST /api/auth/rinnova` finché la sessione è
+    aperta, al massimo `DURATA_SESSIONE` (predefinito 12 ore) dal login.
+
+    **Il token vale solo se la sua sessione è aperta nel database**, a ogni richiesta e su
+    tutti e due i servizi. La sessione si chiude, e il token smette subito di valere, con:
+    il logout (`POST /api/auth/esci`), la disattivazione dell'utente (poi 403 "account
+    disattivato"), un cambio di sede (il token porta la sede) e una password nuova (cambio,
+    recupero o nuova password dell'amministratore; chi la cambia tiene la sessione da cui
+    l'ha cambiata). Una sessione chiusa risponde 401: si rifà il login.
     Negli schemi di sicurezza qui sotto `operatore`, `corriere`, `cliente`, `amministratore`
     indicano il ruolo richiesto: il token deve essere di un utente con quel ruolo.
 
@@ -20,33 +36,75 @@ info:
     `X-Id-Cliente`, `X-Id-Amministratore` (id nella tabella del ruolo). In produzione va
     impostata a `disattiva`.
     Clienti e amministratori possono solo leggere: il cliente l'elenco e il dettaglio
-    delle sue spedizioni, l'amministratore tutte le spedizioni e il loro storico.
+    delle sue spedizioni, l'amministratore l'elenco delle spedizioni di una sede alla volta
+    (`id_sede` obbligatorio) e, per id, il dettaglio e lo storico di qualunque spedizione.
     L'amministratore non crea, modifica né elimina spedizioni, note o storico: tutte le
     altre operazioni rispondono 403, e non esistono endpoint di eliminazione.
 
-    **Configurazione del server** (variabili d'ambiente): `DATABASE_URL` (obbligatoria),
+    **Configurazione del server** (variabili d'ambiente): `DATABASE_URL` (obbligatoria: il
+    database del servizio; per il servizio spedizioni è il database del gruppo 0, e
+    `DATABASE_URL_1`, `DATABASE_URL_2`, ... sono i database degli altri gruppi di sedi,
+    vedi **Sedi**), `URL_SERVIZIO_UTENTI` / `URL_SERVIZIO_SPEDIZIONI` e
+    `CHIAVE_INTERNA` (per le chiamate tra i due servizi, vedi docs/microservizi.md),
     `CORS_ORIGIN` (obbligatoria: origini del frontend web ammesse dal browser, separate da
     virgola, senza percorso né barra finale, es. `http://localhost:5173`; `*` = tutte, solo
     sviluppo; le richieste senza `Origin`, come quelle delle app mobile, non ne dipendono),
     `LISTEN_ADDR` (predefinito `127.0.0.1:8080`), `JWT_SEGRETO` (almeno 32 caratteri; se
-    manca se ne genera uno casuale a ogni avvio), `DURATA_TOKEN` (predefinito `8h`),
+    manca se ne genera uno casuale a ogni avvio), `DURATA_TOKEN` (predefinito `15m`, almeno un minuto), `DURATA_SESSIONE` (predefinito `12h`, non minore di `DURATA_TOKEN`),
     `IDENTITA_HEADER_SVILUPPO` (`attiva` o `disattiva`), `LINK_RECUPERO_PASSWORD` (pagina del
     frontend a cui punta il link della mail, predefinita `http://localhost:5173/`; il backend
     aggiunge `?token=<token>`, quindi il valore non deve contenerlo), `SMTP_HOST`, `SMTP_PORT` (predefinito 587),
     `SMTP_UTENTE`, `SMTP_PASSWORD`, `SMTP_MITTENTE`. Senza `SMTP_HOST` le mail non vengono
     inviate ma scritte nel log del server.
 
+    **Sedi.** Ogni città ha una sede (`/api/sedi`, le crea l'amministratore). Operatori e
+    corrieri lavorano per una sede; una spedizione nasce nella sede dell'operatore che la
+    crea, ha ritiro e consegna nella città della sede e si assegna solo a corrieri della
+    stessa sede (409 altrimenti). Operatori e corrieri vedono solo i dati della propria sede:
+    una spedizione di un'altra sede risponde 404, come se non esistesse. L'amministratore
+    guarda l'elenco delle spedizioni **una sede alla volta**: in `GET /api/spedizioni`
+    `id_sede` per lui è obbligatorio (400 senza, 404 se la sede non esiste) e non c'è una
+    vista di tutte le sedi insieme; dettaglio e storico li legge per id, di qualunque sede.
+    Il cliente vede le spedizioni destinate a lui in qualunque sede. Sul servizio utenti la
+    sede si rilegge dal database a ogni richiesta; sul servizio spedizioni è quella del
+    token, ma un cambio di sede chiude subito le sessioni dell'utente (vedi
+    **Autenticazione**), quindi il token con la sede vecchia smette di valere su tutti e
+    due i servizi e si rifà il login. Il database controlla una seconda volta con la
+    Row-Level Security.
+
+    **Gruppi di sedi (mappa sede → database).** Le sedi sono divise in gruppi e ogni
+    gruppo ha il suo database delle spedizioni (le città grandi da sole, le piccole
+    insieme). Il gruppo è `gruppo_spedizioni` della sede: si sceglie alla creazione
+    (`POST /api/sedi`, predefinito 0, il gruppo principale) e poi non si cambia. Con il
+    solo gruppo 0 tutto funziona come un unico database. Per chi chiama l'API non cambia
+    niente: il servizio spedizioni sceglie il database da solo (la sede del token, l'id
+    della spedizione o `id_sede`).
+
     **Parametri dell'amministratore.** Tentativi massimi di ritiro e di consegna, giorni di
-    visibilità del cliente, intervallo della posizione e motivi non sono variabili d'ambiente:
-    stanno nelle tabelle `impostazioni` e `motivi` e li modifica l'amministratore
-    (`/api/impostazioni`). Valgono dalla richiesta successiva. Le tabelle qui sotto usano i
+    visibilità del cliente e intervallo della posizione non sono variabili d'ambiente: ogni
+    sede ha i suoi, nella tabella `impostazioni`, e li modifica l'amministratore con
+    `/api/sedi/{id}/impostazioni`. I motivi (`/api/impostazioni/motivi`) sono uguali per
+    tutte le sedi. Valgono dalla richiesta successiva. Le tabelle qui sotto usano i
     valori predefiniti (3 tentativi).
+
+    **ID.** Tutti gli id sono interi a 64 bit (`BIGINT` nel database). Gli id delle
+    spedizioni (e di note, tentativi, storico) contengono il gruppo di sedi: nel database
+    del gruppo g partono da g × 10^12 + 1, quindi il gruppo è `id / 10^12` (divisione
+    intera) e un id non si ripete tra gruppi diversi. Restano sotto 2^53: numeri esatti
+    anche in JavaScript. Chi chiama non deve farci niente: va solo trattato come un id.
+
+    **Idempotenza.** Le richieste con `Idempotency-Key` sono salvate nel database (24 ore):
+    una ripetizione trova la risposta anche se arriva a un'altra replica del backend o dopo
+    un riavvio.
 
     **Utenti disattivati.** L'amministratore può disattivare corrieri, operatori e clienti
     destinatari (`PATCH /api/utenti/{id}`): il login risponde 403, i token già emessi ricevono
     403 a ogni richiesta, a un corriere disattivato non si assegnano spedizioni e un cliente
     disattivato non può essere destinatario di spedizioni nuove. I dati dei clienti li
     modifica anche l'operatore, ma non può disattivarli.
+
+    **Sedi disattivate.** Una sede disattivata (`PATCH /api/sedi/{id}`) non accetta nuove
+    spedizioni né nuovi corrieri o operatori; chi ci lavora chiude le spedizioni già aperte.
 
     **Ciclo di vita** (stati del tipo `stato_spedizione` del database):
 
@@ -61,17 +119,19 @@ info:
     | in consegna | consegnata (non nell'uscita in cui è già fallito un tentativo di consegna) | corriere assegnato | `PATCH /stato` |
     | in consegna | in consegna (consegna fallita, tentativi 1 e 2) | corriere assegnato | `POST /tentativi` con `tipo: consegna` |
     | in consegna | non consegnata (consegna fallita, 3° tentativo) | corriere assegnato | `POST /tentativi` con `tipo: consegna` |
-    | in consegna | ritirata | solo operatore | `PATCH /stato` |
+    | in consegna | ritirata (solo con un tentativo di consegna fallito in questa uscita) | solo operatore | `PATCH /stato` |
     | ritirata, in consegna | persa (`motivo` e `nota` obbligatori) | operatore | `PATCH /stato` |
 
-    Tentativi (`max_tentativi_ritiro` e `max_tentativi_consegna` di `/api/impostazioni`, predefinito 3):
+    Tentativi (`max_tentativi_ritiro` e `max_tentativi_consegna` della sede, predefinito 3):
     - ritiro: la spedizione resta `assegnata`; dopo il terzo il corriere non può più
       registrare tentativi né ritirarla, non si può riassegnare e la annulla l'operatore,
       senza dover ripetere `motivo` e `nota` (ci sono già quelli dei 3 tentativi);
-    - consegna: ogni uscita in consegna ammette un solo tentativo. Ai tentativi 1 e 2 la
-      spedizione resta `in consegna`; per riprovare l'operatore la riporta in `ritirata`
-      (ed eventualmente la riassegna) e il corriere la rimette `in consegna`. Al terzo
-      passa da sola a `non consegnata`.
+    - consegna: ogni uscita in consegna (dall'ultimo passaggio a `in consegna`) ammette un
+      solo tentativo. Ai tentativi 1 e 2 la spedizione resta `in consegna` ma l'uscita è
+      chiusa: niente altro tentativo né consegna finché l'operatore non la riporta in
+      `ritirata` (ed eventualmente la riassegna) e il corriere non la rimette `in consegna`.
+      Al terzo passa da sola a `non consegnata`. L'operatore la riporta in `ritirata` solo
+      dopo un tentativo di consegna fallito di questa uscita.
 
     Ogni tentativo (ritiro e consegna) richiede `motivo` e `nota`, e così i cambi di stato
     in `annullata` e `persa`. La `nota` è testo libero; il `motivo` è uno dei motivi attivi
@@ -113,6 +173,8 @@ tags:
     description: Posizione simulata dei corrieri (RF16) e intervallo di invio
   - name: amministrazione
     description: Parametri della gestione delle spedizioni, motivi e utenti (corrieri, operatori e clienti); l'operatore modifica solo i dati dei clienti
+  - name: sedi
+    description: Sedi operative (una per città), loro impostazioni, attivazione e disattivazione
   - name: anagrafiche
     description: |
       Clienti e indirizzi, per creare una spedizione dall'interfaccia: l'operatore cerca o
@@ -156,6 +218,7 @@ paths:
                 token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI0IiwicnVvbG8iOiJjbGllbnRlIiwiaWQiOjIsImlhdCI6MCwiZXhwIjowfQ.firma
                 tipo: Bearer
                 scade_il: '2026-11-09T18:00:00Z'
+                durata_secondi: 900
                 utente: { id_utente: 4, ruolo: cliente, id: 2, nome: Dora, cognome: Destinataria, email: destinatario@veloce24.test }
         '400':
           description: '`email` o `password` mancanti; utente con più ruoli senza `ruolo`'
@@ -177,6 +240,63 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Errore' }
         '415': { $ref: '#/components/responses/NonJSON' }
+        '500': { $ref: '#/components/responses/ErroreInterno' }
+        '503': { $ref: '#/components/responses/NonDisponibile' }
+
+  /api/auth/rinnova:
+    post:
+      tags: [autenticazione]
+      summary: Rinnova il token
+      description: |
+        Con il token attuale (in `Authorization: Bearer`) restituisce un token nuovo, con la
+        stessa forma del login e la stessa sessione. Accetta anche un token appena scaduto
+        (app rimasta sospesa o senza rete), purché la sessione sia ancora aperta nel database
+        e non oltre `DURATA_SESSIONE` dal login: la sessione ha una durata massima e un token
+        rubato non si allunga all'infinito.
+        - sessione chiusa (logout, disattivazione, cambio di sede, password nuova) o finita: 401;
+        - utente disattivato: 403.
+        L'app lo chiama da sola a metà della durata del token (`durata_secondi`), così un
+        utente attivo non vede scadere la sessione prima di `DURATA_SESSIONE`.
+      operationId: rinnovaToken
+      security:
+        - bearer: []
+      responses:
+        '200':
+          description: Nuovo token
+          headers:
+            Cache-Control:
+              schema: { type: string, example: no-store }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Sessione' }
+        '401':
+          description: Token mancante o non valido, sessione oltre `DURATA_SESSIONE`, password cambiata dopo il login
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+        '403':
+          description: Utente disattivato dall'amministratore
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+        '500': { $ref: '#/components/responses/ErroreInterno' }
+        '503': { $ref: '#/components/responses/NonDisponibile' }
+
+  /api/auth/esci:
+    post:
+      tags: [autenticazione]
+      summary: Logout
+      description: |
+        Chiude la sessione del token: da subito il token non vale più, su tutti e due i
+        servizi, e non si rinnova. Le altre sessioni dello stesso utente (altri dispositivi)
+        restano aperte. Come il rinnovo accetta anche un token scaduto, entro
+        `DURATA_SESSIONE` dal login; una sessione già chiusa risponde comunque 204.
+      operationId: esci
+      security:
+        - bearer: []
+      responses:
+        '204': { description: Sessione chiusa (o già chiusa) }
+        '401': { $ref: '#/components/responses/NonIdentificato' }
         '500': { $ref: '#/components/responses/ErroreInterno' }
         '503': { $ref: '#/components/responses/NonDisponibile' }
 
@@ -281,7 +401,8 @@ paths:
 
         | Ruolo | Spedizioni restituite | Note | `id_corriere` |
         | :-- | :-- | :-- | :-- |
-        | operatore, amministratore | tutte, in tutti gli stati | tutte | sì |
+        | operatore | tutte quelle della sua sede, in tutti gli stati | tutte | sì |
+        | amministratore | tutte quelle della sede scelta con `id_sede` (obbligatorio), in tutti gli stati | tutte | sì |
         | corriere | solo quelle assegnate a lui, finché non sono concluse (`assegnata`, `ritirata`, `in consegna`) | tutte | no |
         | cliente | solo quelle di cui è destinatario: quelle in corso sempre, quelle chiuse (consegnata, non consegnata, persa, annullata) fino a `giorni_visibilita_cliente` giorni dalla chiusura (impostati dall'amministratore, predefinito 30) | solo il `motivo` (e la data) delle note pubbliche | no |
 
@@ -291,6 +412,12 @@ paths:
         Ordinate dalla più recente. I filtri si applicano dentro ciò che il ruolo può già
         vedere (un corriere che chiede `stato=consegnata` riceve una lista vuota) e si
         possono combinare.
+
+        **L'amministratore sceglie sempre una sede**: senza `id_sede` risponde 400 (campo
+        `id_sede`), con una sede che non esiste 404 "sede non trovata". Non c'è un elenco
+        di tutte le sedi insieme: ogni gruppo di sedi ha il suo database delle spedizioni.
+        L'elenco del cliente invece comprende tutte le sedi (legge tutti i gruppi e unisce
+        i risultati, con lo stesso ordine e `totale_elementi` sommato).
       operationId: elencaSpedizioni
       security:
         - operatore: []
@@ -306,7 +433,16 @@ paths:
           in: query
           required: false
           description: Solo le spedizioni assegnate a questo corriere. Solo per operatore e amministratore (altrimenti 403).
-          schema: { type: integer, format: int32, minimum: 1 }
+          schema: { type: integer, format: int64, minimum: 1 }
+        - name: id_sede
+          in: query
+          required: false
+          description: |
+            Solo le spedizioni di questa sede. **Obbligatorio per l'amministratore** (senza:
+            400; sede inesistente: 404), che vede l'elenco di una sede alla volta. Operatori e
+            corrieri non ne hanno bisogno, vedono già solo la propria (possono indicare solo
+            quella; un'altra sede: 403); il cliente non lo usa.
+          schema: { type: integer, format: int64, minimum: 1 }
         - name: dal
           in: query
           required: false
@@ -359,16 +495,33 @@ paths:
                 totale_elementi: 1
                 totale_pagine: 1
         '400':
-          description: Parametro non valido (`stato`, `id_corriere`, `dal`, `al`, `cod_ordine`, `pagina` o `per_pagina`)
+          description: |
+            Parametro non valido (`stato`, `id_corriere`, `id_sede`, `dal`, `al`, `cod_ordine`,
+            `pagina` o `per_pagina`), oppure `id_sede` mancante per l'amministratore
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Errore' }
+              examples:
+                sede_mancante:
+                  summary: L'amministratore non ha scelto la sede
+                  value:
+                    errore: dati non validi
+                    dettagli:
+                      - { campo: id_sede, messaggio: "obbligatorio per l'amministratore: scegliere una sede" }
         '401': { $ref: '#/components/responses/NonIdentificato' }
         '403':
-          description: Filtro `id_corriere` usato da un corriere o da un cliente
+          description: |
+            Filtro `id_corriere` usato da un corriere o da un cliente, oppure `id_sede` di
+            un'altra sede chiesto da un operatore o da un corriere
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Errore' }
+        '404':
+          description: L'amministratore ha indicato in `id_sede` una sede che non esiste
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+              example: { errore: sede non trovata }
         '500': { $ref: '#/components/responses/ErroreInterno' }
         '503': { $ref: '#/components/responses/NonDisponibile' }
 
@@ -380,7 +533,8 @@ paths:
         (cercati o creati con `/api/clienti` e `/api/indirizzi`). Senza `id_corriere` nasce
         `creata`; con `id_corriere` (scelto da `GET /api/corrieri`) nasce già `assegnata` a quel
         corriere, nella stessa operazione, e lo storico registra creazione e assegnazione.
-        `cod_ordine` è il riferimento esterno (es. l'ordine dell'e-commerce) ed è unico.
+        `cod_ordine` è il riferimento esterno (es. l'ordine dell'e-commerce) ed è unico nel
+        database del gruppo di sedi dell'operatore (con un solo gruppo: unico ovunque).
       operationId: creaSpedizione
       security:
         - operatore: []
@@ -417,8 +571,11 @@ paths:
         '403': { $ref: '#/components/responses/NonAutorizzato' }
         '409':
           description: |
-            Codice ordine già usato, destinatario disattivato dall'amministratore (errore sul
-            campo `id_cliente_destinatario`), oppure Idempotency-Key già usata con dati diversi
+            Codice ordine già usato, `id_corriere` di un'altra sede o disattivato, destinatario
+            disattivato dall'amministratore (errore sul campo `id_cliente_destinatario`), sede
+            dell'operatore disattivata, oppure Idempotency-Key già usata con dati diversi. La
+            spedizione nasce nella sede dell'operatore: indirizzi di ritiro o consegna fuori
+            dalla sua città rispondono 400.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Errore' }
@@ -438,7 +595,8 @@ paths:
 
         | Chi | Vede |
         | :-- | :-- |
-        | operatore, amministratore | qualsiasi spedizione, con corriere, note interne e autori delle note |
+        | operatore | qualsiasi spedizione della sua sede, con corriere, note interne e autori delle note |
+        | amministratore | qualsiasi spedizione di qualunque sede (non serve `id_sede`: l'id dice in quale database sta), con corriere, note interne e autori delle note |
         | corriere | solo le spedizioni assegnate a lui in `assegnata`, `ritirata`, `in consegna`, con note interne |
         | cliente | solo quelle di cui è destinatario, fino a `giorni_visibilita_cliente` giorni dalla chiusura (impostati dall'amministratore); senza corriere; delle note vede solo il `motivo` di quelle pubbliche (tentativi, annullata, persa) |
 
@@ -582,7 +740,10 @@ paths:
         '403': { $ref: '#/components/responses/NonAutorizzato' }
         '404': { $ref: '#/components/responses/NonTrovata' }
         '409':
-          description: Spedizione in consegna o chiusa, tentativi di ritiro esauriti, oppure spedizione ritirata senza tentativi di consegna falliti
+          description: |
+            Spedizione in consegna o chiusa, tentativi di ritiro esauriti, spedizione ritirata
+            senza tentativi di consegna falliti, oppure corriere di un'altra sede (una spedizione
+            si assegna solo a corrieri della sua sede) o disattivato
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Errore' }
@@ -600,7 +761,8 @@ paths:
         Il corriere assegnato registra un tentativo fallito; lo stato lo decide il server.
         - `ritiro` (spedizione `assegnata`): resta `assegnata`; al massimo 3 tentativi;
         - `consegna` (spedizione `in consegna`): un solo tentativo per uscita; resta
-          `in consegna` ai tentativi 1 e 2, passa a `non consegnata` al terzo.
+          `in consegna` ai tentativi 1 e 2 (per riprovare l'operatore la riporta in
+          `ritirata`), passa a `non consegnata` al terzo.
 
         `motivo` e `nota` sono sempre obbligatori e formano una nota pubblica: il cliente
         vede solo il `motivo`, la `nota` resta interna.
@@ -771,7 +933,7 @@ paths:
         '403': { $ref: '#/components/responses/NonAutorizzato' }
         '404': { $ref: '#/components/responses/NonTrovata' }
         '409':
-          description: Transizione non ammessa dallo stato attuale, spedizione chiusa, tentativi di ritiro esauriti, oppure consegna nell'uscita in cui è già stato registrato un tentativo fallito (va prima riportata in ritirata dall'operatore)
+          description: Transizione non ammessa dallo stato attuale, spedizione chiusa, tentativi di ritiro esauriti, consegna nell'uscita in cui è già stato registrato un tentativo fallito (va prima riportata in ritirata dall'operatore), oppure ritorno da `in consegna` a `ritirata` senza un tentativo di consegna fallito registrato in questa uscita
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Errore' }
@@ -946,6 +1108,7 @@ paths:
         - amministratore: []
       parameters:
         - { name: q, in: query, required: false, schema: { type: string, maxLength: 100 } }
+        - { name: id_sede, in: query, required: false, description: "Solo l'amministratore filtra su qualunque sede; operatori e corrieri sono limitati alla propria", schema: { type: integer, format: int64, minimum: 1 } }
         - { name: pagina, in: query, required: false, schema: { type: integer, minimum: 1, default: 1 } }
         - { name: per_pagina, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
       responses:
@@ -970,13 +1133,18 @@ paths:
       summary: Ricerca degli indirizzi
       description: |
         Operatori e amministratori. `q` cerca, senza distinguere maiuscole e minuscole, in via,
-        civico, città e CAP; vuoto = tutti.
+        civico, città e CAP; vuoto = tutti. Gli indirizzi di ritiro e consegna sono della sede
+        (stanno nel database delle spedizioni del suo gruppo, servizio spedizioni): l'operatore
+        vede quelli della sua sede, l'amministratore quelli della sede che sceglie con
+        `id_sede`, **obbligatorio** per lui (senza: 400 sul campo `id_sede`; una sede che non
+        esiste: 404).
       operationId: cercaIndirizzi
       security:
         - operatore: []
         - amministratore: []
       parameters:
         - { name: q, in: query, required: false, schema: { type: string, maxLength: 100 } }
+        - { name: id_sede, in: query, required: false, description: "Obbligatorio per l'amministratore (una sede alla volta); l'operatore vede solo la propria (un'altra sede: 403)", schema: { type: integer, format: int64, minimum: 1 } }
         - { name: pagina, in: query, required: false, schema: { type: integer, minimum: 1, default: 1 } }
         - { name: per_pagina, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
       responses:
@@ -998,11 +1166,15 @@ paths:
       tags: [anagrafiche]
       summary: Trova o crea un indirizzo
       description: |
-        Solo l'operatore. Tutti i campi sono obbligatori. Nazione, regione e città vengono
-        riusate se esistono già (senza distinguere maiuscole e minuscole), altrimenti create.
-        Se nella stessa città esiste già un indirizzo con la stessa via e lo stesso civico
+        Solo l'operatore. Tutti i campi sono obbligatori. Città, regione e nazione devono essere
+        quelle della sede dell'operatore (senza distinguere maiuscole e minuscole): l'indirizzo
+        si salva nel database delle spedizioni del gruppo della sede, con la sede.
+        Se nella stessa sede esiste già un indirizzo con la stessa via e lo stesso civico
         risponde 200 con quello, altrimenti lo crea e risponde 201. In entrambi i casi l'`id`
         si usa come `id_indirizzo_ritiro` o `id_indirizzo_spedizione` della spedizione.
+        Ritiro e consegna restano nella città della sede dell'operatore: un indirizzo con
+        città, regione o nazione diverse da quelle della sede risponde 400 sul campo `citta`.
+        Il CAP sta sull'indirizzo (una città ne ha più d'uno).
       operationId: trovaOCreaIndirizzo
       security:
         - operatore: []
@@ -1120,18 +1292,18 @@ paths:
   /api/impostazioni/intervallo-posizione:
     get:
       tags: [posizioni]
-      summary: Ogni quanti secondi il corriere invia la posizione
-      description: >-
-        Corrieri, operatori e amministratori; il cliente riceve 403. L'intervallo si
-        modifica solo con `PATCH /api/impostazioni` (`intervallo_posizione_sec`).
+      summary: Ogni quanti secondi il corriere invia la posizione (sede di chi chiama)
+      description: |
+        Corrieri e operatori leggono l'intervallo della propria sede. L'amministratore non ha
+        una sede: legge e cambia l'intervallo di ogni sede con `/api/sedi/{id}/impostazioni`
+        (qui riceve 403, come il cliente).
       operationId: leggiIntervalloPosizione
       security:
         - corriere: []
         - operatore: []
-        - amministratore: []
       responses:
         '200':
-          description: Intervallo attuale
+          description: Intervallo attuale della sede
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Intervallo' }
@@ -1140,31 +1312,203 @@ paths:
         '500': { $ref: '#/components/responses/ErroreInterno' }
         '503': { $ref: '#/components/responses/NonDisponibile' }
 
-  /api/impostazioni:
+  /api/sedi:
     get:
-      tags: [amministrazione]
-      summary: Parametri della gestione delle spedizioni
+      tags: [sedi]
+      summary: Sedi
+      description: |
+        L'amministratore vede tutte le sedi; operatori e corrieri solo la propria; il cliente
+        riceve 403. `q` cerca nel nome della sede e in città, regione e nazione.
+      operationId: cercaSedi
+      security:
+        - amministratore: []
+        - operatore: []
+        - corriere: []
+      parameters:
+        - { name: q, in: query, required: false, schema: { type: string, maxLength: 100 } }
+        - { name: attiva, in: query, required: false, description: 'true = solo attive, false = solo disattivate', schema: { type: boolean } }
+        - { name: pagina, in: query, required: false, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: per_pagina, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        '200':
+          description: Sedi trovate
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ListaSedi' }
+        '400':
+          description: Parametri non validi
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+        '401': { $ref: '#/components/responses/NonIdentificato' }
+        '403': { $ref: '#/components/responses/NonAutorizzato' }
+        '500': { $ref: '#/components/responses/ErroreInterno' }
+        '503': { $ref: '#/components/responses/NonDisponibile' }
+    post:
+      tags: [sedi]
+      summary: Apre una sede in una città
+      description: |
+        Solo l'amministratore. Città, regione e nazione si ricavano dall'indirizzo, che si
+        trova o si crea come con `POST /api/indirizzi` (stesse regole, errori sui campi
+        `indirizzo.via`, `indirizzo.citta`, ...). Una sola sede per città (409). La sede nasce
+        con le impostazioni predefinite.
+
+        `gruppo_spedizioni` (facoltativo, predefinito 0) è il gruppo di sedi, cioè il
+        database delle spedizioni in cui staranno le spedizioni della sede. Deve essere tra
+        0 e 9006 e il gruppo deve avere un database configurato nel servizio spedizioni
+        (`DATABASE_URL_<n>`), altrimenti 400 sul campo `gruppo_spedizioni` (il messaggio
+        elenca i gruppi configurati). Dopo la creazione non si cambia: spostare una sede in
+        un altro gruppo è una migrazione dei dati.
+      operationId: creaSede
+      security:
+        - amministratore: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NuovaSede' }
+            example:
+              nome: Veloce24 Verona
+              indirizzo: { via: Via Mazzini, civico: '5', cap: '37121', citta: Verona, regione: Veneto, nazione: Italia }
+      responses:
+        '201':
+          description: Sede creata
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Sede' }
+        '400':
+          description: |
+            Nome o indirizzo mancanti o non validi; `gruppo_spedizioni` fuori da 0..9006 o di
+            un gruppo senza database delle spedizioni
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+              examples:
+                gruppo_senza_database:
+                  summary: Il gruppo non ha un database delle spedizioni
+                  value:
+                    errore: dati non validi
+                    dettagli:
+                      - { campo: gruppo_spedizioni, messaggio: 'il gruppo 3 non ha un database delle spedizioni (gruppi configurati: [0 1])' }
+        '401': { $ref: '#/components/responses/NonIdentificato' }
+        '403': { $ref: '#/components/responses/NonAutorizzato' }
+        '409':
+          description: La città ha già una sede, oppure esiste già una sede con questo nome
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+        '415': { $ref: '#/components/responses/NonJSON' }
+        '500': { $ref: '#/components/responses/ErroreInterno' }
+        '503': { $ref: '#/components/responses/NonDisponibile' }
+
+  /api/sedi/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: integer, format: int64, minimum: 1 } }
+    get:
+      tags: [sedi]
+      summary: Una sede
+      description: L'amministratore vede ogni sede; operatori e corrieri solo la propria (altrimenti 403).
+      operationId: leggiSede
+      security:
+        - amministratore: []
+        - operatore: []
+        - corriere: []
+      responses:
+        '200':
+          description: La sede
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Sede' }
+        '401': { $ref: '#/components/responses/NonIdentificato' }
+        '403': { $ref: '#/components/responses/NonAutorizzato' }
+        '404': { $ref: '#/components/responses/NonTrovata' }
+        '500': { $ref: '#/components/responses/ErroreInterno' }
+        '503': { $ref: '#/components/responses/NonDisponibile' }
+    patch:
+      tags: [sedi]
+      summary: Modifica o disattiva una sede
+      description: |
+        Solo l'amministratore; partono solo i campi presenti. L'indirizzo, se c'è, va dato
+        intero e deve essere nella città della sede (400 su `indirizzo.citta`): le spedizioni
+        della sede sono legate alla sua città, che non cambia.
+
+        Con `attiva: false` la sede non accetta nuove spedizioni (409 a `POST /api/spedizioni`)
+        né nuovi corrieri o operatori (409 su `id_sede` in `POST /api/utenti` e
+        `PATCH /api/utenti/{id}`). Chi ci lavora continua ad accedere e porta a termine le
+        spedizioni già aperte. Con `attiva: true` torna come prima.
+
+        `gruppo_spedizioni` non si cambia (400 sul campo `gruppo_spedizioni`): le spedizioni
+        della sede sono nel database del suo gruppo.
+      operationId: modificaSede
+      security:
+        - amministratore: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ModificaSede' }
+            examples:
+              rinomina: { value: { nome: Veloce24 Trento Centro } }
+              disattiva: { value: { attiva: false } }
+      responses:
+        '200':
+          description: Sede aggiornata
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Sede' }
+        '400':
+          description: Nessun campo, nome vuoto o troppo lungo, indirizzo non valido o in un'altra città, `gruppo_spedizioni` presente (non si cambia)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+        '401': { $ref: '#/components/responses/NonIdentificato' }
+        '403': { $ref: '#/components/responses/NonAutorizzato' }
+        '404': { $ref: '#/components/responses/NonTrovata' }
+        '409':
+          description: Esiste già una sede con questo nome
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Errore' }
+        '415': { $ref: '#/components/responses/NonJSON' }
+        '500': { $ref: '#/components/responses/ErroreInterno' }
+        '503': { $ref: '#/components/responses/NonDisponibile' }
+
+  /api/sedi/{id}/impostazioni:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: integer, format: int64, minimum: 1 } }
+    get:
+      tags: [sedi]
+      summary: Parametri della gestione delle spedizioni di una sede
+      description: L'amministratore li legge per ogni sede; operatori e corrieri solo per la propria (altrimenti 403).
       operationId: leggiImpostazioni
       security:
         - amministratore: []
+        - operatore: []
+        - corriere: []
       responses:
         '200':
-          description: Impostazioni attuali
+          description: Impostazioni attuali della sede
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Impostazioni' }
         '401': { $ref: '#/components/responses/NonIdentificato' }
         '403': { $ref: '#/components/responses/NonAutorizzato' }
+        '404': { $ref: '#/components/responses/NonTrovata' }
         '500': { $ref: '#/components/responses/ErroreInterno' }
         '503': { $ref: '#/components/responses/NonDisponibile' }
     patch:
-      tags: [amministrazione]
-      summary: Modifica uno o più parametri
+      tags: [sedi]
+      summary: Modifica uno o più parametri di una sede
       description: |
-        Solo i campi presenti cambiano; la modifica registra l'amministratore e l'ora. I nuovi
-        valori valgono dalla richiesta successiva, anche per le spedizioni già aperte: per
-        esempio, abbassando `max_tentativi_consegna` una spedizione arriva prima a `non consegnata`.
-        `intervallo_posizione_sec` è lo stesso valore di `/api/impostazioni/intervallo-posizione`.
+        Solo l'amministratore, che sceglie la sede e poi i parametri. Solo i campi presenti
+        cambiano; la modifica registra l'amministratore e l'ora. I nuovi valori valgono dalla
+        richiesta successiva, anche per le spedizioni già aperte della sede: per esempio,
+        abbassando `max_tentativi_consegna` una spedizione arriva prima a `non consegnata`.
+        Le altre sedi non cambiano.
       operationId: modificaImpostazioni
       security:
         - amministratore: []
@@ -1189,6 +1533,7 @@ paths:
               schema: { $ref: '#/components/schemas/Errore' }
         '401': { $ref: '#/components/responses/NonIdentificato' }
         '403': { $ref: '#/components/responses/NonAutorizzato' }
+        '404': { $ref: '#/components/responses/NonTrovata' }
         '415': { $ref: '#/components/responses/NonJSON' }
         '500': { $ref: '#/components/responses/ErroreInterno' }
         '503': { $ref: '#/components/responses/NonDisponibile' }
@@ -1252,7 +1597,7 @@ paths:
 
   /api/impostazioni/motivi/{id}:
     parameters:
-      - { name: id, in: path, required: true, schema: { type: integer, format: int32, minimum: 1 } }
+      - { name: id, in: path, required: true, schema: { type: integer, format: int64, minimum: 1 } }
     patch:
       tags: [amministrazione]
       summary: Attiva o disattiva un motivo
@@ -1311,6 +1656,7 @@ paths:
         - amministratore: []
       parameters:
         - { name: q, in: query, required: false, schema: { type: string, maxLength: 100 } }
+        - { name: id_sede, in: query, required: false, description: "Solo l'amministratore filtra su qualunque sede; operatori e corrieri sono limitati alla propria", schema: { type: integer, format: int64, minimum: 1 } }
         - { name: ruolo, in: query, required: false, schema: { type: string, enum: [corriere, operatore, cliente] } }
         - { name: attivo, in: query, required: false, schema: { type: boolean } }
         - { name: pagina, in: query, required: false, schema: { type: integer, minimum: 1, default: 1 } }
@@ -1377,11 +1723,15 @@ paths:
         in: path
         required: true
         description: Id dell'utente (campo `id` di `Utente`, non `id_ruolo`)
-        schema: { type: integer, format: int32, minimum: 1 }
+        schema: { type: integer, format: int64, minimum: 1 }
     patch:
       tags: [amministrazione]
       summary: Modifica, abilita o disattiva un corriere, un operatore o un cliente
       description: |
+        Il **ruolo** non si cambia: un corpo con `ruolo` risponde 400 sul campo `ruolo` (e un
+        trigger nel database impedisce comunque di spostare o togliere il ruolo di un utente).
+        Disattivazione, cambio di sede e nuova password chiudono subito le sessioni
+        dell'utente: i suoi token smettono di valere su tutti e due i servizi.
         Cambia solo i campi presenti (almeno uno); il ruolo non si cambia. Per i dati valgono
         le regole di `POST /api/utenti`; l'email non può essere di un altro utente (409), la
         propria con maiuscole diverse sì. Con una nuova `password` l'utente la riceve per mail.
@@ -1392,6 +1742,8 @@ paths:
           i dati: con `password` o `attivo` risponde 409.
         - **operatore logistico**: solo i dati dei clienti (nome, cognome, prefisso,
           nr_telefono, email). `password` o `attivo`, oppure un corriere o un operatore, danno 403.
+          Anche l'`email`, pure di chi usa l'app. A ogni cambio di email i link di recupero
+          della password già mandati scadono.
         - gli amministratori non si modificano da qui (404).
 
         Un utente disattivato (`attivo: false`) non può fare il login (403), i token che aveva ricevono 403 a
@@ -1475,7 +1827,7 @@ components:
       name: id
       in: path
       required: true
-      schema: { type: integer, format: int32, minimum: 1 }
+      schema: { type: integer, format: int64, minimum: 1 }
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -1578,8 +1930,8 @@ components:
           maxLength: 50
           pattern: '^[A-Za-z0-9][A-Za-z0-9._/-]*$'
           description: Riferimento esterno dell'ordine, unico
-        id_cliente_mittente: { type: integer, format: int32, minimum: 1 }
-        id_cliente_destinatario: { type: integer, format: int32, minimum: 1 }
+        id_cliente_mittente: { type: integer, format: int64, minimum: 1 }
+        id_cliente_destinatario: { type: integer, format: int64, minimum: 1 }
         dataora_richiesta_spedizione:
           type: string
           format: date-time
@@ -1590,15 +1942,15 @@ components:
           description: |
             Non si invia: data e ora del ritiro le registra il sistema quando il corriere porta
             la spedizione in `ritirata`. Se presente la richiesta è rifiutata con 400 sul campo.
-        id_indirizzo_ritiro: { type: integer, format: int32, minimum: 1 }
+        id_indirizzo_ritiro: { type: integer, format: int64, minimum: 1 }
         id_indirizzo_spedizione:
           type: integer
-          format: int32
+          format: int64
           minimum: 1
           description: Diverso dall'indirizzo di ritiro
         id_corriere:
           type: integer
-          format: int32
+          format: int64
           minimum: 1
           description: Facoltativo; se presente la spedizione nasce già assegnata a questo corriere
 
@@ -1611,8 +1963,8 @@ components:
         is_reso:
           type: boolean
           description: Solo su una spedizione annullata, persa o non consegnata
-        id_cliente_mittente: { type: integer, format: int32, minimum: 1 }
-        id_cliente_destinatario: { type: integer, format: int32, minimum: 1 }
+        id_cliente_mittente: { type: integer, format: int64, minimum: 1 }
+        id_cliente_destinatario: { type: integer, format: int64, minimum: 1 }
         dataora_richiesta_spedizione:
           type: string
           format: date-time
@@ -1623,15 +1975,15 @@ components:
           description: |
             Non si invia: data e ora del ritiro le registra il sistema quando il corriere porta
             la spedizione in `ritirata`. Se presente la richiesta è rifiutata con 400 sul campo.
-        id_indirizzo_ritiro: { type: integer, format: int32, minimum: 1 }
-        id_indirizzo_spedizione: { type: integer, format: int32, minimum: 1 }
+        id_indirizzo_ritiro: { type: integer, format: int64, minimum: 1 }
+        id_indirizzo_spedizione: { type: integer, format: int64, minimum: 1 }
 
     Assegnazione:
       type: object
       additionalProperties: false
       required: [id_corriere]
       properties:
-        id_corriere: { type: integer, format: int32, minimum: 1 }
+        id_corriere: { type: integer, format: int64, minimum: 1 }
 
     TentativoFallito:
       type: object
@@ -1704,7 +2056,8 @@ components:
         - tentativi_ritiro_falliti
         - tentativi_consegna_falliti
       properties:
-        id: { type: integer, format: int32, example: 42 }
+        id: { type: integer, format: int64, example: 42 }
+        id_sede: { type: integer, format: int64, description: Sede che gestisce la spedizione }
         cod_ordine: { type: string, example: ORD-2026-0001 }
         stato: { $ref: '#/components/schemas/Stato' }
         is_reso: { type: boolean }
@@ -1718,13 +2071,13 @@ components:
           format: date-time
           nullable: true
           description: Data e ora del ritiro, registrate al primo passaggio in `ritirata`; null prima
-        id_cliente_mittente: { type: integer, format: int32 }
-        id_cliente_destinatario: { type: integer, format: int32 }
-        id_indirizzo_ritiro: { type: integer, format: int32 }
-        id_indirizzo_spedizione: { type: integer, format: int32 }
+        id_cliente_mittente: { type: integer, format: int64 }
+        id_cliente_destinatario: { type: integer, format: int64 }
+        id_indirizzo_ritiro: { type: integer, format: int64 }
+        id_indirizzo_spedizione: { type: integer, format: int64 }
         id_corriere:
           type: integer
-          format: int32
+          format: int64
           nullable: true
           description: Corriere dell'assegnazione attuale, null se non assegnata
         annullata_il:
@@ -1766,9 +2119,10 @@ components:
 
     IndirizzoAnagrafica:
       type: object
-      required: [id, via, civico, citta, cap, regione, nazione]
+      required: [id, id_citta, via, civico, citta, cap, regione, nazione]
       properties:
-        id: { type: integer, format: int32 }
+        id: { type: integer, format: int64 }
+        id_citta: { type: integer, format: int64, description: Ogni indirizzo è in una sola città }
         via: { type: string }
         civico: { type: string }
         citta: { type: string }
@@ -1807,8 +2161,8 @@ components:
       type: object
       required: [id, id_utente, nome, cognome, email, prefisso, nr_telefono, attivo, destinatario]
       properties:
-        id: { type: integer, format: int32, description: 'Id nella tabella clienti, da usare come id_cliente_mittente o id_cliente_destinatario' }
-        id_utente: { type: integer, format: int32, description: "Id dell'utente, da usare in PATCH /api/utenti/{id} per modificarne i dati" }
+        id: { type: integer, format: int64, description: 'Id nella tabella clienti, da usare come id_cliente_mittente o id_cliente_destinatario' }
+        id_utente: { type: integer, format: int64, description: "Id dell'utente, da usare in PATCH /api/utenti/{id} per modificarne i dati" }
         nome: { type: string }
         cognome: { type: string }
         email: { type: string }
@@ -1832,8 +2186,9 @@ components:
       type: object
       required: [id, id_utente, nome, cognome, email, prefisso, nr_telefono]
       properties:
-        id: { type: integer, format: int32, description: 'Id nella tabella corrieri, da usare come id_corriere' }
-        id_utente: { type: integer, format: int32 }
+        id: { type: integer, format: int64, description: 'Id nella tabella corrieri, da usare come id_corriere' }
+        id_utente: { type: integer, format: int64 }
+        id_sede: { type: integer, format: int64, description: Sede in cui lavora il corriere }
         nome: { type: string }
         cognome: { type: string }
         email: { type: string }
@@ -1874,7 +2229,7 @@ components:
         - cliente: mittente con nome, cognome, email e telefono (senza id), destinatario con id,
           email e telefono; niente corriere.
       properties:
-        id: { type: integer, format: int32, description: 'Id nella tabella clienti o corrieri; assente per il mittente quando chiama il cliente' }
+        id: { type: integer, format: int64, description: 'Id nella tabella clienti o corrieri; assente per il mittente quando chiama il cliente' }
         nome: { type: string }
         cognome: { type: string }
         email: { type: string }
@@ -1885,7 +2240,7 @@ components:
       required: [ruolo, id]
       properties:
         ruolo: { type: string, enum: [operatore, corriere] }
-        id: { type: integer, format: int32 }
+        id: { type: integer, format: int64 }
         nome: { type: string, description: Presente nello storico e nelle note (non per il cliente) }
         cognome: { type: string, description: Presente nello storico e nelle note (non per il cliente) }
 
@@ -1911,7 +2266,7 @@ components:
       type: object
       required: [id, is_interna, motivo, creata_il]
       properties:
-        id: { type: integer, format: int32 }
+        id: { type: integer, format: int64 }
         nota:
           type: string
           description: Testo della nota; assente per il cliente, che vede solo il `motivo`
@@ -1943,7 +2298,9 @@ components:
         - conclusa_il
         - note
       properties:
-        id: { type: integer, format: int32 }
+        id: { type: integer, format: int64 }
+        id_sede: { type: integer, format: int64, description: Sede che gestisce la spedizione }
+        sede: { type: string, description: Nome della sede }
         cod_ordine: { type: string }
         stato: { $ref: '#/components/schemas/Stato' }
         is_reso: { type: boolean }
@@ -1956,16 +2313,16 @@ components:
           description: Data e ora del ritiro, registrate al primo passaggio in `ritirata`; null prima
         id_cliente_mittente:
           type: integer
-          format: int32
+          format: int64
           description: Assente quando chiama il cliente
-        id_cliente_destinatario: { type: integer, format: int32 }
+        id_cliente_destinatario: { type: integer, format: int64 }
         indirizzo_ritiro: { $ref: '#/components/schemas/Indirizzo' }
         indirizzo_spedizione: { $ref: '#/components/schemas/Indirizzo' }
         mittente: { $ref: '#/components/schemas/Persona' }
         destinatario: { $ref: '#/components/schemas/Persona' }
         id_corriere:
           type: integer
-          format: int32
+          format: int64
           nullable: true
           description: Presente solo per operatore e amministratore
         corriere:
@@ -2012,19 +2369,26 @@ components:
       type: object
       required: [id, operazione, valore_vecchio, valore_nuovo, modificato_il, autore]
       properties:
-        id: { type: integer, format: int32 }
+        id: { type: integer, format: int64 }
         operazione:
           type: string
-          enum: [creazione, modifica, annullamento]
+          enum: [creazione, modifica, annullamento, tentativo]
+          description: |
+            `tentativo`: un tentativo di ritiro o di consegna fallito, registrato dal corriere
+            (`POST /tentativi`); sta nello storico accanto ai cambi di stato, in ordine di tempo
+            (a parità di istante prima il tentativo, poi il cambio di stato che ha causato).
+            L'`id` è quello del tentativo, non di una modifica.
         valore_vecchio:
           type: object
           nullable: true
           additionalProperties: true
-          description: Solo i campi cambiati, col valore precedente; null per la creazione
+          description: Solo i campi cambiati, col valore precedente; null per la creazione e per i tentativi
         valore_nuovo:
           type: object
           additionalProperties: true
-          description: Solo i campi cambiati, col nuovo valore; la riga intera per la creazione
+          description: |
+            Solo i campi cambiati, col nuovo valore; la riga intera per la creazione. Per un
+            tentativo: `tipo` (ritiro o consegna), `esito` (fallito), `motivo` e `nota` del corriere.
         modificato_il: { type: string, format: date-time }
         autore:
           allOf: [{ $ref: '#/components/schemas/Autore' }]
@@ -2057,7 +2421,7 @@ components:
       type: object
       required: [id_corriere, nome, cognome, latitudine, longitudine, rilevata_il, spedizioni_attive]
       properties:
-        id_corriere: { type: integer, format: int32 }
+        id_corriere: { type: integer, format: int64 }
         nome: { type: string }
         cognome: { type: string }
         latitudine: { type: number }
@@ -2065,7 +2429,7 @@ components:
         rilevata_il: { type: string, format: date-time }
         spedizioni_attive:
           type: array
-          items: { type: integer, format: int32 }
+          items: { type: integer, format: int64 }
 
     PosizioniCorrieri:
       type: object
@@ -2090,21 +2454,28 @@ components:
 
     Sessione:
       type: object
-      required: [token, tipo, scade_il, utente]
+      required: [token, tipo, scade_il, durata_secondi, utente]
       properties:
         token: { type: string }
         tipo: { type: string, enum: [Bearer] }
         scade_il: { type: string, format: date-time }
+        durata_secondi:
+          type: integer
+          description: Durata del token in secondi. Il client programma il rinnovo con il proprio orologio (adesso + durata), senza confrontare scade_il con un orologio del dispositivo che può essere sbagliato.
         utente:
           type: object
           required: [id_utente, ruolo, id, nome, cognome, email]
           properties:
-            id_utente: { type: integer, format: int32 }
+            id_utente: { type: integer, format: int64 }
             ruolo: { type: string, enum: [operatore, corriere, cliente, amministratore] }
             id:
               type: integer
-              format: int32
+              format: int64
               description: Id nella tabella del ruolo (operatori_logistici, corrieri, clienti, amministratori)
+            id_sede:
+              type: integer
+              format: int64
+              description: Sede di operatori e corrieri; assente per clienti e amministratori
             nome: { type: string }
             cognome: { type: string }
             email: { type: string }
@@ -2140,14 +2511,15 @@ components:
 
     Impostazioni:
       type: object
-      required: [giorni_visibilita_cliente, max_tentativi_ritiro, max_tentativi_consegna, intervallo_posizione_sec, modificate_il, id_amministratore_modifica]
+      required: [id_sede, giorni_visibilita_cliente, max_tentativi_ritiro, max_tentativi_consegna, intervallo_posizione_sec, modificate_il, id_amministratore_modifica]
       properties:
-        giorni_visibilita_cliente: { type: integer, minimum: 1, maximum: 365, example: 30, description: Per quanti giorni dalla chiusura il cliente destinatario vede una spedizione }
+        id_sede: { type: integer, format: int64 }
+        giorni_visibilita_cliente: { type: integer, minimum: 1, maximum: 365, example: 30, description: Per quanti giorni dalla chiusura il cliente destinatario vede una spedizione della sede }
         max_tentativi_ritiro: { type: integer, minimum: 1, maximum: 10, example: 3, description: Ritiri falliti dopo i quali la spedizione va annullata }
         max_tentativi_consegna: { type: integer, minimum: 1, maximum: 10, example: 3, description: Consegne fallite dopo le quali la spedizione diventa non consegnata }
         intervallo_posizione_sec: { type: integer, minimum: 5, maximum: 3600, example: 30, description: Ogni quanti secondi il corriere invia la posizione e la mappa degli operatori si aggiorna }
         modificate_il: { type: string, format: date-time }
-        id_amministratore_modifica: { type: integer, format: int32, nullable: true, description: Ultimo amministratore che le ha modificate }
+        id_amministratore_modifica: { type: integer, format: int64, nullable: true, description: Ultimo amministratore che le ha modificate }
 
     ModificaImpostazioni:
       type: object
@@ -2170,7 +2542,7 @@ components:
       type: object
       required: [id, descrizione, attivo, creato_il]
       properties:
-        id: { type: integer, format: int32 }
+        id: { type: integer, format: int64 }
         descrizione: { type: string }
         attivo: { type: boolean, description: Solo i motivi attivi sono in GET /api/motivi e sono accettati }
         creato_il: { type: string, format: date-time }
@@ -2202,13 +2574,22 @@ components:
         email: { type: string, format: email, maxLength: 254 }
         password: { type: string, minLength: 8, description: Nuova password, inviata per mail all'utente }
         attivo: { type: boolean, description: false disattiva l'utente, true lo riabilita }
+        id_sede:
+          type: integer
+          format: int64
+          description: |
+            Solo l'amministratore, solo per corrieri e operatori (i clienti non hanno sede: 400).
+            Sposta l'utente in un'altra sede. Un corriere con spedizioni assegnate, ritirate o in
+            consegna non si sposta (409): vanno prima riassegnate. Sede inesistente: 400; sede
+            disattivata: 409.
 
     NuovoUtente:
       type: object
       additionalProperties: false
-      required: [ruolo, nome, cognome, prefisso, nr_telefono, email, password]
+      required: [ruolo, id_sede, nome, cognome, prefisso, nr_telefono, email, password]
       properties:
         ruolo: { type: string, enum: [corriere, operatore] }
+        id_sede: { type: integer, format: int64, description: Sede in cui lavora (inesistente = 400, disattivata = 409) }
         nome: { type: string, maxLength: 100 }
         cognome: { type: string, maxLength: 100 }
         prefisso: { type: string, pattern: '^\+[0-9]{1,4}$', example: '+39' }
@@ -2223,9 +2604,11 @@ components:
       type: object
       required: [id, ruolo, id_ruolo, nome, cognome, email, prefisso, nr_telefono, attivo]
       properties:
-        id: { type: integer, format: int32, description: "Id nella tabella utenti, da usare in /api/utenti/{id}" }
+        id: { type: integer, format: int64, description: "Id nella tabella utenti, da usare in /api/utenti/{id}" }
         ruolo: { type: string, enum: [corriere, operatore, cliente] }
-        id_ruolo: { type: integer, format: int32, description: 'Id nella tabella corrieri, operatori_logistici o clienti, quello usato nelle spedizioni (es. id_corriere)' }
+        id_ruolo: { type: integer, format: int64, description: 'Id nella tabella corrieri, operatori_logistici o clienti, quello usato nelle spedizioni (es. id_corriere)' }
+        id_sede: { type: integer, format: int64, nullable: true, description: 'Sede in cui lavora il corriere o l''operatore; null per i clienti' }
+        sede: { type: string, nullable: true, description: 'Nome della sede; null per i clienti' }
         nome: { type: string }
         cognome: { type: string }
         email: { type: string }
@@ -2245,6 +2628,63 @@ components:
       properties:
         utente: { $ref: '#/components/schemas/Utente' }
         mail_inviata: { type: boolean, description: true se la mail con le credenziali è partita }
+
+    Sede:
+      type: object
+      required: [id, nome, attiva, indirizzo, gruppo_spedizioni, creata_il]
+      properties:
+        id: { type: integer, format: int64 }
+        nome: { type: string }
+        attiva: { type: boolean, description: 'false = non accetta nuove spedizioni né nuovi corrieri o operatori' }
+        indirizzo: { $ref: '#/components/schemas/IndirizzoAnagrafica' }
+        gruppo_spedizioni:
+          type: integer
+          minimum: 0
+          maximum: 9006
+          readOnly: true
+          description: |
+            Gruppo di sedi: il database delle spedizioni della sede (0 = il principale).
+            Si sceglie alla creazione e poi non si cambia.
+        creata_il: { type: string, format: date-time }
+
+    NuovaSede:
+      type: object
+      additionalProperties: false
+      required: [nome, indirizzo]
+      properties:
+        nome: { type: string, maxLength: 100, description: Unico tra le sedi (senza distinguere maiuscole) }
+        indirizzo: { $ref: '#/components/schemas/NuovoIndirizzo' }
+        gruppo_spedizioni:
+          type: integer
+          minimum: 0
+          maximum: 9006
+          default: 0
+          description: |
+            Gruppo di sedi (database delle spedizioni) della sede; deve avere un database
+            configurato nel servizio spedizioni. Non si cambia dopo la creazione.
+
+    ModificaSede:
+      type: object
+      additionalProperties: false
+      description: Almeno un campo; partono solo quelli presenti. `gruppo_spedizioni` non c'è perché non si cambia (se mandato, 400 sul campo `gruppo_spedizioni`).
+      properties:
+        nome: { type: string, maxLength: 100 }
+        indirizzo:
+          allOf: [{ $ref: '#/components/schemas/NuovoIndirizzo' }]
+          description: Nuovo indirizzo della sede, intero e nella stessa città
+        attiva: { type: boolean, description: 'false disattiva la sede, true la riattiva' }
+
+    ListaSedi:
+      type: object
+      required: [dati, pagina, per_pagina, totale_elementi, totale_pagine]
+      properties:
+        dati:
+          type: array
+          items: { $ref: '#/components/schemas/Sede' }
+        pagina: { type: integer }
+        per_pagina: { type: integer }
+        totale_elementi: { type: integer, minimum: 0 }
+        totale_pagine: { type: integer, minimum: 0 }
 
     ListaUtenti:
       type: object

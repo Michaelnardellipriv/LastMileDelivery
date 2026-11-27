@@ -11,16 +11,21 @@ import (
 )
 
 const (
-	percorsoImpostazioni = "/api/impostazioni"
-	percorsoMotiviAdmin  = "/api/impostazioni/motivi"
-	percorsoUtenti       = "/api/utenti"
+	percorsoMotiviAdmin = "/api/impostazioni/motivi"
+	percorsoUtenti      = "/api/utenti"
 )
 
-// impostazioni modifica i parametri globali e li ripristina a fine test: gli altri
-// test si aspettano i valori predefiniti (3 tentativi, 30 giorni).
+// percorsoImpostazioni: ogni sede ha le sue impostazioni.
+func percorsoImpostazioni(idSede int64) string {
+	return "/api/sedi/" + strconv.FormatInt(idSede, 10) + "/impostazioni"
+}
+
+// impostazioni modifica i parametri della sede della fixture e li ripristina a fine test:
+// gli altri test si aspettano i valori predefiniti (3 tentativi, 30 giorni).
 func (f *fixture) impostazioni(t *testing.T, modifica map[string]any) map[string]any {
 	t.Helper()
 	admin := comeAmministratore(f)
+	percorsoImpostazioni := percorsoImpostazioni(f.idSede)
 	prima := f.chiama(t, http.MethodGet, percorsoImpostazioni, nil, admin)
 	if prima.stato != http.StatusOK {
 		t.Fatalf("lettura impostazioni: %d %s", prima.stato, prima.grezzo)
@@ -44,19 +49,40 @@ func (f *fixture) impostazioni(t *testing.T, modifica map[string]any) map[string
 func TestImpostazioniAmministratore(t *testing.T) {
 	f := preparaFixture(t)
 	admin, op, c1, dest := comeAmministratore(f), comeOperatore(f), comeCorriere(f.idCorriere1), comeCliente(f.idDestinatario)
+	percorsoImpostazioni := percorsoImpostazioni(f.idSede)
 
-	t.Run("solo_amministratore", func(t *testing.T) {
+	t.Run("solo_amministratore_modifica", func(t *testing.T) {
 		for _, chi := range []map[string]string{op, c1, dest} {
-			if r := f.chiama(t, http.MethodGet, percorsoImpostazioni, nil, chi); r.stato != http.StatusForbidden {
-				t.Errorf("%v legge le impostazioni: atteso 403, ottenuto %d", chi, r.stato)
-			}
 			if r := f.chiama(t, http.MethodPatch, percorsoImpostazioni, map[string]any{"max_tentativi_ritiro": 2}, chi); r.stato != http.StatusForbidden {
 				t.Errorf("%v modifica le impostazioni: atteso 403, ottenuto %d", chi, r.stato)
 			}
 		}
+		if r := f.chiama(t, http.MethodGet, percorsoImpostazioni, nil, dest); r.stato != http.StatusForbidden {
+			t.Errorf("il cliente legge le impostazioni: atteso 403, ottenuto %d", r.stato)
+		}
+		for _, chi := range []map[string]string{op, c1} {
+			if r := f.chiama(t, http.MethodGet, percorsoImpostazioni, nil, chi); r.stato != http.StatusOK {
+				t.Errorf("%v legge le impostazioni della sua sede: atteso 200, ottenuto %d", chi, r.stato)
+			}
+			if r := f.chiama(t, http.MethodGet, "/api/sedi/"+strconv.FormatInt(f.idSedeAltra, 10)+"/impostazioni", nil, chi); r.stato != http.StatusForbidden {
+				t.Errorf("%v legge le impostazioni di un'altra sede: atteso 403, ottenuto %d", chi, r.stato)
+			}
+		}
 		r := f.chiama(t, http.MethodGet, percorsoImpostazioni, nil, admin)
-		if r.stato != http.StatusOK || r.corpo["max_tentativi_ritiro"] == nil || r.corpo["giorni_visibilita_cliente"] == nil {
-			t.Fatalf("l'amministratore legge le impostazioni: %d %s", r.stato, r.grezzo)
+		if r.stato != http.StatusOK || r.corpo["max_tentativi_ritiro"] == nil || r.corpo["giorni_visibilita_cliente"] == nil ||
+			r.corpo["id_sede"] != float64(f.idSede) {
+			t.Fatalf("l'amministratore legge le impostazioni della sede: %d %s", r.stato, r.grezzo)
+		}
+		if r := f.chiama(t, http.MethodGet, "/api/sedi/999999999/impostazioni", nil, admin); r.stato != http.StatusNotFound {
+			t.Errorf("sede inesistente: atteso 404, ottenuto %d", r.stato)
+		}
+	})
+
+	t.Run("ogni_sede_ha_le_sue_impostazioni", func(t *testing.T) {
+		f.impostazioni(t, map[string]any{"max_tentativi_ritiro": 7})
+		altra := f.chiama(t, http.MethodGet, "/api/sedi/"+strconv.FormatInt(f.idSedeAltra, 10)+"/impostazioni", nil, admin)
+		if altra.stato != http.StatusOK || altra.corpo["max_tentativi_ritiro"] != float64(3) {
+			t.Fatalf("cambiare Trento non cambia Bolzano: %d %s", altra.stato, altra.grezzo)
 		}
 	})
 
@@ -187,7 +213,7 @@ func TestUtentiAmministratore(t *testing.T) {
 	f := preparaFixture(t)
 	admin, op := comeAmministratore(f), comeOperatore(f)
 	nuovo := func(ruolo, nome string) map[string]any {
-		return map[string]any{"ruolo": ruolo, "nome": nome, "cognome": "Nuovo", "prefisso": "+39",
+		return map[string]any{"ruolo": ruolo, "id_sede": f.idSede, "nome": nome, "cognome": "Nuovo", "prefisso": "+39",
 			"nr_telefono": telefonoUnico(), "email": f.emailDi(nome), "password": "PasswordNuova1"}
 	}
 
@@ -224,7 +250,7 @@ func TestUtentiAmministratore(t *testing.T) {
 		}
 		utente := r.corpo["utente"].(map[string]any)
 		idUtente := strconv.Itoa(int(utente["id"].(float64)))
-		idCorriere := int32(utente["id_ruolo"].(float64))
+		idCorriere := int64(utente["id_ruolo"].(float64))
 		if utente["ruolo"] != "corriere" || utente["attivo"] != true {
 			t.Fatalf("dati del corriere: %s", r.grezzo)
 		}
@@ -242,8 +268,16 @@ func TestUtentiAmministratore(t *testing.T) {
 			t.Fatalf("disattivazione: %d %s", disattiva.stato, disattiva.grezzo)
 		}
 		f.login(t, map[string]any{"email": f.emailDi("corrierenuovo"), "password": "PasswordNuova1"}, 403)
+		// negato l'accesso, il token smette SUBITO di valere: sul servizio spedizioni (che ha
+		// ricevuto la sessione chiusa) e sul servizio utenti, e non si rinnova
 		if r := f.chiama(t, http.MethodGet, "/api/spedizioni", nil, token); r.stato != http.StatusForbidden {
-			t.Fatalf("il token di un utente disattivato non vale più: %d", r.stato)
+			t.Fatalf("spedizioni con il token di un utente appena disattivato: atteso 403, ottenuto %d %s", r.stato, r.grezzo)
+		}
+		if r := f.chiama(t, http.MethodPost, "/api/auth/cambio-password", map[string]any{"password_attuale": "x", "nuova_password": "y"}, token); r.stato != http.StatusForbidden {
+			t.Fatalf("servizio utenti con il token di un utente disattivato: atteso 403, ottenuto %d", r.stato)
+		}
+		if r := f.chiama(t, http.MethodPost, "/api/auth/rinnova", nil, token); r.stato != http.StatusForbidden || r.corpo["token"] != nil {
+			t.Fatalf("un utente disattivato non rinnova il token (403, come il login): %d %s", r.stato, r.grezzo)
 		}
 		if r := f.chiama(t, http.MethodGet, "/api/spedizioni", nil, comeCorriere(idCorriere)); r.stato != http.StatusForbidden {
 			t.Fatalf("neanche con l'header di sviluppo: %d", r.stato)
@@ -422,8 +456,11 @@ func TestUtentiAmministratore(t *testing.T) {
 			t.Fatalf("disattivazione del destinatario: %d %s", r.stato, r.grezzo)
 		}
 		f.login(t, map[string]any{"email": f.emailDi("clientedest"), "password": "PasswordNuova9"}, 403)
+		if r := f.chiama(t, http.MethodPost, "/api/auth/rinnova", nil, conToken(sessione)); r.stato != http.StatusForbidden {
+			t.Errorf("il destinatario disattivato non rinnova il token: %d", r.stato)
+		}
 		if r := f.chiama(t, http.MethodGet, "/api/spedizioni", nil, conToken(sessione)); r.stato != http.StatusForbidden {
-			t.Errorf("il token del destinatario disattivato non vale più: %d", r.stato)
+			t.Errorf("il token del destinatario disattivato non vale più sulle spedizioni: %d", r.stato)
 		}
 
 		// un destinatario disattivato non riceve spedizioni nuove, né per modifica
@@ -445,7 +482,7 @@ func TestUtentiAmministratore(t *testing.T) {
 		}
 
 		// gli amministratori non si modificano da qui
-		var idUtenteAdmin int32
+		var idUtenteAdmin int64
 		if err := f.db.QueryRow(t.Context(), `SELECT id_utente FROM amministratori WHERE id = $1`, f.idAmministratore).Scan(&idUtenteAdmin); err != nil {
 			t.Fatal(err)
 		}

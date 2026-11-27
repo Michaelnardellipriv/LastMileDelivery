@@ -1,4 +1,5 @@
 // flutter test — client dell'area operatori con un server finto (MockClient).
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -65,6 +66,8 @@ ApiOperatore _api(Future<http.Response> Function(http.Request) server) =>
     ApiOperatore(base: 'http://backend:8080/', client: MockClient(server));
 
 void main() {
+  _testRinnovo();
+
   test('login (i valori partono come inseriti): salva il token e lo manda come Bearer nelle chiamate successive', () async {
     final richieste = <http.Request>[];
     final api = _api((req) async {
@@ -286,5 +289,188 @@ void main() {
     expect((s.assegnataDa!.id, s.assegnataDa!.nomeCompleto, s.assegnataDa!.email, s.assegnataDa!.telefono),
         (2, 'Olga Operatrice', 'olga@test.it', '+39 3330000012'));
     expect(Spedizione.daJson(_spedizione).assegnataDa, isNull);
+  });
+}
+
+// Il token dura poco (15 minuti nel backend): oltre metà della durata l'app lo rinnova da
+// sola prima della richiesta; se il backend rifiuta il rinnovo (utente disattivato) la
+// sessione si chiude.
+Map<String, Object?> _sessioneCheScadeTra(Duration d, String token) => {
+      ..._sessione,
+      'token': token,
+      'scade_il': DateTime.now().add(d).toUtc().toIso8601String(),
+    };
+
+void _testRinnovo() {
+  test('a ridosso della scadenza il token si rinnova prima della richiesta', () async {
+    final viste = <String>[];
+    final api = _api((req) async {
+      viste.add('${req.method} ${req.url.path} ${req.headers['Authorization']}');
+      return switch (req.url.path) {
+        '/api/auth/login' => http.Response(jsonEncode(_sessioneCheScadeTra(const Duration(seconds: 2), 'tok-vecchio')), 200),
+        '/api/auth/rinnova' => http.Response(jsonEncode(_sessioneCheScadeTra(const Duration(minutes: 15), 'tok-nuovo')), 200),
+        _ => http.Response(jsonEncode(_spedizione), 200),
+      };
+    });
+    final ricevuti = <String>[];
+    api.alRinnovoToken.add(ricevuti.add);
+    await api.login('op@test.it', 'x');
+    // token di 2 s: dopo 1,6 s manca meno di un quarto della durata, quindi si aspetta il rinnovo
+    await Future<void>.delayed(const Duration(milliseconds: 1600));
+    await api.dettaglio(42);
+    expect(viste, [
+      'POST /api/auth/login null',
+      'POST /api/auth/rinnova Bearer tok-vecchio',
+      'GET /api/spedizioni/42 Bearer tok-nuovo',
+    ]);
+    expect(ricevuti, ['tok-nuovo']); // es. il worker del GPS
+    await api.dettaglio(42); // token appena rinnovato: niente altro rinnovo
+    expect(viste.where((v) => v.contains('rinnova')), hasLength(1));
+  });
+
+  test('a metà della durata il rinnovo parte in sottofondo: la richiesta non lo aspetta', () async {
+    final viste = <String>[];
+    final rinnovo = Completer<http.Response>();
+    final api = _api((req) {
+      viste.add('${req.method} ${req.url.path} ${req.headers['Authorization']}');
+      if (req.url.path == '/api/auth/rinnova') return rinnovo.future; // servizio utenti lento
+      if (req.url.path == '/api/auth/login') {
+        return Future.value(http.Response(jsonEncode({..._sessioneCheScadeTra(const Duration(seconds: 8), 'tok-vecchio'), 'durata_secondi': 8}), 200));
+      }
+      return Future.value(http.Response(jsonEncode(_spedizione), 200));
+    });
+    await api.login('op@test.it', 'x');
+    await Future<void>.delayed(const Duration(milliseconds: 4500)); // oltre metà di 8 s, lontano dalla scadenza
+    await api.dettaglio(42); // non aspetta il rinnovo ancora in corso
+    expect(viste, ['POST /api/auth/login null', 'POST /api/auth/rinnova Bearer tok-vecchio', 'GET /api/spedizioni/42 Bearer tok-vecchio']);
+    rinnovo.complete(http.Response(jsonEncode({..._sessioneCheScadeTra(const Duration(minutes: 15), 'tok-nuovo'), 'durata_secondi': 900}), 200));
+    await Future<void>.delayed(Duration.zero);
+    await api.dettaglio(42);
+    expect(viste.last, 'GET /api/spedizioni/42 Bearer tok-nuovo');
+  });
+
+  test('rinnovo non riuscito per la rete: un 401 non fa uscire, si riprova più tardi', () async {
+    var scaduto = false;
+    final api = _api((req) async {
+      switch (req.url.path) {
+        case '/api/auth/login':
+          return http.Response(jsonEncode({..._sessioneCheScadeTra(const Duration(minutes: 15), 'tok'), 'durata_secondi': 900}), 200);
+        case '/api/auth/rinnova':
+          throw http.ClientException('rete assente');
+      }
+      return http.Response('{"errore":"token non valido o scaduto"}', 401);
+    });
+    api.alScadereDelToken = () => scaduto = true;
+    await api.login('op@test.it', 'x');
+    await expectLater(api.dettaglio(42), throwsA(isA<ErroreServer>()));
+    expect(scaduto, isFalse);
+    expect(api.token, 'tok');
+  });
+
+  test('rinnovo rifiutato (utente disattivato): la sessione si chiude', () async {
+    final api = _api((req) async => switch (req.url.path) {
+          '/api/auth/login' => http.Response(jsonEncode(_sessioneCheScadeTra(const Duration(seconds: 2), 'tok')), 200),
+          '/api/auth/rinnova' => http.Response('{"errore":"account disattivato"}', 403),
+          _ => http.Response(jsonEncode(_spedizione), 200),
+        });
+    var scaduto = false;
+    api.alScadereDelToken = () => scaduto = true;
+    await api.login('op@test.it', 'x');
+    await Future<void>.delayed(const Duration(milliseconds: 1200));
+    await api.rinnovaSeServe();
+    expect(scaduto, isTrue);
+    expect(api.token, isNull);
+  });
+
+  test("403 da un servizio: il rinnovo verifica l'account e, se disattivato, chiude la sessione", () async {
+    final api = _api((req) async => switch (req.url.path) {
+          '/api/auth/login' => http.Response(jsonEncode({..._sessioneCheScadeTra(const Duration(minutes: 15), 'tok'), 'durata_secondi': 900}), 200),
+          '/api/auth/rinnova' => http.Response('{"errore":"account disattivato"}', 403),
+          _ => http.Response('{"errore":"account disattivato"}', 403),
+        });
+    var scaduto = false;
+    api.alScadereDelToken = () => scaduto = true;
+    await api.login('op@test.it', 'x');
+    await expectLater(api.dettaglio(42), throwsA(isA<ErroreServer>().having((e) => e.status, 'status', 403)));
+    expect(scaduto, isTrue);
+    expect(api.token, isNull);
+  });
+
+  test('403 per un permesso mancante: la sessione resta', () async {
+    final api = _api((req) async => switch (req.url.path) {
+          '/api/auth/login' => http.Response(jsonEncode({..._sessioneCheScadeTra(const Duration(minutes: 15), 'tok'), 'durata_secondi': 900}), 200),
+          '/api/auth/rinnova' => http.Response(jsonEncode({..._sessioneCheScadeTra(const Duration(minutes: 15), 'tok-nuovo'), 'durata_secondi': 900}), 200),
+          _ => http.Response('{"errore":"solo un operatore"}', 403),
+        });
+    var scaduto = false;
+    api.alScadereDelToken = () => scaduto = true;
+    await api.login('op@test.it', 'x');
+    await expectLater(api.dettaglio(42), throwsA(isA<ErroreServer>().having((e) => e.status, 'status', 403)));
+    expect(scaduto, isFalse);
+    expect(api.token, 'tok-nuovo');
+  });
+
+  test('token scaduto (app sospesa): il 401 rinnova e ripete la richiesta una volta', () async {
+    final viste = <String>[];
+    var primaVolta = true;
+    final api = _api((req) async {
+      viste.add('${req.method} ${req.url.path} ${req.headers['Authorization']}');
+      switch (req.url.path) {
+        case '/api/auth/login':
+          return http.Response(jsonEncode({..._sessioneCheScadeTra(const Duration(minutes: 15), 'tok-vecchio'), 'durata_secondi': 900}), 200);
+        case '/api/auth/rinnova':
+          return http.Response(jsonEncode({..._sessioneCheScadeTra(const Duration(minutes: 15), 'tok-nuovo'), 'durata_secondi': 900}), 200);
+      }
+      if (primaVolta) {
+        primaVolta = false;
+        return http.Response('{"errore":"token non valido o scaduto"}', 401);
+      }
+      return http.Response(jsonEncode(_spedizione), 200);
+    });
+    await api.login('op@test.it', 'x');
+    await api.dettaglio(42);
+    expect(viste, [
+      'POST /api/auth/login null',
+      'GET /api/spedizioni/42 Bearer tok-vecchio',
+      'POST /api/auth/rinnova Bearer tok-vecchio',
+      'GET /api/spedizioni/42 Bearer tok-nuovo',
+    ]);
+    expect(api.token, 'tok-nuovo');
+  });
+
+  test('logout: chiude la sessione sul server, poi esce anche se il server non risponde', () async {
+    final viste = <String>[];
+    var rete = true;
+    final api = _api((req) async {
+      viste.add('${req.method} ${req.url.path} ${req.headers['Authorization']}');
+      if (!rete) throw http.ClientException('rete assente');
+      return req.url.path == '/api/auth/login'
+          ? http.Response(jsonEncode({..._sessioneCheScadeTra(const Duration(minutes: 15), 'tok'), 'durata_secondi': 900}), 200)
+          : http.Response('', 204);
+    });
+    await api.login('op@test.it', 'x');
+    await api.logout();
+    expect(viste.last, 'POST /api/auth/esci Bearer tok');
+    expect(api.token, isNull);
+
+    await api.login('op@test.it', 'x');
+    rete = false;
+    await api.logout();
+    expect(api.token, isNull);
+  });
+
+  test('logout durante un rinnovo: il token che arriva dopo non riapre la sessione', () async {
+    final risposta = Completer<http.Response>();
+    final api = _api((req) {
+      if (req.url.path == '/api/auth/rinnova') return risposta.future; // risponde dopo il logout
+      return Future.value(http.Response(jsonEncode(_sessioneCheScadeTra(const Duration(minutes: 15), 'tok')), 200));
+    });
+    await api.login('op@test.it', 'x');
+    final rinnovo = api.rinnova();
+    api.esci();
+    risposta.complete(http.Response(jsonEncode(_sessioneCheScadeTra(const Duration(minutes: 15), 'tok-nuovo')), 200));
+    expect(await rinnovo, isFalse);
+    expect(api.token, isNull);
+    expect(api.utente, isNull);
   });
 }

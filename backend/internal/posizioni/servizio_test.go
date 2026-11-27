@@ -9,27 +9,34 @@ import (
 	"lastmiledelivery/backend/internal/identita"
 )
 
+const sedeTrento = 10
+
+// archivioFinto ricorda la sede con cui è stato chiamato: il servizio deve passare
+// sempre quella del richiedente.
 type archivioFinto struct {
 	registrata bool
-	intervallo int32
+	intervallo int64
+	sede       int64
 }
 
-func (a *archivioFinto) Registra(context.Context, int32, float64, float64) (int32, error) {
-	a.registrata = true
+func (a *archivioFinto) Registra(_ context.Context, idSede, _ int64, _, _ float64) (int64, error) {
+	a.registrata, a.sede = true, idSede
 	return a.intervallo, nil
 }
 
-func (a *archivioFinto) Posizioni(context.Context) ([]Posizione, error) {
+func (a *archivioFinto) Posizioni(_ context.Context, idSede int64) ([]Posizione, error) {
+	a.sede = idSede
 	return []Posizione{{IDCorriere: 1}}, nil
 }
 
-func (a *archivioFinto) Intervallo(context.Context) (int32, error) {
+func (a *archivioFinto) Intervallo(_ context.Context, idSede int64) (int64, error) {
+	a.sede = idSede
 	return a.intervallo, nil
 }
 
 var (
-	operatore      = identita.Richiedente{Ruolo: identita.Operatore, ID: 1}
-	corriere       = identita.Richiedente{Ruolo: identita.Corriere, ID: 2}
+	operatore      = identita.Richiedente{Ruolo: identita.Operatore, ID: 1, IDSede: sedeTrento}
+	corriere       = identita.Richiedente{Ruolo: identita.Corriere, ID: 2, IDSede: sedeTrento}
 	cliente        = identita.Richiedente{Ruolo: identita.Cliente, ID: 3}
 	amministratore = identita.Richiedente{Ruolo: identita.Amministratore, ID: 4}
 )
@@ -58,6 +65,9 @@ func TestInviaPosizione(t *testing.T) {
 	if intervallo, err := s.Invia(ctx, corriere, p(46.07), p(11.12)); err != nil || intervallo != 30 || !a.registrata {
 		t.Fatalf("il corriere invia la posizione: %d %v", intervallo, err)
 	}
+	if a.sede != sedeTrento {
+		t.Errorf("la posizione va nella sede del corriere: %d", a.sede)
+	}
 	for _, r := range []identita.Richiedente{operatore, cliente, amministratore} {
 		if _, err := s.Invia(ctx, r, p(46.07), p(11.12)); tipoErrore(err) != "403" {
 			t.Errorf("%s non invia posizioni: %v", r.Ruolo, err)
@@ -78,10 +88,14 @@ func TestInviaPosizione(t *testing.T) {
 	}
 }
 
-func TestElencoPosizioniSoloOperatori(t *testing.T) {
-	s := NuovoServizio(&archivioFinto{intervallo: 30})
+func TestOperatoreVedeSoloICorrieriDellaSuaSede(t *testing.T) {
+	a := &archivioFinto{intervallo: 30}
+	s := NuovoServizio(a)
 	if intervallo, posizioni, err := s.Elenca(context.Background(), operatore); err != nil || intervallo != 30 || len(posizioni) != 1 {
 		t.Fatalf("l'operatore vede le posizioni: %d %v %v", intervallo, posizioni, err)
+	}
+	if a.sede != sedeTrento {
+		t.Errorf("le posizioni sono quelle della sede dell'operatore: %d", a.sede)
 	}
 	for _, r := range []identita.Richiedente{corriere, cliente, amministratore} {
 		if _, _, err := s.Elenca(context.Background(), r); tipoErrore(err) != "403" {
@@ -90,17 +104,20 @@ func TestElencoPosizioniSoloOperatori(t *testing.T) {
 	}
 }
 
-func TestIntervallo(t *testing.T) {
+func TestIntervalloDellaPropriaSede(t *testing.T) {
 	ctx := context.Background()
 	a := &archivioFinto{intervallo: 30}
 	s := NuovoServizio(a)
 
-	for _, r := range []identita.Richiedente{corriere, operatore, amministratore} {
-		if intervallo, err := s.Intervallo(ctx, r); err != nil || intervallo != 30 {
-			t.Errorf("%s legge l'intervallo: %d %v", r.Ruolo, intervallo, err)
+	for _, r := range []identita.Richiedente{corriere, operatore} {
+		if intervallo, err := s.Intervallo(ctx, r); err != nil || intervallo != 30 || a.sede != sedeTrento {
+			t.Errorf("%s legge l'intervallo della sua sede: %d %v (sede %d)", r.Ruolo, intervallo, err, a.sede)
 		}
 	}
-	if _, err := s.Intervallo(ctx, cliente); tipoErrore(err) != "403" {
-		t.Errorf("il cliente non legge l'intervallo: %v", err)
+	// l'amministratore non ha una sede: usa GET /api/sedi/{id}/impostazioni
+	for _, r := range []identita.Richiedente{cliente, amministratore} {
+		if _, err := s.Intervallo(ctx, r); tipoErrore(err) != "403" {
+			t.Errorf("%s non ha un intervallo di sede: %v", r.Ruolo, err)
+		}
 	}
 }

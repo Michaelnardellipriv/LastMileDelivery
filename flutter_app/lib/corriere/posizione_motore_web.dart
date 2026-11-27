@@ -2,6 +2,7 @@
 // web/posizione_worker.js, che il browser non rallenta quando la scheda è in
 // background. La pagina gli passa backend, token e punto di partenza, e riceve l'esito
 // di ogni invio.
+import 'dart:async';
 import 'dart:js_interop';
 
 import 'package:web/web.dart' as web;
@@ -13,8 +14,13 @@ InvioPosizione creaInvioPosizione(ApiCorriere api) => InvioPosizioneWorker(api);
 
 class InvioPosizioneWorker extends InvioPosizione {
   web.Worker? _worker;
+  Timer? _riprova; // nuovo tentativo dopo un rinnovo non riuscito
 
   InvioPosizioneWorker(super.api) : super.base();
+
+  // a ogni rinnovo il worker riceve il token nuovo: altrimenti dopo 15 minuti i suoi
+  // invii verrebbero rifiutati
+  void _nuovoToken(String token) => _worker?.postMessage({'tipo': 'token', 'token': token}.jsify());
 
   @override
   void avvia() {
@@ -31,12 +37,16 @@ class InvioPosizioneWorker extends InvioPosizione {
       'intervallo': intervalloSecondi,
     }.jsify());
     _worker = w;
+    api.alRinnovoToken.add(_nuovoToken);
   }
 
   @override
   void ferma() {
+    _riprova?.cancel();
+    _riprova = null;
     final w = _worker;
     if (w == null) return;
+    api.alRinnovoToken.remove(_nuovoToken);
     w.postMessage({'tipo': 'ferma'}.jsify());
     w.terminate();
     _worker = null;
@@ -52,17 +62,34 @@ class InvioPosizioneWorker extends InvioPosizione {
     final status = (m['status'] as num?)?.toInt();
     if (m['ok'] == true) {
       registraEsito(intervallo: (m['intervallo'] as num?)?.toInt());
+      // il worker non passa da api.chiama: il rinnovo si fa qui, a ogni invio riuscito
+      api.rinnovaSeServe();
       return;
     }
     registraEsito(
       intervallo: (m['intervallo'] as num?)?.toInt(),
       errore: ErroreServer(status, m['messaggio'] as String? ?? 'errore', const {}, m['tecnico'] as String? ?? ''),
     );
-    if (status == 401) {
-      // sessione scaduta: il worker si è già fermato, la pagina torna al login
+    if (status == 401 || status == 403) {
+      // 401: token scaduto (scheda sospesa, rete assente); 403: forse account disattivato.
+      // Il worker si è fermato. Si rinnova:
+      //  - rinnovo rifiutato (401/403): rinnova() ha chiuso la sessione, si torna al login;
+      //  - token nuovo dopo un 401: si riparte subito;
+      //  - altrimenti (403 per un altro motivo, rete assente): si riprova dopo un
+      //    intervallo, senza raffiche.
       ferma();
-      api.esci();
-      api.alScadereDelToken?.call();
+      final vecchio = api.token;
+      api.rinnova().then((rinnovato) {
+        if (api.token == null) return;
+        if (status == 401 && rinnovato && api.token != vecchio) {
+          avvia();
+        } else {
+          _riprova?.cancel();
+          _riprova = Timer(Duration(seconds: intervalloSecondi), () {
+            if (api.token != null) avvia();
+          });
+        }
+      });
     }
   }
 }

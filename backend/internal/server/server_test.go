@@ -29,9 +29,10 @@ func serverSenzaDatabase(t *testing.T, ammettiHeaderID bool) *httptest.Server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(Nuovo(db, Config{
+	// i due servizi nello stesso processo, come in sviluppo: tutti e due senza database
+	srv := httptest.NewServer(NuovoTutto(db, map[int]*pgxpool.Pool{0: db}, Config{
 		Firmatario: firmatarioTest, Postino: autenticazione.PostinoLog{}, AmmettiHeaderID: ammettiHeaderID,
-		CORS: cors,
+		CORS: cors, ChiaveInterna: "chiave-interna-di-prova",
 	}))
 	t.Cleanup(srv.Close)
 	return srv
@@ -90,7 +91,7 @@ func TestSenzaIdentita401(t *testing.T) {
 
 func TestTokenBearer(t *testing.T) {
 	srv := serverSenzaDatabase(t, false)
-	token, _, err := firmatarioTest.Firma(9, identita.Richiedente{Ruolo: identita.Corriere, ID: 1})
+	token, _, err := firmatarioTest.Firma(9, identita.Richiedente{Ruolo: identita.Corriere, ID: 1, IDSede: 1, Sessione: "sessione-di-prova"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +115,7 @@ func TestTokenBearer(t *testing.T) {
 func tokenAltroSegreto(t *testing.T) string {
 	t.Helper()
 	altro := autenticazione.NuovoFirmatario([]byte("un-altro-segreto-lungo-almeno-32-caratteri"), time.Hour)
-	token, _, err := altro.Firma(9, identita.Richiedente{Ruolo: identita.Corriere, ID: 1})
+	token, _, err := altro.Firma(9, identita.Richiedente{Ruolo: identita.Corriere, ID: 1, Sessione: "sessione-di-prova"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,5 +155,46 @@ func TestPercorsiNonPrevisti(t *testing.T) {
 		if stato != http.StatusMethodNotAllowed || header.Get("Allow") != c.ammessi {
 			t.Fatalf("%s %s: atteso 405 con Allow %q, ottenuto %d %q", c.metodo, c.percorso, c.ammessi, stato, header.Get("Allow"))
 		}
+	}
+}
+
+// Le stesse regole dell'Ingress: ogni percorso va al servizio che ha i suoi dati.
+func TestPerSpedizioni(t *testing.T) {
+	casi := map[string]bool{
+		"/api/spedizioni":                        true,
+		"/api/spedizioni/12/storico":             true,
+		"/api/corrieri/posizione":                true,
+		"/api/corrieri/posizioni":                true,
+		"/api/impostazioni/motivi":               true,
+		"/api/impostazioni/intervallo-posizione": true,
+		"/api/motivi":                            true,
+		"/api/sedi/3/impostazioni":               true,
+		"/api/sedi":                              false,
+		"/api/sedi/3":                            false,
+		"/api/corrieri":                          false,
+		"/api/clienti":                           false,
+		"/api/utenti/4":                          false,
+		"/api/auth/login":                        false,
+		"/api/indirizzi":                         true,
+		"/health":                                false,
+	}
+	for percorso, atteso := range casi {
+		if PerSpedizioni(percorso) != atteso {
+			t.Errorf("%s: servizio spedizioni = %v, atteso %v", percorso, !atteso, atteso)
+		}
+	}
+}
+
+// Le rotte /interno rispondono solo con la chiave interna: da fuori sembrano non esistere.
+func TestRotteInterneSenzaChiave404(t *testing.T) {
+	srv := serverSenzaDatabase(t, true)
+	stato, _, _ := chiama(t, srv, http.MethodPost, "/interno/risolvi", `{"sedi":[1]}`, nil)
+	if stato != http.StatusNotFound {
+		t.Fatalf("senza chiave: %d, atteso 404", stato)
+	}
+	stato, _, _ = chiama(t, srv, http.MethodPost, "/interno/risolvi", `{"sedi":[1]}`,
+		map[string]string{"X-Chiave-Interna": "sbagliata"})
+	if stato != http.StatusNotFound {
+		t.Fatalf("chiave sbagliata: %d, atteso 404", stato)
 	}
 }

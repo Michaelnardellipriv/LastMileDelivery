@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,20 +25,31 @@ import (
 )
 
 type fixture struct {
-	url              string
+	url string
+	// i due database dei microservizi: globale (utenti, sedi, indirizzi) e spedizioni
 	db               *pgxpool.Pool
+	sped             *pgxpool.Pool
 	suffisso         string
-	idOperatore      int32
-	idCorriere1      int32
-	idCorriere2      int32
-	idMittente       int32
-	idDestinatario   int32
-	idRitiro         int32
-	idConsegna       int32
-	idAltro          int32
-	idAmministratore int32
-	idCorrierePos    int32
-	idCorriereFermo  int32
+	idOperatore      int64
+	idCorriere1      int64
+	idCorriere2      int64
+	idMittente       int64
+	idDestinatario   int64
+	idRitiro         int64
+	idConsegna       int64
+	idAltro          int64
+	idAmministratore int64
+	idCorrierePos    int64
+	idCorriereFermo  int64
+	// la sede della fixture (Trento) e un'altra sede (Bolzano) con il suo operatore,
+	// il suo corriere e un suo indirizzo, per provare che le sedi non si vedono
+	// nazione della fixture: solo lettere, perché il backend rifiuta le cifre nei luoghi
+	nazione          string
+	idSede           int64
+	idSedeAltra      int64
+	idOperatoreAltro int64
+	idCorriereAltro  int64
+	idIndirizzoAltro int64
 }
 
 var (
@@ -56,29 +68,34 @@ func preparaFixture(t *testing.T) *fixture {
 
 func creaFixture(t *testing.T) *fixture {
 	url := strings.TrimRight(valore("TEST_API_URL", "http://localhost:8080"), "/")
-	connessione := os.Getenv("TEST_DATABASE_URL")
-	if connessione == "" {
-		t.Fatal("imposta TEST_DATABASE_URL con lo stesso database del backend")
-	}
 	ctx := context.Background()
-	db, err := pgxpool.New(ctx, connessione)
-	if err != nil {
-		t.Fatal(err)
+	collega := func(variabile, cosa string) *pgxpool.Pool {
+		connessione := os.Getenv(variabile)
+		if connessione == "" {
+			t.Fatalf("imposta %s con lo stesso database del backend (%s)", variabile, cosa)
+		}
+		db, err := pgxpool.New(ctx, connessione)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return db
 	}
+	db := collega("TEST_DATABASE_URL", "database globale, DATABASE_URL")
+	sped := collega("TEST_DATABASE_SPEDIZIONI_URL", "database delle spedizioni, DATABASE_SPEDIZIONI_URL")
 
 	b := make([]byte, 4)
 	rand.Read(b)
-	f := &fixture{url: url, db: db, suffisso: hex.EncodeToString(b)}
+	f := &fixture{url: url, db: db, sped: sped, suffisso: hex.EncodeToString(b)}
 
-	inserisci := func(sql string, args ...any) int32 {
-		var id int32
+	inserisci := func(sql string, args ...any) int64 {
+		var id int64
 		if err := db.QueryRow(ctx, sql, args...).Scan(&id); err != nil {
 			t.Fatalf("dati di prova: %v", err)
 		}
 		return id
 	}
 	contatore := 0
-	utente := func(nome string) int32 {
+	utente := func(nome string) int64 {
 		contatore++
 		telefono := fmt.Sprintf("8%s%d", f.suffisso[:6], contatore)
 		telefono = strings.Map(func(r rune) rune {
@@ -91,24 +108,61 @@ func creaFixture(t *testing.T) *fixture {
 			VALUES ($1, 'Test', '+39', $2, $3, '!') RETURNING id`, nome, telefono, nome+"."+f.suffisso+"@test.it")
 	}
 
-	f.idOperatore = inserisci(`INSERT INTO operatori_logistici (id_utente) VALUES ($1) RETURNING id`, utente("operatore"))
-	f.idCorriere1 = inserisci(`INSERT INTO corrieri (id_utente) VALUES ($1) RETURNING id`, utente("corriere1"))
-	f.idCorriere2 = inserisci(`INSERT INTO corrieri (id_utente) VALUES ($1) RETURNING id`, utente("corriere2"))
+	// due città, ognuna con la sua sede (database globale) e le sue impostazioni
+	// predefinite (database delle spedizioni)
+	f.nazione = "Nazione " + strings.Map(func(r rune) rune {
+		if r >= '0' && r <= '9' {
+			return 'g' + (r - '0')
+		}
+		return r
+	}, f.suffisso)
+	nazione := inserisci(`INSERT INTO nazioni (nome) VALUES ($1) RETURNING id`, f.nazione)
+	regione := inserisci(`INSERT INTO regioni (nome, id_nazione) VALUES ('Regione', $1) RETURNING id`, nazione)
+	citta := inserisci(`INSERT INTO citta (nome, id_regione) VALUES ('Trento', $1) RETURNING id`, regione)
+	cittaAltra := inserisci(`INSERT INTO citta (nome, id_regione) VALUES ('Bolzano', $1) RETURNING id`, regione)
+	indirizzo := func(via, civico, cap string, idCitta int64) int64 {
+		return inserisci(`INSERT INTO indirizzi (via, civico, cod_postale, id_citta) VALUES ($1, $2, $3, $4) RETURNING id`,
+			via, civico, cap, idCitta)
+	}
+	sede := func(nome string, idCitta, idIndirizzo int64) int64 {
+		id := inserisci(`INSERT INTO sedi (nome, id_citta, id_indirizzo) VALUES ($1, $2, $3) RETURNING id`,
+			nome+" "+f.suffisso, idCitta, idIndirizzo)
+		if _, err := sped.Exec(ctx, `INSERT INTO impostazioni (id_sede) VALUES ($1)`, id); err != nil {
+			t.Fatalf("dati di prova: %v", err)
+		}
+		return id
+	}
+	// l'indirizzo della sede sta nel database globale; quelli di ritiro e consegna nel
+	// database delle spedizioni (del gruppo della sede: qui il gruppo 0)
+	f.idSede = sede("Sede Trento", citta, indirizzo("Via Brennero", "1", "38121", citta))
+	f.idSedeAltra = sede("Sede Bolzano", cittaAltra, indirizzo("Via Galvani", "2", "39100", cittaAltra))
+	indirizzoSpedizioni := func(via, civico, cap string, idSede, idCitta int64) int64 {
+		var id int64
+		if err := sped.QueryRow(ctx, `
+			INSERT INTO indirizzi (id_sede, id_citta, via, civico, cod_postale) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+			idSede, idCitta, via, civico, cap).Scan(&id); err != nil {
+			t.Fatalf("dati di prova: %v", err)
+		}
+		return id
+	}
+	f.idRitiro = indirizzoSpedizioni("Via Roma", "1", "38121", f.idSede, citta)
+	f.idConsegna = indirizzoSpedizioni("Via Museo", "12", "38121", f.idSede, citta)
+	f.idAltro = indirizzoSpedizioni("Via Belenzani", "3", "38121", f.idSede, citta)
+	f.idIndirizzoAltro = indirizzoSpedizioni("Via Museo", "30", "39100", f.idSedeAltra, cittaAltra)
+
+	ruolo := func(tabella, nome string, idSede int64) int64 {
+		return inserisci(`INSERT INTO `+tabella+` (id_utente, id_sede) VALUES ($1, $2) RETURNING id`, utente(nome), idSede)
+	}
+	f.idOperatore = ruolo("operatori_logistici", "operatore", f.idSede)
+	f.idCorriere1 = ruolo("corrieri", "corriere1", f.idSede)
+	f.idCorriere2 = ruolo("corrieri", "corriere2", f.idSede)
+	f.idCorrierePos = ruolo("corrieri", "corrierepos", f.idSede)
+	f.idCorriereFermo = ruolo("corrieri", "corrierefermo", f.idSede)
+	f.idOperatoreAltro = ruolo("operatori_logistici", "operatorealtro", f.idSedeAltra)
+	f.idCorriereAltro = ruolo("corrieri", "corrierealtro", f.idSedeAltra)
 	f.idMittente = inserisci(`INSERT INTO clienti (id_utente) VALUES ($1) RETURNING id`, utente("mittente"))
 	f.idDestinatario = inserisci(`INSERT INTO clienti (id_utente) VALUES ($1) RETURNING id`, utente("destinatario"))
 	f.idAmministratore = inserisci(`INSERT INTO amministratori (id_utente) VALUES ($1) RETURNING id`, utente("amministratore"))
-	f.idCorrierePos = inserisci(`INSERT INTO corrieri (id_utente) VALUES ($1) RETURNING id`, utente("corrierepos"))
-	f.idCorriereFermo = inserisci(`INSERT INTO corrieri (id_utente) VALUES ($1) RETURNING id`, utente("corrierefermo"))
-
-	nazione := inserisci(`INSERT INTO nazioni (nome) VALUES ($1) RETURNING id`, "Nazione "+f.suffisso)
-	regione := inserisci(`INSERT INTO regioni (nome, id_nazione) VALUES ('Regione', $1) RETURNING id`, nazione)
-	citta := inserisci(`INSERT INTO citta (nome, cod_postale, id_regione) VALUES ('Trento', '38121', $1) RETURNING id`, regione)
-	f.idRitiro = inserisci(`INSERT INTO indirizzi (via, civico) VALUES ('Via Roma', '1') RETURNING id`)
-	f.idConsegna = inserisci(`INSERT INTO indirizzi (via, civico) VALUES ('Via Museo', '12') RETURNING id`)
-	inserisci(`INSERT INTO indirizzi_in_citta (id_citta, id_indirizzo) VALUES ($1, $2) RETURNING id`, citta, f.idRitiro)
-	inserisci(`INSERT INTO indirizzi_in_citta (id_citta, id_indirizzo) VALUES ($1, $2) RETURNING id`, citta, f.idConsegna)
-	f.idAltro = inserisci(`INSERT INTO indirizzi (via, civico) VALUES ('Via Belenzani', '3') RETURNING id`)
-	inserisci(`INSERT INTO indirizzi_in_citta (id_citta, id_indirizzo) VALUES ($1, $2) RETURNING id`, citta, f.idAltro)
 	return f
 }
 
@@ -161,7 +215,7 @@ func comeOperatore(f *fixture) map[string]string {
 	return map[string]string{"X-Id-Operatore": strconv.Itoa(int(f.idOperatore))}
 }
 
-func comeCliente(id int32) map[string]string {
+func comeCliente(id int64) map[string]string {
 	return map[string]string{"X-Id-Cliente": strconv.Itoa(int(id))}
 }
 
@@ -169,10 +223,14 @@ func comeAmministratore(f *fixture) map[string]string {
 	return map[string]string{"X-Id-Amministratore": strconv.Itoa(int(f.idAmministratore))}
 }
 
+func comeOperatoreAltro(f *fixture) map[string]string {
+	return map[string]string{"X-Id-Operatore": strconv.Itoa(int(f.idOperatoreAltro))}
+}
+
 func (f *fixture) retrodata(t *testing.T, id, giorni int) {
 	t.Helper()
 	ctx := context.Background()
-	tx, err := f.db.Begin(ctx)
+	tx, err := f.sped.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +249,7 @@ func (f *fixture) retrodata(t *testing.T, id, giorni int) {
 func (f *fixture) retrodataStorico(t *testing.T, id, giorni int) {
 	t.Helper()
 	ctx := context.Background()
-	tx, err := f.db.Begin(ctx)
+	tx, err := f.sped.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,7 +309,7 @@ func (f *fixture) elenco(t *testing.T, chi map[string]string, query string, atte
 	return voci, r
 }
 
-func comeCorriere(id int32) map[string]string {
+func comeCorriere(id int64) map[string]string {
 	return map[string]string{"X-Id-Corriere": strconv.Itoa(int(id))}
 }
 
@@ -289,7 +347,7 @@ func (f *fixture) stato(t *testing.T, id int, chi map[string]string, corpo map[s
 	return f.invia(t, http.MethodPatch, id, "/stato", chi, corpo, atteso)
 }
 
-func (f *fixture) assegna(t *testing.T, id int, idCorriere int32, atteso int) risposta {
+func (f *fixture) assegna(t *testing.T, id int, idCorriere int64, atteso int) risposta {
 	t.Helper()
 	return f.invia(t, http.MethodPost, id, "/assegnazioni", comeOperatore(f), map[string]any{"id_corriere": idCorriere}, atteso)
 }
@@ -327,10 +385,19 @@ func contiene(lista []string, x string) bool {
 	return false
 }
 
+// tabelleSpedizioni sono nel database delle spedizioni; tutte le altre in quello globale.
+// Le chiavi di idempotenza controllate nei test sono quelle delle spedizioni.
+var tabelleSpedizioni = regexp.MustCompile(`\b(spedizioni|assegnazioni|note|tentativi|cambiamenti_spedizioni|impostazioni|motivi|ultime_posizioni_corrieri|chiavi_idempotenza)\b`)
+
+// conta esegue un count(*) nel database che contiene le tabelle della query.
 func (f *fixture) conta(t *testing.T, sql string, args ...any) int {
 	t.Helper()
+	db := f.db
+	if tabelleSpedizioni.MatchString(sql) {
+		db = f.sped
+	}
 	var n int
-	if err := f.db.QueryRow(context.Background(), sql, args...).Scan(&n); err != nil {
+	if err := db.QueryRow(context.Background(), sql, args...).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	return n
@@ -492,7 +559,7 @@ func TestModificaDati(t *testing.T) {
 		data := time.Now().Add(-72 * time.Hour).UTC().Truncate(time.Second)
 		corpo := map[string]any{"id_indirizzo_spedizione": f.idAltro, "dataora_richiesta_spedizione": data.Format(time.RFC3339)}
 		r := f.modifica(t, id, op, corpo, 200)
-		if int32(r.corpo["id_indirizzo_spedizione"].(float64)) != corpo["id_indirizzo_spedizione"] ||
+		if int64(r.corpo["id_indirizzo_spedizione"].(float64)) != corpo["id_indirizzo_spedizione"] ||
 			r.corpo["dataora_richiesta_spedizione"] != data.Format(time.RFC3339) {
 			t.Fatalf("dati non aggiornati: %s", r.grezzo)
 		}
@@ -571,12 +638,12 @@ func TestAssegnazioni(t *testing.T) {
 	t.Run("assegna_e_riassegna_prima_e_dopo_il_ritiro", func(t *testing.T) {
 		id := f.nuovaSpedizione(t, "ASS")
 		r := f.assegna(t, id, f.idCorriere1, 201)
-		if r.corpo["stato"] != "assegnata" || int32(r.corpo["id_corriere"].(float64)) != f.idCorriere1 {
+		if r.corpo["stato"] != "assegnata" || int64(r.corpo["id_corriere"].(float64)) != f.idCorriere1 {
 			t.Fatalf("assegnazione: %s", r.grezzo)
 		}
 		f.assegna(t, id, f.idCorriere1, 200)
 		r = f.assegna(t, id, f.idCorriere2, 201)
-		if r.corpo["stato"] != "assegnata" || int32(r.corpo["id_corriere"].(float64)) != f.idCorriere2 {
+		if r.corpo["stato"] != "assegnata" || int64(r.corpo["id_corriere"].(float64)) != f.idCorriere2 {
 			t.Fatalf("riassegnazione prima del ritiro: %s", r.grezzo)
 		}
 		f.stato(t, id, c1, map[string]any{"stato": "ritirata"}, 403)
@@ -590,7 +657,7 @@ func TestAssegnazioni(t *testing.T) {
 		f.stato(t, id, op, map[string]any{"stato": "ritirata"}, 200)
 
 		r = f.assegna(t, id, f.idCorriere1, 201)
-		if r.corpo["stato"] != "ritirata" || int32(r.corpo["id_corriere"].(float64)) != f.idCorriere1 {
+		if r.corpo["stato"] != "ritirata" || int64(r.corpo["id_corriere"].(float64)) != f.idCorriere1 {
 			t.Fatalf("riassegnazione dopo un tentativo di consegna fallito: %s", r.grezzo)
 		}
 		f.stato(t, id, c2, map[string]any{"stato": "in consegna"}, 403)
@@ -663,6 +730,8 @@ func TestTentativi(t *testing.T) {
 		f.assegna(t, id, f.idCorriere1, 201)
 		f.stato(t, id, c1, map[string]any{"stato": "ritirata"}, 200)
 
+		// un tentativo per uscita: dopo ognuno l'operatore la riporta in ritirata e il corriere
+		// la rimette in consegna
 		attesi := []string{"in consegna", "in consegna", "non consegnata"}
 		for i, atteso := range attesi {
 			f.stato(t, id, c1, map[string]any{"stato": "in consegna"}, 200)
@@ -674,11 +743,16 @@ func TestTentativi(t *testing.T) {
 				t.Fatalf("tentativo %d: atteso %q, ottenuto %s", i+1, atteso, r.grezzo)
 			}
 			if atteso == "in consegna" {
-				f.tentativo(t, id, c1, consegnaFallita, 409)
+				// secondo tentativo nella stessa uscita: va prima riportata in ritirata
+				r := f.tentativo(t, id, c1, consegnaFallita, 409)
+				if msg, _ := r.corpo["errore"].(string); !strings.Contains(msg, "ritirata") {
+					t.Fatalf("il messaggio spiega che va riportata in ritirata: %s", r.grezzo)
+				}
 				f.stato(t, id, c1, map[string]any{"stato": "ritirata"}, 403)
 				f.stato(t, id, op, map[string]any{"stato": "ritirata"}, 200)
 			}
 		}
+		f.tentativo(t, id, c1, consegnaFallita, 409)
 		if n := f.conta(t, `SELECT count(*) FROM tentativi t JOIN note n ON n.id = t.id_nota
 			WHERE t.id_spedizione = $1 AND t.tipo = 'consegna' AND n.id_corriere_creata = $2`, id, f.idCorriere1); n != 3 {
 			t.Fatalf("attesi 3 tentativi di consegna con la nota del corriere, trovati %d", n)
@@ -693,27 +767,60 @@ func TestTentativi(t *testing.T) {
 		}
 	})
 
-	t.Run("dopo_un_tentativo_fallito_niente_consegna_nella_stessa_uscita_409", func(t *testing.T) {
-		id := f.nuovaSpedizione(t, "TENT-CONS")
+	t.Run("in_ritirata_dall_operatore_solo_dopo_un_tentativo_fallito_dell_uscita", func(t *testing.T) {
+		id := f.nuovaSpedizione(t, "TENT-RIT")
 		f.assegna(t, id, f.idCorriere1, 201)
 		f.stato(t, id, c1, map[string]any{"stato": "ritirata"}, 200)
 		f.stato(t, id, c1, map[string]any{"stato": "in consegna"}, 200)
-		f.tentativo(t, id, c1, consegnaFallita, 201)
 
-		// l'uscita è finita con un tentativo fallito: il corriere non può segnarla consegnata
-		r := f.stato(t, id, c1, map[string]any{"stato": "consegnata"}, 409)
+		// nessun tentativo fallito: l'operatore non la riporta in ritirata
+		r := f.stato(t, id, op, map[string]any{"stato": "ritirata"}, 409)
 		if msg, _ := r.corpo["errore"].(string); !strings.Contains(msg, "tentativo di consegna fallito") {
 			t.Fatalf("il messaggio spiega perché: %s", r.grezzo)
 		}
-		if d := f.dettaglio(t, id, op, 200); d.corpo["stato"] != "in consegna" {
-			t.Fatalf("lo stato resta in consegna: %s", d.grezzo)
-		}
+		f.tentativo(t, id, c1, consegnaFallita, 201)
+		f.stato(t, id, c1, map[string]any{"stato": "ritirata"}, 403)
+		f.stato(t, id, op, map[string]any{"stato": "ritirata"}, 200)
 
-		// l'operatore la riporta in ritirata, il corriere esce di nuovo e stavolta consegna
+		// nuova uscita: il tentativo di quella prima non basta più
+		f.stato(t, id, c1, map[string]any{"stato": "in consegna"}, 200)
+		f.stato(t, id, op, map[string]any{"stato": "ritirata"}, 409)
+		// fallisce di nuovo: niente secondo tentativo né consegna in questa uscita
+		f.tentativo(t, id, c1, consegnaFallita, 201)
+		f.tentativo(t, id, c1, consegnaFallita, 409)
+		f.stato(t, id, c1, map[string]any{"stato": "consegnata"}, 409)
+		// di nuovo in ritirata e in consegna: stavolta consegna
 		f.stato(t, id, op, map[string]any{"stato": "ritirata"}, 200)
 		f.stato(t, id, c1, map[string]any{"stato": "in consegna"}, 200)
 		if r := f.stato(t, id, c1, map[string]any{"stato": "consegnata"}, 200); r.corpo["stato"] != "consegnata" {
-			t.Fatalf("consegna alla nuova uscita: %s", r.grezzo)
+			t.Fatalf("consegna nella nuova uscita: %s", r.grezzo)
+		}
+
+		// lo storico ha i tentativi accanto ai cambi di stato, in ordine di tempo
+		s := f.chiama(t, http.MethodGet, "/api/spedizioni/"+strconv.Itoa(id)+"/storico", nil, op)
+		if s.stato != http.StatusOK {
+			t.Fatalf("storico: %d %s", s.stato, s.grezzo)
+		}
+		var sequenza []string
+		for _, v := range s.corpo["dati"].([]any) {
+			voce := v.(map[string]any)
+			nuovo, _ := voce["valore_nuovo"].(map[string]any)
+			switch {
+			case voce["operazione"] == "tentativo":
+				if nuovo["tipo"] != "consegna" || nuovo["motivo"] != "destinatario assente" || nuovo["nota"] != "citofono rotto" {
+					t.Errorf("voce del tentativo: %v", voce)
+				}
+				if a := voce["autore"].(map[string]any); a["ruolo"] != "corriere" || int64(a["id"].(float64)) != f.idCorriere1 {
+					t.Errorf("autore del tentativo: %v", a)
+				}
+				sequenza = append(sequenza, "tentativo")
+			case nuovo["stato"] != nil:
+				sequenza = append(sequenza, nuovo["stato"].(string))
+			}
+		}
+		attesa := "ritirata,in consegna,tentativo,ritirata,in consegna,tentativo,ritirata,in consegna,consegnata"
+		if strings.Join(sequenza, ",") != attesa && !strings.HasSuffix(strings.Join(sequenza, ","), ","+attesa) {
+			t.Fatalf("storico: attesa la sequenza %s, ottenuta %v", attesa, sequenza)
 		}
 	})
 
@@ -889,8 +996,8 @@ func TestElencoSpedizioni(t *testing.T) {
 	f.assegna(t, inCorsoDa40, f.idCorriere1, 201)
 	f.retrodata(t, inCorsoDa40, 40)
 	f.retrodataStorico(t, inCorsoDa40, 40)
-	if _, err := f.db.Exec(context.Background(), `INSERT INTO note (nota, is_interna, id_operatore_logistico_creata, id_spedizione)
-		VALUES ('nota interna', true, $1, $2), ('nota con motivo per il cliente', false, $1, $2)`, f.idOperatore, assegnata); err != nil {
+	if _, err := f.sped.Exec(context.Background(), `INSERT INTO note (id_sede, nota, is_interna, id_operatore_logistico_creata, id_spedizione)
+		VALUES ($3, 'nota interna', true, $1, $2), ($3, 'nota con motivo per il cliente', false, $1, $2)`, f.idOperatore, assegnata, f.idSede); err != nil {
 		t.Fatal(err)
 	}
 
@@ -913,7 +1020,12 @@ func TestElencoSpedizioni(t *testing.T) {
 
 	t.Run("operatore_e_amministratore_vedono_tutto", func(t *testing.T) {
 		for _, chi := range []map[string]string{op, admin} {
-			voci, _ := f.elenco(t, chi, "per_pagina=100", 200)
+			query := "per_pagina=100"
+			if chi["X-Id-Amministratore"] != "" {
+				// l'amministratore sceglie sempre una sede: qui quella della fixture
+				query += "&id_sede=" + strconv.FormatInt(f.idSede, 10)
+			}
+			voci, _ := f.elenco(t, chi, query, 200)
 			presenti(t, voci, creata, assegnata, inConsegna, consegnata, annullata, altroCorriere, consegnataDa10, consegnataDa40)
 			if voci[assegnata]["id_corriere"] == nil {
 				t.Errorf("l'operatore vede il corriere assegnato")
@@ -979,7 +1091,7 @@ func TestElencoSpedizioni(t *testing.T) {
 		presenti(t, voci, altroCorriere)
 		assenti(t, voci, creata, assegnata)
 		for id, v := range voci {
-			if int32(v["id_corriere"].(float64)) != f.idCorriere2 {
+			if int64(v["id_corriere"].(float64)) != f.idCorriere2 {
 				t.Errorf("filtro per corriere: la spedizione %d è di un altro corriere", id)
 			}
 		}
@@ -1049,12 +1161,12 @@ func TestStoricoSpedizione(t *testing.T) {
 		primo, ultimo := dati[0].(map[string]any), dati[2].(map[string]any)
 		autorePrimo, autoreUltimo := primo["autore"].(map[string]any), ultimo["autore"].(map[string]any)
 		if primo["operazione"] != "creazione" || primo["valore_vecchio"] != nil ||
-			autorePrimo["ruolo"] != "operatore" || int32(autorePrimo["id"].(float64)) != f.idOperatore {
+			autorePrimo["ruolo"] != "operatore" || int64(autorePrimo["id"].(float64)) != f.idOperatore {
 			t.Errorf("prima riga: creazione da parte dell'operatore: %v", primo)
 		}
 		vecchio, nuovo := ultimo["valore_vecchio"].(map[string]any), ultimo["valore_nuovo"].(map[string]any)
 		if vecchio["stato"] != "assegnata" || nuovo["stato"] != "ritirata" ||
-			autoreUltimo["ruolo"] != "corriere" || int32(autoreUltimo["id"].(float64)) != f.idCorriere1 {
+			autoreUltimo["ruolo"] != "corriere" || int64(autoreUltimo["id"].(float64)) != f.idCorriere1 {
 			t.Errorf("ultima riga: ritiro da parte del corriere: %v", ultimo)
 		}
 	}

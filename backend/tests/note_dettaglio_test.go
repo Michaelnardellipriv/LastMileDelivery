@@ -19,12 +19,12 @@ func (f *fixture) nota(t *testing.T, id int, chi map[string]string, corpo map[st
 	return f.invia(t, http.MethodPost, id, "/note", chi, corpo, atteso)
 }
 
-func autoreNota(n map[string]any) (string, int32) {
+func autoreNota(n map[string]any) (string, int64) {
 	a, ok := n["autore"].(map[string]any)
 	if !ok {
 		return "", 0
 	}
-	return a["ruolo"].(string), int32(a["id"].(float64))
+	return a["ruolo"].(string), int64(a["id"].(float64))
 }
 
 func TestNoteLibere(t *testing.T) {
@@ -126,7 +126,7 @@ func TestDettaglioSpedizione(t *testing.T) {
 			if int(c["id"].(float64)) != id || c["stato"] != "ritirata" || c["cod_ordine"] != "DETT-"+f.suffisso {
 				t.Errorf("dati della spedizione: %s", r.grezzo)
 			}
-			if int32(c["id_corriere"].(float64)) != f.idCorriere1 || int(c["tentativi_ritiro_falliti"].(float64)) != 1 ||
+			if int64(c["id_corriere"].(float64)) != f.idCorriere1 || int(c["tentativi_ritiro_falliti"].(float64)) != 1 ||
 				int(c["tentativi_consegna_falliti"].(float64)) != 0 || c["annullata_il"] != nil || c["conclusa_il"] != nil {
 				t.Errorf("corriere, tentativi e date: %s", r.grezzo)
 			}
@@ -246,10 +246,14 @@ func TestAmministratoreSoloLettura(t *testing.T) {
 			t.Errorf("DELETE %s: nessuna eliminazione, atteso 405, ottenuto %d", p, r.stato)
 		}
 	}
-	for _, p := range []string{"/api/spedizioni", percorso, percorso + "/storico"} {
+	// l'elenco dell'amministratore è sempre di una sede scelta; il dettaglio va per id
+	for _, p := range []string{"/api/spedizioni?id_sede=" + strconv.FormatInt(f.idSede, 10), percorso, percorso + "/storico"} {
 		if r := f.chiama(t, http.MethodGet, p, nil, admin); r.stato != http.StatusOK {
 			t.Errorf("GET %s: l'amministratore consulta, atteso 200, ottenuto %d", p, r.stato)
 		}
+	}
+	if r := f.chiama(t, http.MethodGet, "/api/spedizioni", nil, admin); r.stato != http.StatusBadRequest || !contiene(campiInErrore(r), "id_sede") {
+		t.Errorf("GET /api/spedizioni senza sede: l'amministratore deve sceglierla, atteso 400 su id_sede, ottenuto %d %s", r.stato, r.grezzo)
 	}
 	if n := f.storico(t, id); n != righeStorico {
 		t.Errorf("l'amministratore non cambia nulla: storico da %d a %d righe", righeStorico, n)

@@ -46,11 +46,11 @@ Future<http.Response> _backend(http.Request req) async {
       return _json({'dati': [_dora, _nuovo], 'pagina': 1, 'per_pagina': 20, 'totale_elementi': 2, 'totale_pagine': 1}, 200);
     case ('PATCH', '/api/utenti/21'):
       final corpo = jsonDecode(req.body) as Map<String, dynamic>;
-      if (corpo['email'] == '') {
+      if (corpo['cognome'] == '') {
         return _json({
           'errore': 'dati non validi',
           'dettagli': [
-            {'campo': 'email', 'messaggio': 'obbligatorio'}
+            {'campo': 'cognome', 'messaggio': 'obbligatorio'}
           ]
         }, 400);
       }
@@ -79,15 +79,17 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Reimposta la password'), findsNothing);
 
-    // email vuota: parte vuota e l'errore del backend va sotto il campo
-    await tester.enterText(find.widgetWithText(TextField, 'Email'), '');
+    // l'operatore cambia anche l'email di chi usa l'app (non la password)
+    expect(tester.widget<TextField>(find.widgetWithText(TextField, 'Email')).readOnly, isFalse);
+
+    // cognome vuoto: parte vuoto e l'errore del backend va sotto il campo
+    await tester.enterText(find.widgetWithText(TextField, 'Cognome'), '');
     await tester.tap(find.text('Salva modifiche'));
     await tester.pumpAndSettle();
-    expect(jsonDecode(_richieste.last.body), {'email': ''});
+    expect(jsonDecode(_richieste.last.body), {'cognome': ''});
     expect(find.text('obbligatorio'), findsOneWidget);
 
     // solo i campi cambiati, verso PATCH /api/utenti/{id_utente}
-    await tester.enterText(find.widgetWithText(TextField, 'Email'), 'dora@test.it');
     await tester.enterText(find.widgetWithText(TextField, 'Cognome'), 'Rossi');
     await tester.tap(find.text('Salva modifiche'));
     await tester.pumpAndSettle();

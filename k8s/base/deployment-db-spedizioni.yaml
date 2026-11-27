@@ -1,0 +1,47 @@
+# Database spedizioni (spedizioni, storico, impostazioni, posizioni: lo usa solo il servizio spedizioni).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: db-spedizioni-pvc
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: db-spedizioni
+  labels: { app: db-spedizioni }
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate   # un solo Pod sul volume: niente rolling update
+  selector: { matchLabels: { app: db-spedizioni } }
+  template:
+    metadata: { labels: { app: db-spedizioni } }
+    spec:
+      containers:
+        - name: db
+          image: localhost:32000/lastmile/db-spedizioni:2.4.0
+          ports: [{ containerPort: 5432 }]
+          envFrom:
+            - secretRef: { name: db-secret }
+          env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 512Mi }
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: db-spedizioni-pvc }

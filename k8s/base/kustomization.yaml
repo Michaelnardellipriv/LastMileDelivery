@@ -1,0 +1,21 @@
+# I manifest comuni a tutti gli ambienti. Non si applica da solo: si usa un ambiente,
+#   kubectl apply -k k8s/test      (TEST: Docker Desktop / MicroK8s, lastmile.test)
+#   kubectl apply -k k8s/prod      (PROD: vedi docs/deployment.md)
+# Ogni ambiente cambia solo quello che deve (immagini, nome host, certificato, repliche,
+# volumi): il resto è uguale, così TEST prova davvero quello che andrà in PROD.
+# I valori qui sono quelli di TEST.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - configmap.yaml
+  - deployment-db-globale.yaml
+  - service-db-globale.yaml
+  - deployment-db-spedizioni.yaml
+  - service-db-spedizioni.yaml
+  - deployment-utenti.yaml
+  - service-utenti.yaml
+  - deployment-spedizioni.yaml
+  - service-spedizioni.yaml
+  - deployment-frontend.yaml
+  - service-frontend.yaml
+  - ingress.yaml

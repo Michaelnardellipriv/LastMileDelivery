@@ -1,0 +1,20 @@
+# Emittente dei certificati Let's Encrypt per cert-manager. È un oggetto di tutto il
+# cluster, non del namespace: si applica una volta, dopo aver installato cert-manager
+# (docs/deployment.md), e NON fa parte di kubectl apply -k k8s/prod.
+#   kubectl apply -f k8s/prod/letsencrypt.yaml
+# L'email riceve gli avvisi di Let's Encrypt (es. certificato in scadenza): usare una
+# casella del team, non personale.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: ops@veloce24.example
+    privateKeySecretRef:
+      name: letsencrypt-account
+    solvers:
+      - http01:
+          ingress:
+            ingressClassName: nginx

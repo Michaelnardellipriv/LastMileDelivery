@@ -1,0 +1,106 @@
+# ESEMPIO: il database delle spedizioni del gruppo di sedi 1 (mappa sede → database,
+# docs/microservizi.md). Non fa parte di nessun ambiente (k8s/test, k8s/prod): un gruppo
+# in più si aggiunge solo quando serve, con questi passi. Per il gruppo 2, 3, ... si copia
+# il file cambiando "1" in ogni nome e in GRUPPO_SPEDIZIONI.
+#
+# 1. Immagine del database senza dati di prova (i dati di prova sono delle sedi del
+#    gruppo 0), la stessa di PROD, anche in TEST:
+#      docker build --build-arg PARTE=spedizioni --build-arg DATI=nessuno \
+#        -t localhost:32000/lastmile/db-spedizioni:2.4.0-prod db
+#    e caricarla nel cluster come le altre (docs/deploy-kubernetes.md).
+#    In PROD l'immagine è quella del registry: cambiare "image" qui sotto in
+#    registry.veloce24.example/lastmile/db-spedizioni:2.4.0-prod (questo file non passa da
+#    kustomize, quindi images di k8s/prod/kustomization.yaml non lo tocca).
+#    Sempre in PROD, le misure qui sotto sono quelle di TEST: portare il volume ad almeno
+#    20Gi e le risorse del container a requests { cpu: 500m, memory: 1Gi }, limits
+#    { memory: 2Gi }, come db-spedizioni in k8s/prod/database-patch.yaml (o di più, se il
+#    gruppo ha città grandi).
+#
+# 2. Database, volume e Service (in PROD aggiungere -n lastmile-prod a ogni kubectl):
+#      kubectl apply -f k8s/esempi/gruppo-spedizioni-1.yaml
+#      kubectl rollout status deploy/db-spedizioni-1
+#    Al primo avvio lo schema, poi GRUPPO_SPEDIZIONI=1: gli id partono da 10^12 + 1
+#    (db/gruppo_spedizioni.sh), poi l'utente del backend (stesse credenziali di db-secret).
+#
+# 3. L'URL del nuovo database nel Secret del servizio spedizioni, chiave DATABASE_URL_1
+#    (le chiavi già presenti restano):
+#      kubectl patch secret spedizioni-secret --type merge -p \
+#        '{"stringData":{"DATABASE_URL_1":"postgres://<APP_DB_USER>:<APP_DB_PASSWORD>@db-spedizioni-1-svc:5432/<POSTGRES_DB>?sslmode=disable"}}'
+#
+# 4. Riavvio del servizio spedizioni, che legge le variabili all'avvio e controlla che il
+#    database dichiari il gruppo 1 (tabella gruppo_database):
+#      kubectl rollout restart deploy/spedizioni
+#      kubectl rollout status deploy/spedizioni
+#      kubectl logs deploy/spedizioni | grep gruppi     # "database delle spedizioni: 2 gruppi (2 già controllati)"
+#    Se il database del gruppo 1 non risponde il servizio parte lo stesso (avviso nel log)
+#    e solo le sedi del gruppo 1 hanno 503 finché non torna.
+#
+# 5. Le sedi del gruppo 1 si creano dall'amministratore con il gruppo scelto:
+#      POST /api/sedi  { "nome": ..., "indirizzo": {...}, "gruppo_spedizioni": 1 }
+#    Una sede esistente non si sposta di gruppo (sedi.gruppo_spedizioni non si cambia).
+#
+# 6. Backup: aggiungere spedizioni-1 a GRUPPI_DB in k8s/prod/backup.yaml.
+#
+# Le migrazioni dei database delle spedizioni (db/spedizioni/migrazione_*.sql) da qui in
+# poi vanno eseguite anche su questo database (deploy/db-spedizioni-1).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: db-spedizioni-1-pvc
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: db-spedizioni-1
+  labels: { app: db-spedizioni-1 }
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate   # un solo Pod sul volume: niente rolling update
+  selector: { matchLabels: { app: db-spedizioni-1 } }
+  template:
+    metadata: { labels: { app: db-spedizioni-1 } }
+    spec:
+      containers:
+        - name: db
+          # immagine "-prod" (DATI=nessuno): solo lo schema, anche in TEST
+          image: localhost:32000/lastmile/db-spedizioni:2.4.0-prod
+          ports: [{ containerPort: 5432 }]
+          envFrom:
+            - secretRef: { name: db-secret }
+          env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            # gruppo di sedi di questo database: letto solo alla prima creazione
+            - name: GRUPPO_SPEDIZIONI
+              value: "1"
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 512Mi }
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: db-spedizioni-1-pvc }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: db-spedizioni-1-svc
+spec:
+  selector:
+    app: db-spedizioni-1
+  ports:
+    - port: 5432
+      targetPort: 5432

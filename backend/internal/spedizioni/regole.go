@@ -37,9 +37,14 @@ const (
 	// margine per gli orologi non sincronizzati tra client e server
 	tolleranzaOrologio = 5 * time.Minute
 
+	// l'operatore riporta in ritirata una spedizione in consegna solo dopo un tentativo di
+	// consegna fallito di questa uscita (il corriere torna al magazzino con il pacco)
+	messaggioRitiroSenzaTentativo = "si riporta in ritirata solo una spedizione con un tentativo di consegna " +
+		"fallito registrato dal corriere in questa uscita"
+
 	// un tentativo di consegna fallito chiude l'uscita: niente altro tentativo né consegna
-	// finché la spedizione non torna in ritirata e riparte
-	messaggioUscitaFallita = "per questa uscita è già stato registrato un tentativo di consegna fallito: " +
+	// finché l'operatore non la riporta in ritirata e il corriere non la rimette in consegna
+	messaggioUscitaFallita = "in questa uscita è già stato registrato un tentativo di consegna fallito: " +
 		"l'operatore deve riportare la spedizione in ritirata e il corriere rimetterla in consegna"
 )
 
@@ -65,13 +70,13 @@ func controllaCodOrdine(e *errori.Validazione, cod string) {
 	}
 }
 
-func controllaID(e *errori.Validazione, campo string, v int32) {
+func controllaID(e *errori.Validazione, campo string, v int64) {
 	if v <= 0 {
 		e.Aggiungi(campo, "deve essere un id positivo")
 	}
 }
 
-func controllaIndirizzi(e *errori.Validazione, ritiro, spedizione int32) {
+func controllaIndirizzi(e *errori.Validazione, ritiro, spedizione int64) {
 	if ritiro > 0 && ritiro == spedizione {
 		e.Aggiungi("id_indirizzo_spedizione", "deve essere diverso dall'indirizzo di ritiro")
 	}
@@ -106,7 +111,7 @@ func notaDaSalvare(nota, motivo *string) *NotaDaSalvare {
 	return &NotaDaSalvare{Testo: strings.TrimSpace(*nota), Motivo: motivo}
 }
 
-func stessoCorriere(a, b *int32) bool {
+func stessoCorriere(a, b *int64) bool {
 	return a != nil && b != nil && *a == *b
 }
 

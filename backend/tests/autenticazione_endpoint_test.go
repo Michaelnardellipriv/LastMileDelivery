@@ -52,7 +52,7 @@ func TestLogin(t *testing.T) {
 		r := f.login(t, map[string]any{"email": f.emailDi("operatore"), "password": "PasswordOperatore1"}, 200)
 		utente := r.corpo["utente"].(map[string]any)
 		if r.corpo["tipo"] != "Bearer" || r.corpo["scade_il"] == nil || utente["ruolo"] != "operatore" ||
-			int32(utente["id"].(float64)) != f.idOperatore || utente["email"] != f.emailDi("operatore") {
+			int64(utente["id"].(float64)) != f.idOperatore || utente["email"] != f.emailDi("operatore") {
 			t.Fatalf("risposta del login: %s", r.grezzo)
 		}
 		if r.header.Get("Cache-Control") != "no-store" {
@@ -64,7 +64,7 @@ func TestLogin(t *testing.T) {
 
 		r = f.login(t, map[string]any{"email": strings.ToUpper(f.emailDi("destinatario")), "password": "PasswordCliente1"}, 200)
 		utente = r.corpo["utente"].(map[string]any)
-		if utente["ruolo"] != "cliente" || int32(utente["id"].(float64)) != f.idDestinatario {
+		if utente["ruolo"] != "cliente" || int64(utente["id"].(float64)) != f.idDestinatario {
 			t.Fatalf("il destinatario entra come cliente, email senza distinguere maiuscole: %s", r.grezzo)
 		}
 		if e := f.chiama(t, http.MethodGet, "/api/spedizioni", nil, conToken(r)); e.stato != 200 {
@@ -138,6 +138,49 @@ func TestLogin(t *testing.T) {
 		f.login(t, map[string]any{"email": f.emailDi("operatore"), "password": "x", "id": 1}, 400)
 	})
 
+	t.Run("rinnovo_del_token", func(t *testing.T) {
+		vecchio := f.login(t, map[string]any{"email": f.emailDi("operatore"), "password": "PasswordOperatore1"}, 200)
+		r := f.chiama(t, http.MethodPost, "/api/auth/rinnova", nil, conToken(vecchio))
+		if r.stato != http.StatusOK || r.corpo["token"] == nil || r.corpo["scade_il"] == nil || r.corpo["durata_secondi"] == nil {
+			t.Fatalf("rinnovo con un token valido: %d %s", r.stato, r.grezzo)
+		}
+		utente := r.corpo["utente"].(map[string]any)
+		if utente["ruolo"] != "operatore" || int64(utente["id"].(float64)) != f.idOperatore {
+			t.Errorf("il nuovo token è dello stesso utente: %s", r.grezzo)
+		}
+		if e := f.chiama(t, http.MethodGet, "/api/spedizioni", nil, conToken(r)); e.stato != http.StatusOK {
+			t.Errorf("il nuovo token funziona sulle spedizioni: %d", e.stato)
+		}
+		if r := f.chiama(t, http.MethodPost, "/api/auth/rinnova", nil, nil); r.stato != http.StatusUnauthorized {
+			t.Errorf("senza token: atteso 401, ottenuto %d", r.stato)
+		}
+	})
+
+	t.Run("logout_chiude_la_sessione", func(t *testing.T) {
+		sessione := f.login(t, map[string]any{"email": f.emailDi("operatore"), "password": "PasswordOperatore1"}, 200)
+		altra := f.login(t, map[string]any{"email": f.emailDi("operatore"), "password": "PasswordOperatore1"}, 200)
+		if r := f.chiama(t, http.MethodPost, "/api/auth/esci", nil, conToken(sessione)); r.stato != http.StatusNoContent {
+			t.Fatalf("logout: atteso 204, ottenuto %d %s", r.stato, r.grezzo)
+		}
+		// subito, su tutti e due i servizi, e non si rinnova
+		if r := f.chiama(t, http.MethodGet, "/api/spedizioni", nil, conToken(sessione)); r.stato != http.StatusUnauthorized {
+			t.Errorf("spedizioni dopo il logout: atteso 401, ottenuto %d", r.stato)
+		}
+		if r := f.chiama(t, http.MethodGet, "/api/clienti", nil, conToken(sessione)); r.stato != http.StatusUnauthorized {
+			t.Errorf("servizio utenti dopo il logout: atteso 401, ottenuto %d", r.stato)
+		}
+		if r := f.chiama(t, http.MethodPost, "/api/auth/rinnova", nil, conToken(sessione)); r.stato != http.StatusUnauthorized {
+			t.Errorf("rinnovo dopo il logout: atteso 401, ottenuto %d", r.stato)
+		}
+		if r := f.chiama(t, http.MethodPost, "/api/auth/esci", nil, nil); r.stato != http.StatusUnauthorized {
+			t.Errorf("logout senza token: atteso 401, ottenuto %d", r.stato)
+		}
+		// l'altra sessione dello stesso utente (es. un altro dispositivo) resta aperta
+		if r := f.chiama(t, http.MethodGet, "/api/spedizioni", nil, conToken(altra)); r.stato != http.StatusOK {
+			t.Errorf("l'altra sessione resta aperta: %d", r.stato)
+		}
+	})
+
 	t.Run("token_non_valido_401", func(t *testing.T) {
 		for _, h := range []map[string]string{
 			{"Authorization": "Bearer abc.def.ghi"},
@@ -151,13 +194,13 @@ func TestLogin(t *testing.T) {
 
 	t.Run("un_solo_ruolo_per_email", func(t *testing.T) {
 		email := "doppio." + f.suffisso + "@test.it"
-		var idUtente, idCorriere, idCliente int32
+		var idUtente, idCorriere, idCliente int64
 		ctx := t.Context()
 		if err := f.db.QueryRow(ctx, `INSERT INTO utenti (nome, cognome, prefisso, nr_telefono, email, pwd_hash)
 			VALUES ('Doppio', 'Ruolo', '+39', $1, $2, '!') RETURNING id`, fmt.Sprintf("7%d", time.Now().UnixNano()%1e9), email).Scan(&idUtente); err != nil {
 			t.Fatal(err)
 		}
-		if err := f.db.QueryRow(ctx, `INSERT INTO corrieri (id_utente) VALUES ($1) RETURNING id`, idUtente).Scan(&idCorriere); err != nil {
+		if err := f.db.QueryRow(ctx, `INSERT INTO corrieri (id_utente, id_sede) VALUES ($1, $2) RETURNING id`, idUtente, f.idSede).Scan(&idCorriere); err != nil {
 			t.Fatal(err)
 		}
 		err := f.db.QueryRow(ctx, `INSERT INTO clienti (id_utente) VALUES ($1) RETURNING id`, idUtente).Scan(&idCliente)
@@ -166,7 +209,7 @@ func TestLogin(t *testing.T) {
 		}
 		f.impostaPassword(t, email, "PasswordDoppia1")
 		r := f.login(t, map[string]any{"email": email, "password": "PasswordDoppia1"}, 200)
-		if u := r.corpo["utente"].(map[string]any); u["ruolo"] != "corriere" || int32(u["id"].(float64)) != idCorriere {
+		if u := r.corpo["utente"].(map[string]any); u["ruolo"] != "corriere" || int64(u["id"].(float64)) != idCorriere {
 			t.Fatalf("resta solo il ruolo di corriere: %s", r.grezzo)
 		}
 		f.login(t, map[string]any{"email": email, "password": "PasswordDoppia1", "ruolo": "cliente"}, 403)
@@ -192,7 +235,18 @@ func TestCambioPassword(t *testing.T) {
 	if r := cambia(map[string]any{"password_attuale": "PasswordVecchia1", "nuova_password": "corta"}, token, 400); !contiene(campiInErrore(r), "nuova_password") {
 		t.Fatalf("errore sul campo nuova_password: %s", r.grezzo)
 	}
+	altra := conToken(f.login(t, map[string]any{"email": email, "password": "PasswordVecchia1"}, 200)) // es. un token rubato
 	cambia(map[string]any{"password_attuale": "PasswordVecchia1", "nuova_password": "PasswordNuova1"}, token, 204)
+	// le altre sessioni si chiudono subito; quella da cui si è cambiata la password resta
+	if r := f.chiama(t, http.MethodGet, "/api/spedizioni", nil, altra); r.stato != http.StatusUnauthorized {
+		t.Errorf("l'altra sessione dopo il cambio password: atteso 401, ottenuto %d %s", r.stato, r.grezzo)
+	}
+	if r := f.chiama(t, http.MethodPost, "/api/auth/rinnova", nil, altra); r.stato != http.StatusUnauthorized {
+		t.Errorf("rinnovo dell'altra sessione: atteso 401, ottenuto %d %s", r.stato, r.grezzo)
+	}
+	if r := f.chiama(t, http.MethodGet, "/api/spedizioni", nil, token); r.stato != http.StatusOK {
+		t.Errorf("la sessione da cui si è cambiata la password resta: %d", r.stato)
+	}
 
 	f.login(t, map[string]any{"email": email, "password": "PasswordVecchia1"}, 401)
 	f.login(t, map[string]any{"email": email, "password": "PasswordNuova1"}, 200)
@@ -202,7 +256,7 @@ func TestRecuperoPassword(t *testing.T) {
 	f := preparaFixture(t)
 	email := f.emailDi("corriere2")
 	ctx := t.Context()
-	var idUtente int32
+	var idUtente int64
 	if err := f.db.QueryRow(ctx, `SELECT id FROM utenti WHERE email = $1`, email).Scan(&idUtente); err != nil {
 		t.Fatal(err)
 	}

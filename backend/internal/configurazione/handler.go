@@ -17,8 +17,9 @@ func NuovoHandler(s *Servizio) *Handler {
 }
 
 func (h *Handler) Registra(rotte *httpx.Rotte, identifica, idempotente httpx.Middleware) {
-	rotte.Gestisci(http.MethodGet, "/api/impostazioni", http.HandlerFunc(h.impostazioni), identifica)
-	rotte.Gestisci(http.MethodPatch, "/api/impostazioni", http.HandlerFunc(h.modificaImpostazioni), identifica, idempotente)
+	// ogni sede ha le sue impostazioni: l'amministratore sceglie la sede e poi i parametri
+	rotte.Gestisci(http.MethodGet, "/api/sedi/{id}/impostazioni", http.HandlerFunc(h.impostazioni), identifica)
+	rotte.Gestisci(http.MethodPatch, "/api/sedi/{id}/impostazioni", http.HandlerFunc(h.modificaImpostazioni), identifica, idempotente)
 	rotte.Gestisci(http.MethodGet, "/api/impostazioni/motivi", http.HandlerFunc(h.motivi), identifica)
 	rotte.Gestisci(http.MethodPost, "/api/impostazioni/motivi", http.HandlerFunc(h.creaMotivo), identifica, idempotente)
 	rotte.Gestisci(http.MethodPatch, "/api/impostazioni/motivi/{id}", http.HandlerFunc(h.modificaMotivo), identifica, idempotente)
@@ -33,12 +34,13 @@ type richiestaImpostazioni struct {
 }
 
 type impostazioniDTO struct {
+	IDSede                   int64     `json:"id_sede"`
 	GiorniVisibilitaCliente  int       `json:"giorni_visibilita_cliente"`
 	MaxTentativiRitiro       int       `json:"max_tentativi_ritiro"`
 	MaxTentativiConsegna     int       `json:"max_tentativi_consegna"`
 	IntervalloPosizioneSec   int       `json:"intervallo_posizione_sec"`
 	ModificateIl             time.Time `json:"modificate_il"`
-	IDAmministratoreModifica *int32    `json:"id_amministratore_modifica"`
+	IDAmministratoreModifica *int64    `json:"id_amministratore_modifica"`
 }
 
 type richiestaMotivo struct {
@@ -50,7 +52,7 @@ type richiestaStatoMotivo struct {
 }
 
 type motivoDTO struct {
-	ID          int32     `json:"id"`
+	ID          int64     `json:"id"`
 	Descrizione string    `json:"descrizione"`
 	Attivo      bool      `json:"attivo"`
 	CreatoIl    time.Time `json:"creato_il"`
@@ -62,7 +64,7 @@ type elenco[T any] struct {
 
 func versoImpostazioniDTO(i Impostazioni) impostazioniDTO {
 	return impostazioniDTO{
-		GiorniVisibilitaCliente: i.GiorniVisibilitaCliente, MaxTentativiRitiro: i.MaxTentativiRitiro,
+		IDSede: i.IDSede, GiorniVisibilitaCliente: i.GiorniVisibilitaCliente, MaxTentativiRitiro: i.MaxTentativiRitiro,
 		MaxTentativiConsegna: i.MaxTentativiConsegna, IntervalloPosizioneSec: i.IntervalloPosizioneSec,
 		ModificateIl: i.ModificateIl.UTC(), IDAmministratoreModifica: i.IDAmministratoreModifica,
 	}
@@ -73,7 +75,11 @@ func versoMotivoDTO(m Motivo) motivoDTO {
 }
 
 func (h *Handler) impostazioni(w http.ResponseWriter, r *http.Request) {
-	imp, err := h.servizio.Impostazioni(r.Context(), identita.DalContesto(r.Context()))
+	idSede, ok := httpx.IDDalPercorso(w, r)
+	if !ok {
+		return
+	}
+	imp, err := h.servizio.Impostazioni(r.Context(), identita.DalContesto(r.Context()), idSede)
 	if err != nil {
 		httpx.RispondiErrore(w, r, err)
 		return
@@ -82,11 +88,15 @@ func (h *Handler) impostazioni(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) modificaImpostazioni(w http.ResponseWriter, r *http.Request) {
+	idSede, ok := httpx.IDDalPercorso(w, r)
+	if !ok {
+		return
+	}
 	var req richiestaImpostazioni
 	if !httpx.LeggiCorpo(w, r, &req) {
 		return
 	}
-	imp, err := h.servizio.ModificaImpostazioni(r.Context(), identita.DalContesto(r.Context()), ModificaImpostazioni(req))
+	imp, err := h.servizio.ModificaImpostazioni(r.Context(), identita.DalContesto(r.Context()), idSede, ModificaImpostazioni(req))
 	if err != nil {
 		httpx.RispondiErrore(w, r, err)
 		return

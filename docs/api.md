@@ -1,5 +1,18 @@
 # API — LastMileDelivery / Veloce24
 
+> L'API è servita da **due microservizi** dietro lo stesso indirizzo: `spedizioni` risponde a
+> `/api/spedizioni`, `/api/corrieri/posizione(i)`, `/api/impostazioni`, `/api/motivi` e
+> `/api/sedi/{id}/impostazioni`; `utenti` a tutto il resto (login, utenti, clienti, corrieri,
+> sedi). Gli indirizzi di ritiro e consegna (`/api/indirizzi`) dalla 2.5.0 li serve il
+> servizio spedizioni, dal database del gruppo della sede. Per chi chiama non cambia nulla,
+> salvo che l'amministratore indica sempre `id_sede` (vedi `docs/microservizi.md`).
+>
+> **Dalla 0.46.0** le sedi sono divise in gruppi, ognuno con il suo database delle spedizioni
+> (mappa sede → database). Per chi chiama cambiano due cose: l'amministratore deve sempre
+> indicare `id_sede` nell'elenco delle spedizioni, e la sede ha il campo `gruppo_spedizioni`
+> (vedi [Sedi e gruppi](#sedi-e-gruppi-delle-spedizioni)). Gli id delle spedizioni
+> contengono il gruppo (`id / 10^12`) e non si ripetono tra gruppi.
+
 |  |  |
 | :---- | :---- |
 | **Team** | GLS |
@@ -106,7 +119,7 @@ Stati della spedizione (tipo `stato_spedizione` del database): `creata`, `assegn
 | in consegna | consegnata | corriere assegnato | `PATCH /stato` |
 | in consegna | in consegna (consegna fallita, tentativi 1 e 2\) | corriere assegnato | `POST /tentativi` con `tipo: consegna`  con `motivo` e `nota` |
 | in consegna | non consegnata (consegna fallita, 3° tentativo) | corriere assegnato | `POST /tentativi` con `tipo: consegna e` con `motivo` e `nota` |
-| in consegna | ritirata | operatore | `PATCH /stato` |
+| in consegna | ritirata (solo dopo un tentativo di consegna fallito in questa uscita) | operatore | `PATCH /stato` |
 | ritirata, in consegna | persa | operatore | `PATCH /stato` con `motivo` e `nota` |
 
 Ogni altro passaggio viene respinto (409, o 403 se lo chiede il ruolo sbagliato).
@@ -114,7 +127,7 @@ Ogni altro passaggio viene respinto (409, o 403 se lo chiede il ruolo sbagliato)
 **Tentativi** (massimo `max_tentativi_ritiro` e `max_tentativi_consegna`, impostati dall'amministratore con `PATCH /api/impostazioni`, predefinito 3 ciascuno; qui sotto gli esempi usano 3):
 
 - **Ritiro.** La spedizione resta `assegnata`. Dopo il 3° fallimento il corriere non può più registrare tentativi né ritirarla, non si può riassegnare e l'operatore la annulla.  
-- **Consegna.** Ogni uscita in consegna ammette un solo tentativo. Dopo i tentativi 1 e 2 l'operatore riporta la spedizione in `ritirata` (ed eventualmente la riassegna), poi il corriere la rimette `in consegna`. Al 3° la spedizione passa da sola a `non consegnata`.
+- **Consegna.** Ogni uscita in consegna (dall'ultimo passaggio a `in consegna`) ammette un solo tentativo. Dopo i tentativi 1 e 2 la spedizione resta `in consegna` ma il corriere non può registrare un altro tentativo né consegnarla: l'operatore la riporta in `ritirata` (ed eventualmente la riassegna), poi il corriere la rimette `in consegna`. Al 3° passa da sola a `non consegnata`. L'operatore la riporta in `ritirata` solo dopo un tentativo di consegna fallito di questa uscita; altrimenti 409.
 
 **Reso.** `is_reso` lo imposta l'operatore con `PATCH /api/spedizioni/{id}`, solo su spedizioni `annullata`, `persa` o `non consegnata`. Alla creazione vale sempre `false`.
 
@@ -147,7 +160,7 @@ Un motivo non si cancella né si rinomina: si disattiva, e le note che lo usano 
 | Ruolo | Spedizioni | Note | `id_corriere` |
 | :---- | :---- | :---- | :---- |
 | Operatore | tutte, in tutti gli statipiu lo storico | tutte, con testo e autore | sì |
-| Amministratore | tutte, in tutti gli stati, più lo storico; non modifica nulla | tutte, con testo e autore | sì |
+| Amministratore | nell'elenco quelle della sede scelta con `id_sede` (obbligatorio), in tutti gli stati; dettaglio e storico di qualunque spedizione per id; non modifica nulla | tutte, con testo e autore | sì |
 | Corriere | solo quelle assegnate a lui in `assegnata`, `ritirata`, `in consegna` | tutte, con testo e autore | no |
 | Cliente destinatario | solo le sue: quelle in corso sempre, quelle chiuse fino a `giorni_visibilita_cliente` giorni (impostati dall'amministratore, predefinito 30\) dalla chiusura | solo il `motivo` delle note pubbliche | no |
 | Cliente mittente | nessuna (il cliente non ha previsto l'accesso del mittente in questa fase) | — | — |
@@ -164,12 +177,15 @@ Elenco delle spedizioni visibili a chi chiama, dalla più recente.
 | :---- | :---- | :---- |
 | `stato` | stringa | uno degli 8 stati |
 | `id_corriere` | intero | solo spedizioni di quel corriere; solo operatore e amministratore (altrimenti 403\) |
+| `id_sede` | intero | solo spedizioni di quella sede. **Obbligatorio per l'amministratore**: senza, 400 sul campo `id_sede` ("obbligatorio per l'amministratore: scegliere una sede"); una sede che non esiste, 404 "sede non trovata". Operatori e corrieri possono indicare solo la propria (altrimenti 403); il cliente non lo usa |
 | `dal`, `al` | data `AAAA-MM-GG` | data di creazione, estremi inclusi; `al` non prima di `dal` |
 | `cod_ordine` | stringa 1–50 | riferimento: trova i codici che lo contengono, senza distinguere maiuscole e minuscole |
 | `pagina` | intero ≥ 1 | predefinito 1 |
 | `per_pagina` | intero 1–100 | predefinito 20 |
 
 I filtri si combinano e si applicano dentro ciò che il ruolo può già vedere: un corriere che chiede `stato=consegnata` riceve una lista vuota.
+
+L'amministratore non ha una vista di tutte le sedi insieme: sceglie una sede alla volta. L'elenco del cliente invece comprende le spedizioni di tutte le sedi (il servizio legge tutti i gruppi e unisce i risultati, stesso ordine).
 
 Risposta 200:
 
@@ -210,6 +226,7 @@ Risposta 200:
 
 ```
 curl -H "X-Id-Operatore: 1" "http://localhost:8080/api/spedizioni?stato=assegnata&dal=2026-11-01&cod_ordine=ORD"
+curl -H "X-Id-Amministratore: 1" "http://localhost:8080/api/spedizioni?id_sede=1"
 ```
 
 ## POST /api/spedizioni
@@ -305,7 +322,7 @@ Solo il corriere assegnato. `tipo`, `motivo` e `nota` sono obbligatori; il motiv
 - `ritiro`: solo su spedizione `assegnata`, al massimo 3;  
 - `consegna`: solo su spedizione `in consegna`, uno per uscita; al 3° la spedizione diventa `non consegnata`.
 
-Risposta 201 con la spedizione aggiornata. Errori: 400, 403, 404, 409 (stato sbagliato, ritiri esauriti, tentativo già registrato in questa uscita).
+Risposta 201 con la spedizione aggiornata. Errori: 400, 403, 404, 409 (stato sbagliato, ritiri esauriti, tentativo già registrato in questa uscita). Ogni tentativo compare nello storico (`operazione: tentativo`) accanto ai cambi di stato.
 
 ## PATCH /api/spedizioni/{id}/stato
 
@@ -410,7 +427,7 @@ Un utente nelle risposte:
 
 `GET /api/utenti` è paginato come `/api/clienti` (`q`, `pagina`, `per_pagina`), con i filtri facoltativi `ruolo` (`corriere`, `operatore`) e `attivo` (`true`, `false`).
 
-`PATCH /api/utenti/{id}` cambia solo i campi indicati, uno o più tra `nome`, `cognome`, `prefisso`, `nr_telefono`, `email`, `password` e `attivo`; il ruolo non si cambia (400). Valgono le regole di `POST /api/utenti`, e l'email non può essere di un altro utente (409; la propria, anche con maiuscole diverse, va bene). Con una nuova `password` l'utente la riceve per mail; con una nuova `email` il login si fa con quella. Risposta 200 con l'utente; corpo vuoto: 400; 404 se l'id non è di un corriere o di un operatore.
+`PATCH /api/utenti/{id}` cambia solo i campi indicati, uno o più tra `nome`, `cognome`, `prefisso`, `nr_telefono`, `email`, `password` e `attivo`; il ruolo non si cambia (400). Valgono le regole di `POST /api/utenti`, e l'email non può essere di un altro utente (409; la propria, anche con maiuscole diverse, va bene). Con una nuova `password` l'utente la riceve per mail; con una nuova `email` il login si fa con quella. Una nuova `email` fa scadere i link di recupero della password già mandati. L'operatore usa la stessa rotta per i dati dei clienti, email compresa (anche di chi usa l'app); password e stato restano all'amministratore. Risposta 200 con l'utente; corpo vuoto: 400; 404 se l'id non è di un corriere o di un operatore.
 
 ```json
 { "cognome": "Bianchi", "nr_telefono": "3339998877", "email": "carlo.bianchi@veloce24.it" }
@@ -419,15 +436,28 @@ Un utente nelle risposte:
 `{ "attivo": false }` disattiva l'utente, `{ "attivo": true }` lo riabilita. Un utente disattivato:
 
 - non può fare il login (403, solo se la password è giusta; altrimenti resta 401);  
-- i token che aveva già ricevono 403 a ogni richiesta;  
+- le sue sessioni si chiudono subito: i token che aveva rispondono 403 su tutti e due i servizi e non si rinnovano (lo stesso, con 401, per un cambio di sede o una password nuova; il logout è `POST /api/auth/esci`);  
 - non riceve mail di recupero password;  
 - se è un corriere, non compare in `GET /api/corrieri` e non gli si assegnano spedizioni (409 sul campo `id_corriere`). Le spedizioni che aveva restano sue finché l'operatore non le riassegna.
+
+## Sedi e gruppi delle spedizioni
+
+Le sedi (`/api/sedi`, servizio utenti) sono divise in **gruppi**: ogni gruppo ha il suo database delle spedizioni (le città grandi da sole, le piccole insieme). La sede ha il campo `gruppo_spedizioni` (intero 0–9006, 0 = il database principale):
+
+```json
+{ "id": 3, "nome": "Veloce24 Verona", "attiva": true, "indirizzo": { "...": "..." }, "gruppo_spedizioni": 1, "creata_il": "2026-11-25T10:00:00Z" }
+```
+
+- `POST /api/sedi` accetta `gruppo_spedizioni` facoltativo (predefinito 0). Fuori da 0–9006: 400 sul campo `gruppo_spedizioni`. Un gruppo che non ha un database delle spedizioni configurato: 400 sullo stesso campo, con l'elenco dei gruppi configurati.
+- `PATCH /api/sedi/{id}` con `gruppo_spedizioni`: 400 sul campo `gruppo_spedizioni` ("non si cambia"). Spostare una sede in un altro gruppo è una migrazione dei dati.
+- `cod_ordine` è unico dentro un gruppo (con un solo gruppo: ovunque).
 
 ## Configurazione del server
 
 | Variabile | Predefinito | Significato |
 | :---- | :---- | :---- |
-| `DATABASE_URL` | — (obbligatoria) | stringa di connessione a PostgreSQL |
+| `DATABASE_URL` | — (obbligatoria) | stringa di connessione a PostgreSQL (servizio spedizioni: il database del gruppo 0) |
+| `DATABASE_URL_<n>` | — | servizio spedizioni: il database del gruppo di sedi `n` (es. `DATABASE_URL_1`); vedi `docs/configuration.md` |
 | `LISTEN_ADDR` | `127.0.0.1:8080` | indirizzo di ascolto (in Kubernetes `0.0.0.0:8080`) |
 
 Tentativi massimi, giorni di visibilità del cliente, intervallo della posizione e motivi non sono più variabili d'ambiente: li imposta l'amministratore (vedi [Amministrazione](#amministrazione)). `MAX_TENTATIVI` e `GIORNI_VISIBILITA_CLIENTE`, se ancora impostate, vengono ignorate con un avviso nel log.

@@ -11,6 +11,7 @@
 // se si cambia uno, va cambiato anche l'altro.
 //
 // Messaggi dalla pagina:  {tipo: 'avvia', base, token, lat, lon, direzione, intervallo}
+//                         {tipo: 'token', token}   token rinnovato (dura 15 minuti)
 //                         {tipo: 'ferma'}
 // Messaggi alla pagina:   {ok, status, messaggio, tecnico, lat, lon, intervallo}
 
@@ -27,6 +28,8 @@ self.onmessage = (evento) => {
       intervallo: m.intervallo,
     };
     invia();
+  } else if (m.tipo === 'token') {
+    if (stato) stato.token = m.token;
   } else if (m.tipo === 'ferma') {
     clearTimeout(timer);
     stato = null;
@@ -76,7 +79,9 @@ async function invia() {
   }
   if (stato !== corrente) return; // fermato (o riavviato) durante l'invio
   self.postMessage({ ...esito, lat: corrente.lat, lon: corrente.lon, intervallo: corrente.intervallo });
-  if (esito.status === 401) { // sessione scaduta: la pagina riporta al login
+  if (esito.status === 401 || esito.status === 403) {
+    // sessione scaduta o account disattivato: la pagina verifica con il rinnovo e decide
+    // se riportare al login o ripartire
     stato = null;
     return;
   }

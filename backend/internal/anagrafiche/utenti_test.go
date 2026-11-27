@@ -12,7 +12,7 @@ import (
 )
 
 func nuovoUtente(ruolo *string, email string) NuovoUtente {
-	return NuovoUtente{Ruolo: ruolo, NuovoCliente: nuovoCliente(email, p("PasswordNuova1"))}
+	return NuovoUtente{Ruolo: ruolo, IDSede: p(int64(sedeTrento)), NuovoCliente: nuovoCliente(email, p("PasswordNuova1"))}
 }
 
 func TestCreaUtente(t *testing.T) {
@@ -25,6 +25,9 @@ func TestCreaUtente(t *testing.T) {
 		esito, err := s.CreaUtente(ctx, amministratore, nuovoUtente(p(string(ruolo)), "nuovo@test.it"))
 		if err != nil || esito.Utente.Ruolo != ruolo || esito.Utente.Nome != "Dora" || !esito.MailInviata {
 			t.Fatalf("l'amministratore crea un %s: %+v %v", ruolo, esito, err)
+		}
+		if a.sedeUtente != sedeTrento {
+			t.Fatalf("il %s lavora nella sede scelta dall'amministratore: %d", ruolo, a.sedeUtente)
 		}
 		if bcrypt.CompareHashAndPassword([]byte(a.hash), []byte("PasswordNuova1")) != nil {
 			t.Fatal("nel database va l'hash della password scelta dall'amministratore")
@@ -49,7 +52,9 @@ func TestCreaUtente(t *testing.T) {
 		"ruolo cliente":        {nuovoUtente(p("cliente"), "x@test.it"), "ruolo"},
 		"ruolo amministratore": {nuovoUtente(p("amministratore"), "x@test.it"), "ruolo"},
 		"email non valida":     {nuovoUtente(p("corriere"), "non-una-mail"), "email"},
-		"senza password":       {NuovoUtente{Ruolo: p("corriere"), NuovoCliente: nuovoCliente("x@test.it", nil)}, "password"},
+		"senza password":       {NuovoUtente{Ruolo: p("corriere"), IDSede: p(int64(sedeTrento)), NuovoCliente: nuovoCliente("x@test.it", nil)}, "password"},
+		"senza sede":           {NuovoUtente{Ruolo: p("corriere"), NuovoCliente: nuovoCliente("x@test.it", p("PasswordNuova1"))}, "id_sede"},
+		"sede non positiva":    {NuovoUtente{Ruolo: p("corriere"), IDSede: p(int64(0)), NuovoCliente: nuovoCliente("x@test.it", p("PasswordNuova1"))}, "id_sede"},
 	} {
 		_, err := s.CreaUtente(ctx, amministratore, c.n)
 		if tipoErrore(err) != "400" || !campoSegnalato(err, c.campo) {
@@ -132,21 +137,25 @@ func TestModificaClienti(t *testing.T) {
 		}
 	}
 
-	// operatore: solo i dati dei clienti
-	for _, id := range []int32{destinatario, soloMittente} {
-		if _, err := s.ModificaUtente(ctx, operatore, id, ModificaUtente{Email: p("nuova@test.it")}); err != nil {
+	// operatore: tutti i dati dei clienti, email compresa (anche dei destinatari che usano
+	// l'app); non la password né lo stato
+	for _, id := range []int64{destinatario, soloMittente} {
+		if _, err := s.ModificaUtente(ctx, operatore, id, ModificaUtente{Cognome: p("Verdi"), NrTelefono: p("3331234567")}); err != nil {
 			t.Errorf("l'operatore modifica i dati del cliente %d: %v", id, err)
+		}
+		if _, err := s.ModificaUtente(ctx, operatore, id, ModificaUtente{Email: p("nuova@test.it")}); err != nil {
+			t.Errorf("l'operatore cambia l'email del cliente %d: %v", id, err)
 		}
 	}
 	for nome, c := range map[string]struct {
-		id int32
+		id int64
 		m  ModificaUtente
 	}{
-		"disattiva un cliente":     {destinatario, ModificaUtente{Attivo: p(false)}},
-		"reimposta una password":   {destinatario, ModificaUtente{Password: p("NuovaPassword9")}},
-		"modifica un corriere":     {7, ModificaUtente{Nome: p("Carlo")}},
-		"modifica un operatore":    {8, ModificaUtente{Nome: p("Olga")}},
-		"dati e stato del cliente": {destinatario, ModificaUtente{Nome: p("Dora"), Attivo: p(true)}},
+		"disattiva un cliente":      {destinatario, ModificaUtente{Attivo: p(false)}},
+		"reimposta una password":    {destinatario, ModificaUtente{Password: p("NuovaPassword9")}},
+		"modifica un corriere":      {7, ModificaUtente{Nome: p("Carlo")}},
+		"modifica un operatore":     {8, ModificaUtente{Nome: p("Olga")}},
+		"dati e stato del cliente":  {destinatario, ModificaUtente{Nome: p("Dora"), Attivo: p(true)}},
 	} {
 		a.modifica = nil
 		if _, err := s.ModificaUtente(ctx, operatore, c.id, c.m); tipoErrore(err) != "403" || a.modifica != nil {
@@ -159,7 +168,7 @@ func TestModificaDatiUtente(t *testing.T) {
 	ctx := context.Background()
 	a := &archivioFinto{
 		emailUsate:  map[string]bool{"altro@test.it": true, "carlo@test.it": true},
-		proprietari: map[string]int32{"altro@test.it": 8, "carlo@test.it": 7},
+		proprietari: map[string]int64{"altro@test.it": 8, "carlo@test.it": 7},
 	}
 	postino := &postinoFinto{}
 	s := NuovoServizio(a, postino)
@@ -213,4 +222,28 @@ func TestModificaDatiUtente(t *testing.T) {
 func campoSegnalato(err error, campo string) bool {
 	v, ok := err.(*errori.Validazione)
 	return ok && v.Segnalato(campo)
+}
+
+func TestAmministratoreSpostaUnUtenteDiSede(t *testing.T) {
+	ctx := context.Background()
+	a := &archivioFinto{}
+	s := NuovoServizio(a, &postinoFinto{})
+
+	if _, err := s.ModificaUtente(ctx, amministratore, 7, ModificaUtente{IDSede: p(int64(sedeBolzano))}); err != nil ||
+		a.modifica == nil || a.modifica.IDSede == nil || *a.modifica.IDSede != sedeBolzano {
+		t.Fatalf("la nuova sede arriva al repository: %+v %v", a.modifica, err)
+	}
+	if _, err := s.ModificaUtente(ctx, amministratore, 7, ModificaUtente{IDSede: p(int64(-1))}); tipoErrore(err) != "400" || !campoSegnalato(err, "id_sede") {
+		t.Fatalf("sede non positiva: atteso 400 su id_sede, ottenuto %v", err)
+	}
+	// i clienti non hanno sede
+	a.modifica = nil
+	if _, err := s.ModificaUtente(ctx, amministratore, 30, ModificaUtente{IDSede: p(int64(sedeBolzano))}); tipoErrore(err) != "400" ||
+		!campoSegnalato(err, "id_sede") || a.modifica != nil {
+		t.Fatalf("cliente: atteso 400 su id_sede senza salvare, ottenuto %v", err)
+	}
+	// la sede la cambia solo l'amministratore
+	if _, err := s.ModificaUtente(ctx, operatore, 30, ModificaUtente{IDSede: p(int64(sedeBolzano))}); tipoErrore(err) != "403" {
+		t.Fatalf("l'operatore non cambia sedi: atteso 403, ottenuto %v", err)
+	}
 }

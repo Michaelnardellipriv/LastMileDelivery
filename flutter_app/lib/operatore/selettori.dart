@@ -123,10 +123,33 @@ class _NuovoIndirizzoState extends State<_NuovoIndirizzo> {
   Object? _errore;
   bool _attesa = false;
 
+  /// Città della sede dell'operatore: ritiro e consegna restano lì, quindi città,
+  /// regione e nazione si prendono dalla sede e non si cambiano.
+  Sede? _sede;
+
   @override
   void initState() {
     super.initState();
     _campi.c['nazione']!.text = 'Italia';
+    _caricaSede();
+  }
+
+  Future<void> _caricaSede() async {
+    final idSede = widget.api.utente?.idSede;
+    if (idSede == null) return;
+    try {
+      final sede = await widget.api.sede(idSede);
+      if (!mounted) return;
+      setState(() {
+        _sede = sede;
+        _campi.c['citta']!.text = sede.indirizzo.citta ?? '';
+        _campi.c['regione']!.text = sede.indirizzo.regione ?? '';
+        _campi.c['nazione']!.text = sede.indirizzo.nazione ?? '';
+      });
+    } catch (e) {
+      // senza la sede i campi restano liberi: il backend rifiuta comunque un'altra città
+      registraErrore(e);
+    }
   }
 
   Future<void> _salva() async {
@@ -164,10 +187,11 @@ class _NuovoIndirizzoState extends State<_NuovoIndirizzo> {
             child: Wrap(spacing: 12, runSpacing: 12, children: [
               _campi.campo('via', 'Via', _errore, larghezza: 390),
               _campi.campo('civico', 'Civico', _errore, larghezza: 90),
-              _campi.campo('citta', 'Città', _errore, larghezza: 390),
+              _campi.campo('citta', 'Città', _errore,
+                  larghezza: 390, soloLettura: _sede != null, suggerimento: _sede == null ? null : 'La città della tua sede'),
               _campi.campo('cap', 'CAP', _errore, larghezza: 90),
-              _campi.campo('regione', 'Regione', _errore),
-              _campi.campo('nazione', 'Nazione', _errore),
+              _campi.campo('regione', 'Regione', _errore, soloLettura: _sede != null),
+              _campi.campo('nazione', 'Nazione', _errore, soloLettura: _sede != null),
               if (_errore != null && (_errore is! ErroreServer || (_errore as ErroreServer).campi.isEmpty))
                 Text(testoErrore(_errore!), style: TextStyle(color: Theme.of(context).colorScheme.error)),
             ]),

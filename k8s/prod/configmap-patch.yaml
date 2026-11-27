@@ -1,0 +1,13 @@
+# Valori non sensibili di PROD (le credenziali stanno nei Secret, mai nel repository).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend-config
+data:
+  CORS_ORIGIN: "https://lastmile.veloce24.example"
+  # in produzione si entra solo con il login
+  IDENTITA_HEADER_SVILUPPO: "disattiva"
+  DURATA_TOKEN: "15m"
+  DURATA_SESSIONE: "12h"
+  # pagina del frontend a cui punta il link della mail di recupero password (+ ?token=...)
+  LINK_RECUPERO_PASSWORD: "https://lastmile.veloce24.example/"

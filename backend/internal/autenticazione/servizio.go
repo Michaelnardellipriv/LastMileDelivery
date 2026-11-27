@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"lastmiledelivery/backend/internal/audit"
 	"lastmiledelivery/backend/internal/errori"
 	"lastmiledelivery/backend/internal/identita"
 )
@@ -23,24 +24,36 @@ const (
 type archivio interface {
 	PerEmail(ctx context.Context, email string) (Account, bool, error)
 	PerRuolo(ctx context.Context, r identita.Richiedente) (Account, error)
-	AggiornaPassword(ctx context.Context, idUtente int32, hash string) error
-	RecuperiRecenti(ctx context.Context, idUtente int32, dal time.Time) (int, error)
-	CreaRecupero(ctx context.Context, idUtente int32, tokenHash string, scadenza time.Time) error
+	// AggiornaPassword cambia la password e chiude le sessioni dell'utente tranne tranne
+	AggiornaPassword(ctx context.Context, idUtente int64, hash, tranne string) error
+	RecuperiRecenti(ctx context.Context, idUtente int64, dal time.Time) (int, error)
+	CreaRecupero(ctx context.Context, idUtente int64, tokenHash string, scadenza time.Time) error
+	// UsaRecupero imposta la nuova password e chiude tutte le sessioni dell'utente
 	UsaRecupero(ctx context.Context, tokenHash, nuovoHash string) (bool, error)
 	// DestinatarioDiSpedizioni dice se il cliente è (o è stato) destinatario di almeno una spedizione.
-	DestinatarioDiSpedizioni(ctx context.Context, idCliente int32) (bool, error)
+	DestinatarioDiSpedizioni(ctx context.Context, idCliente int64) (bool, error)
+}
+
+// registroSessioni: le sessioni del login nel database globale (package sessioni).
+type registroSessioni interface {
+	// Apri ricontrolla l'account (attivo, stessa password e sede) mentre apre la sessione
+	Apri(ctx context.Context, idUtente int64, r identita.Richiedente, pwdHash string) (string, error)
+	// Valida: la sessione è aperta; restituisce quando finisce
+	Valida(ctx context.Context, r identita.Richiedente) (time.Time, error)
+	Chiudi(ctx context.Context, idSessione, motivo string) error
 }
 
 type Servizio struct {
 	archivio     archivio
+	sessioni     registroSessioni
 	firmatario   *Firmatario
 	postino      Postino
 	linkRecupero string
 	adesso       func() time.Time
 }
 
-func NuovoServizio(a archivio, f *Firmatario, p Postino, linkRecupero string) *Servizio {
-	return &Servizio{archivio: a, firmatario: f, postino: p, linkRecupero: linkRecupero, adesso: time.Now}
+func NuovoServizio(a archivio, s registroSessioni, f *Firmatario, p Postino, linkRecupero string) *Servizio {
+	return &Servizio{archivio: a, sessioni: s, firmatario: f, postino: p, linkRecupero: linkRecupero, adesso: time.Now}
 }
 
 type Sessione struct {
@@ -68,13 +81,17 @@ func (s *Servizio) Login(ctx context.Context, email, password, ruolo *string) (S
 	}
 	if !trovato {
 		confrontoFittizio(*password)
+		// nel log non c'è l'email (dato personale): basta sapere che l'accesso è fallito
+		audit.Evento(ctx, "login_fallito", "motivo", "email_sconosciuta")
 		return Sessione{}, &errori.NonAutenticato{Messaggio: messaggioCredenziali}
 	}
 	if !passwordCorretta(acc.PwdHash, *password) || len(acc.Ruoli) == 0 {
+		audit.Evento(ctx, "login_fallito", "id_utente", acc.IDUtente, "motivo", "password")
 		return Sessione{}, &errori.NonAutenticato{Messaggio: messaggioCredenziali}
 	}
 	// lo si dice solo dopo la password giusta, per non rivelare quali email sono registrate
 	if !acc.Attivo {
+		audit.Evento(ctx, "login_fallito", "id_utente", acc.IDUtente, "motivo", "disattivato")
 		return Sessione{}, &errori.NonAutorizzato{Messaggio: messaggioDisattivato}
 	}
 
@@ -93,11 +110,73 @@ func (s *Servizio) Login(ctx context.Context, email, password, ruolo *string) (S
 			return Sessione{}, &errori.NonAutorizzato{Messaggio: messaggioSoloMittente}
 		}
 	}
+	// la sessione del login: il token vale solo finché resta aperta nel database
+	if scelto.Sessione, err = s.sessioni.Apri(ctx, acc.IDUtente, scelto, acc.PwdHash); err != nil {
+		return Sessione{}, err
+	}
 	token, scadenza, err := s.firmatario.Firma(acc.IDUtente, scelto)
 	if err != nil {
 		return Sessione{}, err
 	}
+	audit.Evento(audit.ConUtente(ctx, scelto.String()), "login")
 	return Sessione{Token: token, Scadenza: scadenza, Account: acc, Ruolo: scelto}, nil
+}
+
+// Rinnova emette un nuovo token a partire da quello attuale, anche se è appena scaduto
+// (app rimasta senza rete), purché la sua sessione sia ancora aperta nel database (non
+// chiusa da logout, disattivazione, cambio di sede o nuova password, e non oltre
+// DURATA_SESSIONE dal login) e l'utente sia attivo (altrimenti 403). Il nuovo token ha la
+// stessa sessione e la sede che l'utente ha adesso.
+func (s *Servizio) Rinnova(ctx context.Context, token string) (Sessione, error) {
+	r, err := s.firmatario.VerificaPerRinnovo(token)
+	if err != nil {
+		return Sessione{}, &errori.NonAutenticato{Messaggio: err.Error()}
+	}
+	fineSessione, err := s.sessioni.Valida(ctx, r)
+	if err != nil {
+		audit.Evento(audit.ConUtente(ctx, r.String()), "rinnovo_rifiutato", "motivo", err.Error())
+		return Sessione{}, err
+	}
+	acc, err := s.archivio.PerRuolo(ctx, r)
+	if err != nil {
+		return Sessione{}, err
+	}
+	if !acc.Attivo {
+		return Sessione{}, &errori.NonAutorizzato{Messaggio: messaggioDisattivato}
+	}
+	attuale, trovato := r, false
+	for _, ruolo := range acc.Ruoli {
+		if ruolo.Ruolo == r.Ruolo && ruolo.ID == r.ID {
+			attuale, trovato = ruolo, true // con la sede di adesso
+		}
+	}
+	if !trovato {
+		return Sessione{}, &errori.NonAutenticato{Messaggio: "utente non riconosciuto"}
+	}
+	attuale.Sessione = r.Sessione
+	nuovo, scadenza, err := s.firmatario.FirmaFinoA(acc.IDUtente, attuale, fineSessione)
+	if err != nil {
+		return Sessione{}, err
+	}
+	return Sessione{Token: nuovo, Scadenza: scadenza, Account: acc, Ruolo: attuale}, nil
+}
+
+// Esci chiude la sessione del token (logout): da subito il token non vale più, su tutti
+// e due i servizi. Come il rinnovo accetta anche un token appena scaduto (app rimasta
+// senza rete, orologio del dispositivo avanti): altrimenti la sessione resterebbe aperta,
+// e quel token rinnovabile, fino a DURATA_SESSIONE. Una sessione già chiusa non è un
+// errore.
+func (s *Servizio) Esci(ctx context.Context, token string) error {
+	r, err := s.firmatario.VerificaPerRinnovo(token)
+	if err != nil {
+		return &errori.NonAutenticato{Messaggio: err.Error()}
+	}
+	ctx = audit.ConUtente(ctx, r.String())
+	if err := s.sessioni.Chiudi(ctx, r.Sessione, identita.MotivoLogout); err != nil {
+		return err
+	}
+	audit.Evento(ctx, "logout")
+	return nil
 }
 
 func scegliRuolo(ruoli []identita.Richiedente, richiesto *string) (identita.Richiedente, error) {
@@ -145,7 +224,13 @@ func (s *Servizio) CambiaPassword(ctx context.Context, r identita.Richiedente, a
 	if err != nil {
 		return err
 	}
-	return s.archivio.AggiornaPassword(ctx, acc.IDUtente, hash)
+	// le altre sessioni dell'utente (es. un token rubato) si chiudono; quella con cui ha
+	// cambiato la password resta aperta
+	if err := s.archivio.AggiornaPassword(ctx, acc.IDUtente, hash, r.Sessione); err != nil {
+		return err
+	}
+	audit.Evento(ctx, "password_cambiata")
+	return nil
 }
 
 func (s *Servizio) RichiediRecupero(ctx context.Context, email *string) error {
@@ -213,5 +298,6 @@ func (s *Servizio) ReimpostaPassword(ctx context.Context, token, nuova *string) 
 		e.Aggiungi("token", "non valido, scaduto o già usato: richiedere un nuovo recupero")
 		return e
 	}
+	audit.Evento(ctx, "password_reimpostata")
 	return nil
 }

@@ -14,12 +14,12 @@ type DettaglioSpedizione struct {
 	TentativiConsegnaFalliti int
 }
 
-func (s *Servizio) Dettaglio(ctx context.Context, r identita.Richiedente, id int32) (DettaglioSpedizione, error) {
-	vis, err := s.visibilita(ctx, r)
+func (s *Servizio) Dettaglio(ctx context.Context, r identita.Richiedente, id int64) (DettaglioSpedizione, error) {
+	vis, err := s.visibilita(r)
 	if err != nil {
 		return DettaglioSpedizione{}, err
 	}
-	d, err := s.archivio.Dettaglio(ctx, vis, id)
+	d, err := s.archivio.Dettaglio(ctx, r.Ambito(), vis, id)
 	if err != nil {
 		return DettaglioSpedizione{}, err
 	}

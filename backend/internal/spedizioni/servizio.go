@@ -7,26 +7,33 @@ import (
 	"time"
 
 	"lastmiledelivery/backend/internal/configurazione"
+	"lastmiledelivery/backend/internal/database"
 	"lastmiledelivery/backend/internal/errori"
 	"lastmiledelivery/backend/internal/identita"
 )
 
+// archivio legge e scrive le spedizioni. Ogni funzione riceve l'ambito delle sedi del
+// richiedente (o la sua sede): è il repository che lo mette nelle query, chi chiama non
+// può dimenticarlo. Il database lo controlla una seconda volta (Row-Level Security).
 type archivio interface {
-	Crea(ctx context.Context, idOperatore int32, n NuovaSpedizione) (Spedizione, error)
-	Aggiorna(ctx context.Context, id int32, autore identita.Richiedente,
+	Crea(ctx context.Context, idSede, idOperatore int64, n NuovaSpedizione) (Spedizione, error)
+	Aggiorna(ctx context.Context, ambito database.Ambito, id int64, autore identita.Richiedente,
 		decidi func(attuale Spedizione) (Modifica, error)) (Spedizione, bool, error)
-	Elenca(ctx context.Context, v Visibilita, f FiltroElenco) ([]VoceElenco, error)
-	Conta(ctx context.Context, v Visibilita, f FiltroElenco) (int, error)
-	Storico(ctx context.Context, id int32) ([]VoceStorico, error)
-	Dettaglio(ctx context.Context, v Visibilita, id int32) (DettaglioSpedizione, error)
-	AggiungiNota(ctx context.Context, id int32, autore identita.Richiedente, testo string,
+	Elenca(ctx context.Context, ambito database.Ambito, v Visibilita, f FiltroElenco) ([]VoceElenco, error)
+	Conta(ctx context.Context, ambito database.Ambito, v Visibilita, f FiltroElenco) (int, error)
+	Storico(ctx context.Context, ambito database.Ambito, id int64) ([]VoceStorico, error)
+	Dettaglio(ctx context.Context, ambito database.Ambito, v Visibilita, id int64) (DettaglioSpedizione, error)
+	AggiungiNota(ctx context.Context, ambito database.Ambito, id int64, autore identita.Richiedente, testo string,
 		verifica func(attuale Spedizione) error) (Nota, error)
+	// SedeCorriere dice in quale sede lavora il corriere (trovato=false se non esiste)
+	SedeCorriere(ctx context.Context, idCorriere int64) (idSede int64, trovato bool, err error)
 }
 
-// fonteRegole dà i parametri impostati dall'amministratore (tentativi, giorni di
-// visibilità, motivi): si leggono a ogni operazione, così una modifica vale subito.
+// fonteRegole dà i parametri impostati dall'amministratore per la sede (tentativi,
+// giorni di visibilità) e i motivi: si leggono a ogni operazione, così una modifica
+// vale subito.
 type fonteRegole interface {
-	Regole(ctx context.Context) (configurazione.Regole, error)
+	Regole(ctx context.Context, idSede int64) (configurazione.Regole, error)
 }
 
 type Servizio struct {
@@ -54,7 +61,33 @@ func (s *Servizio) Crea(ctx context.Context, r identita.Richiedente, n NuovaSped
 	if err := s.validaNuova(n).Err(); err != nil {
 		return Spedizione{}, err
 	}
-	return s.archivio.Crea(ctx, r.ID, n)
+	// la spedizione nasce nella sede dell'operatore: ritiro e consegna devono essere
+	// nella sua città (lo garantisce il database) e il corriere deve essere della sede
+	if n.IDCorriere != nil {
+		if err := s.corriereDellaSede(ctx, r.IDSede, *n.IDCorriere); err != nil {
+			return Spedizione{}, err
+		}
+	}
+	return s.archivio.Crea(ctx, r.IDSede, r.ID, n)
+}
+
+// corriereDellaSede: una spedizione si affida solo a un corriere della sua sede, perché
+// la consegna resta in città ed è gestita da operatori e corrieri di quella città.
+func (s *Servizio) corriereDellaSede(ctx context.Context, idSede, idCorriere int64) error {
+	sedeCorriere, trovato, err := s.archivio.SedeCorriere(ctx, idCorriere)
+	if err != nil {
+		return err
+	}
+	if !trovato {
+		return &errori.RiferimentoNonTrovato{Campo: "id_corriere", Messaggio: "corriere non trovato"}
+	}
+	if sedeCorriere != idSede {
+		return &errori.Conflitto{
+			Messaggio: "il corriere lavora in un'altra sede: una spedizione si assegna solo a corrieri della sua sede",
+			Dettagli:  []errori.ErroreCampo{{Campo: "id_corriere", Messaggio: "corriere di un'altra sede"}},
+		}
+	}
+	return nil
 }
 
 func (s *Servizio) RegoleNuova(n NuovaSpedizione) []errori.ErroreCampo {
@@ -77,14 +110,14 @@ func (s *Servizio) validaNuova(n NuovaSpedizione) *errori.Validazione {
 	return e
 }
 
-func (s *Servizio) ModificaDati(ctx context.Context, r identita.Richiedente, id int32, d DatiSpedizione) (Spedizione, error) {
+func (s *Servizio) ModificaDati(ctx context.Context, r identita.Richiedente, id int64, d DatiSpedizione) (Spedizione, error) {
 	if err := soloOperatore(r, "modificare i dati di una spedizione"); err != nil {
 		return Spedizione{}, err
 	}
 	if err := s.validaDati(d); err != nil {
 		return Spedizione{}, err
 	}
-	sped, _, err := s.archivio.Aggiorna(ctx, id, r, func(attuale Spedizione) (Modifica, error) {
+	sped, _, err := s.archivio.Aggiorna(ctx, r.Ambito(), id, r, func(attuale Spedizione) (Modifica, error) {
 		return decidiDati(attuale, d)
 	})
 	return sped, err
@@ -96,7 +129,7 @@ func (s *Servizio) validaDati(d DatiSpedizione) error {
 		e.Aggiungi("corpo", "indicare almeno un campo da modificare")
 		return e
 	}
-	for campo, v := range map[string]*int32{
+	for campo, v := range map[string]*int64{
 		"id_cliente_mittente":     d.IDClienteMittente,
 		"id_cliente_destinatario": d.IDClienteDestinatario,
 		"id_indirizzo_ritiro":     d.IDIndirizzoRitiro,
@@ -139,7 +172,7 @@ func decidiDati(attuale Spedizione, d DatiSpedizione) (Modifica, error) {
 	return Modifica{NuovoStato: attuale.Stato, Dati: &d}, nil
 }
 
-func (s *Servizio) Assegna(ctx context.Context, r identita.Richiedente, id int32, idCorriere *int32) (Spedizione, bool, error) {
+func (s *Servizio) Assegna(ctx context.Context, r identita.Richiedente, id int64, idCorriere *int64) (Spedizione, bool, error) {
 	if err := soloOperatore(r, "assegnare una spedizione"); err != nil {
 		return Spedizione{}, false, err
 	}
@@ -152,16 +185,19 @@ func (s *Servizio) Assegna(ctx context.Context, r identita.Richiedente, id int32
 	if err := e.Err(); err != nil {
 		return Spedizione{}, false, err
 	}
-	reg, err := s.regole.Regole(ctx)
+	if err := s.corriereDellaSede(ctx, r.IDSede, *idCorriere); err != nil {
+		return Spedizione{}, false, err
+	}
+	reg, err := s.regole.Regole(ctx, r.IDSede)
 	if err != nil {
 		return Spedizione{}, false, err
 	}
-	return s.archivio.Aggiorna(ctx, id, r, func(attuale Spedizione) (Modifica, error) {
+	return s.archivio.Aggiorna(ctx, r.Ambito(), id, r, func(attuale Spedizione) (Modifica, error) {
 		return decidiAssegnazione(reg, attuale, idCorriere)
 	})
 }
 
-func decidiAssegnazione(reg configurazione.Regole, attuale Spedizione, idCorriere *int32) (Modifica, error) {
+func decidiAssegnazione(reg configurazione.Regole, attuale Spedizione, idCorriere *int64) (Modifica, error) {
 	nuovo := attuale.Stato
 	switch attuale.Stato {
 	case Creata:
@@ -185,18 +221,18 @@ func decidiAssegnazione(reg configurazione.Regole, attuale Spedizione, idCorrier
 	return Modifica{NuovoStato: nuovo, NuovoCorriere: idCorriere}, nil
 }
 
-func (s *Servizio) RegistraTentativo(ctx context.Context, r identita.Richiedente, id int32, t TentativoFallito) (Spedizione, error) {
+func (s *Servizio) RegistraTentativo(ctx context.Context, r identita.Richiedente, id int64, t TentativoFallito) (Spedizione, error) {
 	if r.Ruolo != identita.Corriere {
 		return Spedizione{}, &errori.NonAutorizzato{Messaggio: "solo il corriere assegnato può registrare un tentativo"}
 	}
-	reg, err := s.regole.Regole(ctx)
+	reg, err := s.regole.Regole(ctx, r.IDSede)
 	if err != nil {
 		return Spedizione{}, err
 	}
 	if err := validaTentativo(reg, t); err != nil {
 		return Spedizione{}, err
 	}
-	sped, _, err := s.archivio.Aggiorna(ctx, id, r, func(attuale Spedizione) (Modifica, error) {
+	sped, _, err := s.archivio.Aggiorna(ctx, r.Ambito(), id, r, func(attuale Spedizione) (Modifica, error) {
 		return decidiTentativo(reg, r, attuale, t)
 	})
 	return sped, err
@@ -239,7 +275,9 @@ func decidiTentativo(reg configurazione.Regole, r identita.Richiedente, attuale 
 		return Modifica{}, &errori.Conflitto{Messaggio: fmt.Sprintf(
 			"un tentativo di consegna si registra solo su una spedizione in consegna (stato attuale: %q)", attuale.Stato)}
 	}
-	if attuale.TentativiConsegnaFalliti >= attuale.UsciteInConsegna {
+	// un solo tentativo per uscita: per riprovare la spedizione torna in ritirata (operatore)
+	// e il corriere la rimette in consegna
+	if attuale.TentativoInUscita {
 		return Modifica{}, &errori.Conflitto{Messaggio: messaggioUscitaFallita}
 	}
 	m.NuovoStato = InConsegna
@@ -249,18 +287,18 @@ func decidiTentativo(reg configurazione.Regole, r identita.Richiedente, attuale 
 	return m, nil
 }
 
-func (s *Servizio) CambiaStato(ctx context.Context, r identita.Richiedente, id int32, c CambioStato) (Spedizione, error) {
+func (s *Servizio) CambiaStato(ctx context.Context, r identita.Richiedente, id int64, c CambioStato) (Spedizione, error) {
 	if r.Ruolo != identita.Operatore && r.Ruolo != identita.Corriere {
 		return Spedizione{}, &errori.NonAutorizzato{Messaggio: "solo operatori logistici e corrieri possono cambiare lo stato"}
 	}
-	reg, err := s.regole.Regole(ctx)
+	reg, err := s.regole.Regole(ctx, r.IDSede)
 	if err != nil {
 		return Spedizione{}, err
 	}
 	if err := validaCambio(reg, c); err != nil {
 		return Spedizione{}, err
 	}
-	sped, _, err := s.archivio.Aggiorna(ctx, id, r, func(attuale Spedizione) (Modifica, error) {
+	sped, _, err := s.archivio.Aggiorna(ctx, r.Ambito(), id, r, func(attuale Spedizione) (Modifica, error) {
 		return decidiStato(reg, r, attuale, c)
 	})
 	return sped, err
@@ -307,8 +345,11 @@ func decidiStato(reg configurazione.Regole, r identita.Richiedente, attuale Sped
 			"falliti %d tentativi di ritiro su %d: la spedizione deve essere annullata dall'operatore",
 			attuale.TentativiRitiroFalliti, reg.MaxTentativiRitiro)}
 	}
-	if attuale.Stato == InConsegna && c.Stato == Consegnata && attuale.TentativiConsegnaFalliti >= attuale.UsciteInConsegna {
+	if attuale.Stato == InConsegna && c.Stato == Consegnata && attuale.TentativoInUscita {
 		return Modifica{}, &errori.Conflitto{Messaggio: messaggioUscitaFallita}
+	}
+	if attuale.Stato == InConsegna && c.Stato == Ritirata && !attuale.TentativoInUscita {
+		return Modifica{}, &errori.Conflitto{Messaggio: messaggioRitiroSenzaTentativo}
 	}
 	if err := richiediMotivoENota(reg, attuale, c); err != nil {
 		return Modifica{}, err

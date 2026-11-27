@@ -1,6 +1,6 @@
-// Configurazione della gestione delle spedizioni: i parametri (giorni di visibilità per
-// il cliente destinatario, tentativi massimi, intervallo della posizione del corriere) e
-// l'elenco dei motivi pubblici. I valori partono come sono scritti: i limiti li
+// Configurazione della gestione delle spedizioni: i parametri di ogni sede (giorni di
+// visibilità per il cliente destinatario, tentativi massimi, intervallo della posizione
+// del corriere) e l'elenco dei motivi pubblici, uguale per tutte le sedi. I valori partono come sono scritti: i limiti li
 // controlla il backend, che risponde con l'errore sotto il campo.
 import 'package:flutter/material.dart';
 
@@ -8,29 +8,102 @@ import '../comune/comuni.dart';
 import '../comune/ricerca.dart';
 import 'api.dart';
 
-class ConfigurazionePage extends StatelessWidget {
+class ConfigurazionePage extends StatefulWidget {
   final ApiAmministratore api;
-  const ConfigurazionePage({super.key, required this.api});
 
+  /// Cambia quando l'elenco delle sedi cambia (creata, rinominata...): si ricarica.
+  final int versioneSedi;
+  const ConfigurazionePage({super.key, required this.api, this.versioneSedi = 0});
   @override
-  Widget build(BuildContext context) => ListView(padding: const EdgeInsets.all(16), children: [
-        Align(
-          alignment: Alignment.topCenter,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 860),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              ParametriCard(api: api),
-              MotiviCard(api: api),
-            ]),
-          ),
-        ),
-      ]);
+  State<ConfigurazionePage> createState() => _ConfigurazionePageState();
 }
 
-/// Parametri di GET/PATCH /api/impostazioni. Al salvataggio partono solo i valori cambiati.
+class _ConfigurazionePageState extends State<ConfigurazionePage> {
+  List<Sede>? _sedi;
+  Sede? _sede;
+  Object? _errore;
+
+  @override
+  void initState() {
+    super.initState();
+    _caricaSedi();
+  }
+
+  @override
+  void didUpdateWidget(ConfigurazionePage vecchio) {
+    super.didUpdateWidget(vecchio);
+    if (vecchio.versioneSedi != widget.versioneSedi) _caricaSedi();
+  }
+
+  Future<void> _caricaSedi() async {
+    try {
+      final r = await widget.api.sedi();
+      if (!mounted) return;
+      setState(() {
+        _sedi = r.dati;
+        _errore = null;
+        // resta sulla sede scelta, se c'è ancora; altrimenti la prima
+        _sede = r.dati.where((s) => s.id == _sede?.id).firstOrNull ?? r.dati.firstOrNull;
+      });
+    } catch (e) {
+      if (mounted) setState(() => _errore = e);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final sedi = _sedi;
+    final sede = _sede;
+    return ListView(padding: const EdgeInsets.all(16), children: [
+      Align(
+        alignment: Alignment.topCenter,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 860),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            if (_errore != null && sedi == null)
+              Row(children: [
+                Expanded(child: Text(testoErrore(_errore!), style: TextStyle(color: Theme.of(context).colorScheme.error))),
+                TextButton(onPressed: _caricaSedi, child: const Text('Riprova')),
+              ])
+            else if (sedi != null && sedi.isEmpty)
+              const Text('Nessuna sede: creane una dalla sezione Sedi.')
+            else if (sedi != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: SizedBox(
+                    width: 320,
+                    child: DropdownButtonFormField<int>(
+                      value: sede?.id,
+                      isExpanded: true,
+                      decoration: const InputDecoration(
+                          labelText: 'Sede', helperText: 'Ogni sede ha i suoi parametri', border: OutlineInputBorder()),
+                      items: [
+                        for (final s in sedi)
+                          DropdownMenuItem(value: s.id, child: Text('${s.nome} · ${s.citta}${s.attiva ? '' : ' (disattivata)'}')),
+                      ],
+                      onChanged: (id) => setState(() => _sede = sedi.firstWhere((s) => s.id == id)),
+                    ),
+                  ),
+                ),
+              ),
+            // la chiave cambia con la sede: il riquadro rilegge i parametri di quella sede
+            if (sede != null) ParametriCard(key: ValueKey(sede.id), api: widget.api, sede: sede),
+            MotiviCard(api: widget.api),
+          ]),
+        ),
+      ),
+    ]);
+  }
+}
+
+/// Parametri di una sede (GET/PATCH /api/sedi/{id}/impostazioni). Al salvataggio
+/// partono solo i valori cambiati.
 class ParametriCard extends StatefulWidget {
   final ApiAmministratore api;
-  const ParametriCard({super.key, required this.api});
+  final Sede sede;
+  const ParametriCard({super.key, required this.api, required this.sede});
   @override
   State<ParametriCard> createState() => _ParametriCardState();
 }
@@ -63,7 +136,7 @@ class _ParametriCardState extends State<ParametriCard> {
       _erroreLettura = null;
     });
     try {
-      _mostra(await widget.api.impostazioni());
+      _mostra(await widget.api.impostazioni(widget.sede.id));
     } catch (e) {
       if (mounted) setState(() => _erroreLettura = e);
     } finally {
@@ -98,7 +171,7 @@ class _ParametriCardState extends State<ParametriCard> {
       _errore = null;
     });
     try {
-      final imp = await widget.api.modificaImpostazioni(_modifiche, chiave: _chiave);
+      final imp = await widget.api.modificaImpostazioni(widget.sede.id, _modifiche, chiave: _chiave);
       _chiave = widget.api.nuovaChiave(); // la prossima modifica è un'operazione nuova
       _mostra(imp);
       if (mounted) avviso(context, 'Impostazioni salvate');
@@ -115,7 +188,7 @@ class _ParametriCardState extends State<ParametriCard> {
     final imp = _attuali;
     final errore = erroreGenerale(context, _errore, campiMostrati: {for (final v in _voci) v.$1});
     return Sezione(
-      'Parametri delle spedizioni',
+      'Parametri delle spedizioni · ${widget.sede.nome}',
       [
         if (_attesa) const LinearProgressIndicator(),
         if (_erroreLettura != null && imp == null)

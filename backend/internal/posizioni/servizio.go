@@ -17,19 +17,21 @@ const (
 )
 
 type Posizione struct {
-	IDCorriere  int32
+	IDCorriere  int64
 	Nome        string
 	Cognome     string
 	Latitudine  float64
 	Longitudine float64
 	RilevataIl  time.Time
-	Spedizioni  []int32
+	Spedizioni  []int64
 }
 
+// archivio tiene solo l'ultima posizione di ogni corriere. Ogni funzione riceve la
+// sede: un corriere scrive nella sua, un operatore vede solo i corrieri della sua.
 type archivio interface {
-	Registra(ctx context.Context, idCorriere int32, lat, lon float64) (int32, error)
-	Posizioni(ctx context.Context) ([]Posizione, error)
-	Intervallo(ctx context.Context) (int32, error)
+	Registra(ctx context.Context, idSede, idCorriere int64, lat, lon float64) (int64, error)
+	Posizioni(ctx context.Context, idSede int64) ([]Posizione, error)
+	Intervallo(ctx context.Context, idSede int64) (int64, error)
 }
 
 type Servizio struct {
@@ -40,7 +42,7 @@ func NuovoServizio(a archivio) *Servizio {
 	return &Servizio{archivio: a}
 }
 
-func (s *Servizio) Invia(ctx context.Context, r identita.Richiedente, lat, lon *float64) (int32, error) {
+func (s *Servizio) Invia(ctx context.Context, r identita.Richiedente, lat, lon *float64) (int64, error) {
 	if r.Ruolo != identita.Corriere {
 		return 0, &errori.NonAutorizzato{Messaggio: "solo un corriere può inviare la propria posizione"}
 	}
@@ -58,24 +60,28 @@ func (s *Servizio) Invia(ctx context.Context, r identita.Richiedente, lat, lon *
 	if err := e.Err(); err != nil {
 		return 0, err
 	}
-	return s.archivio.Registra(ctx, r.ID, *lat, *lon)
+	return s.archivio.Registra(ctx, r.IDSede, r.ID, *lat, *lon)
 }
 
-func (s *Servizio) Elenca(ctx context.Context, r identita.Richiedente) (int32, []Posizione, error) {
+// Elenca l'ultima posizione dei corrieri in consegna della sede dell'operatore.
+func (s *Servizio) Elenca(ctx context.Context, r identita.Richiedente) (int64, []Posizione, error) {
 	if r.Ruolo != identita.Operatore {
 		return 0, nil, &errori.NonAutorizzato{Messaggio: "la posizione dei corrieri è visibile solo agli operatori logistici"}
 	}
-	intervallo, err := s.archivio.Intervallo(ctx)
+	intervallo, err := s.archivio.Intervallo(ctx, r.IDSede)
 	if err != nil {
 		return 0, nil, err
 	}
-	posizioni, err := s.archivio.Posizioni(ctx)
+	posizioni, err := s.archivio.Posizioni(ctx, r.IDSede)
 	return intervallo, posizioni, err
 }
 
-func (s *Servizio) Intervallo(ctx context.Context, r identita.Richiedente) (int32, error) {
-	if r.Ruolo == identita.Cliente {
-		return 0, &errori.NonAutorizzato{Messaggio: "l'intervallo della posizione è riservato a corrieri, operatori e amministratori"}
+// Intervallo con cui i corrieri della sede inviano la posizione. L'amministratore lo
+// legge e lo cambia per ogni sede con /api/sedi/{id}/impostazioni.
+func (s *Servizio) Intervallo(ctx context.Context, r identita.Richiedente) (int64, error) {
+	if !r.Ruolo.HaSede() {
+		return 0, &errori.NonAutorizzato{Messaggio: "l'intervallo della posizione è quello della propria sede: " +
+			"riservato a corrieri e operatori (l'amministratore usa GET /api/sedi/{id}/impostazioni)"}
 	}
-	return s.archivio.Intervallo(ctx)
+	return s.archivio.Intervallo(ctx, r.IDSede)
 }

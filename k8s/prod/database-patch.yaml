@@ -1,0 +1,45 @@
+# Volumi più grandi (lo storico delle spedizioni cresce ogni giorno) e più memoria per i
+# due PostgreSQL. Da rivedere con i volumi reali del cliente.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: db-globale-pvc
+spec:
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: db-spedizioni-pvc
+spec:
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: db-globale
+spec:
+  template:
+    spec:
+      containers:
+        - name: db
+          resources:
+            requests: { cpu: 250m, memory: 512Mi }
+            limits: { memory: 1Gi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: db-spedizioni
+spec:
+  template:
+    spec:
+      containers:
+        - name: db
+          resources:
+            requests: { cpu: 500m, memory: 1Gi }
+            limits: { memory: 2Gi }

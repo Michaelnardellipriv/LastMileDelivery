@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"lastmiledelivery/backend/internal/audit"
 	"lastmiledelivery/backend/internal/errori"
 	"lastmiledelivery/backend/internal/httpx"
 	"lastmiledelivery/backend/internal/identita"
@@ -58,6 +59,7 @@ func (h *Handler) aggiungiNota(w http.ResponseWriter, r *http.Request) {
 		httpx.RispondiErrore(w, r, err)
 		return
 	}
+	audit.Evento(r.Context(), "spedizione_nota", "spedizione", id)
 	httpx.ScriviJSON(w, http.StatusCreated, versoNotaDTO(n))
 }
 
@@ -94,15 +96,20 @@ func (h *Handler) elenca(w http.ResponseWriter, r *http.Request) {
 	}
 	intero("pagina", &f.Pagina)
 	intero("per_pagina", &f.PerPagina)
-	if v := q.Get("id_corriere"); v != "" {
-		n, err := strconv.ParseInt(v, 10, 32)
-		if err != nil {
-			e.Aggiungi("id_corriere", "deve essere un numero intero")
-		} else {
-			id := int32(n)
-			f.IDCorriere = &id
+	idDaQuery := func(nome string) *int64 {
+		v := q.Get(nome)
+		if v == "" {
+			return nil
 		}
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			e.Aggiungi(nome, "deve essere un numero intero")
+			return nil
+		}
+		return &n
 	}
+	f.IDCorriere = idDaQuery("id_corriere")
+	f.IDSede = idDaQuery("id_sede")
 	data := func(nome string) *time.Time {
 		v := q.Get(nome)
 		if v == "" {
@@ -154,6 +161,7 @@ func (h *Handler) crea(w http.ResponseWriter, r *http.Request) {
 		httpx.RispondiErrore(w, r, err)
 		return
 	}
+	audit.Evento(r.Context(), "spedizione_creata", "spedizione", creata.ID, "sede", creata.IDSede, "stato", creata.Stato)
 	httpx.ScriviJSON(w, http.StatusCreated, versoDTO(creata))
 }
 
@@ -176,6 +184,7 @@ func (h *Handler) modificaDati(w http.ResponseWriter, r *http.Request) {
 		httpx.RispondiErrore(w, r, err)
 		return
 	}
+	audit.Evento(r.Context(), "spedizione_modificata", "spedizione", id)
 	httpx.ScriviJSON(w, http.StatusOK, versoDTO(sped))
 }
 
@@ -192,6 +201,9 @@ func (h *Handler) assegna(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		httpx.RispondiErrore(w, r, err)
 		return
+	}
+	if nuova {
+		audit.Evento(r.Context(), "spedizione_assegnata", "spedizione", id, "corriere", req.IDCorriere)
 	}
 	stato := http.StatusOK
 	if nuova {
@@ -219,6 +231,7 @@ func (h *Handler) registraTentativo(w http.ResponseWriter, r *http.Request) {
 		httpx.RispondiErrore(w, r, err)
 		return
 	}
+	audit.Evento(r.Context(), "spedizione_tentativo", "spedizione", id, "tipo", t.Tipo, "stato", sped.Stato)
 	httpx.ScriviJSON(w, http.StatusCreated, versoDTO(sped))
 }
 
@@ -241,5 +254,6 @@ func (h *Handler) cambiaStato(w http.ResponseWriter, r *http.Request) {
 		httpx.RispondiErrore(w, r, err)
 		return
 	}
+	audit.Evento(r.Context(), "spedizione_stato", "spedizione", id, "a", sped.Stato)
 	httpx.ScriviJSON(w, http.StatusOK, versoDTO(sped))
 }

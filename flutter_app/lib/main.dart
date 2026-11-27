@@ -92,7 +92,8 @@ class _AppState extends State<App> with WidgetsBindingObserver {
     }
     if (store.me != null) return const Shell();
     final s = store.sessione;
-    if (s != null) return AreaRiservata(key: ValueKey(s.token), apiBase: apiBase, sessione: s, client: widget.client);
+    // chiave: la sessione del login (sid), che non cambia quando il token si rinnova
+    if (s != null) return AreaRiservata(key: ValueKey(s.idSessione), apiBase: apiBase, sessione: s, client: widget.client);
     return LoginPage(client: widget.client);
   }
 }

@@ -16,6 +16,7 @@ func NuovoHandler(s *Servizio) *Handler {
 	return &Handler{servizio: s}
 }
 
+// L'intervallo lo cambia l'amministratore per ogni sede con PATCH /api/sedi/{id}/impostazioni.
 func (h *Handler) Registra(rotte *httpx.Rotte, identifica httpx.Middleware) {
 	rotte.Gestisci(http.MethodPost, "/api/corrieri/posizione", http.HandlerFunc(h.invia), identifica)
 	rotte.Gestisci(http.MethodGet, "/api/corrieri/posizioni", http.HandlerFunc(h.elenca), identifica)
@@ -28,21 +29,21 @@ type richiestaPosizione struct {
 }
 
 type intervalloDTO struct {
-	IntervalloSecondi int32 `json:"intervallo_secondi"`
+	IntervalloSecondi int64 `json:"intervallo_secondi"`
 }
 
 type posizioneDTO struct {
-	IDCorriere  int32     `json:"id_corriere"`
+	IDCorriere  int64     `json:"id_corriere"`
 	Nome        string    `json:"nome"`
 	Cognome     string    `json:"cognome"`
 	Latitudine  float64   `json:"latitudine"`
 	Longitudine float64   `json:"longitudine"`
 	RilevataIl  time.Time `json:"rilevata_il"`
-	Spedizioni  []int32   `json:"spedizioni_attive"`
+	Spedizioni  []int64   `json:"spedizioni_attive"`
 }
 
 type rispostaPosizioni struct {
-	IntervalloSecondi int32          `json:"intervallo_secondi"`
+	IntervalloSecondi int64          `json:"intervallo_secondi"`
 	Corrieri          []posizioneDTO `json:"corrieri"`
 }
 

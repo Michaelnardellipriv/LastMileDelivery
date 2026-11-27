@@ -1,0 +1,16 @@
+# Valori dell'ambiente TEST su Kubernetes (non sensibili). La leggono tutti e due i
+# microservizi (ognuno usa le variabili che gli servono).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend-config
+data:
+  LISTEN_ADDR: "0.0.0.0:8080"
+  CORS_ORIGIN: "https://lastmile.test"
+  # in TEST si entra solo con il login: niente header X-Id-* di sviluppo
+  IDENTITA_HEADER_SVILUPPO: "disattiva"
+  # dove trova l'altro servizio per le chiamate /interno (DNS interno del cluster)
+  URL_SERVIZIO_UTENTI: "http://utenti-svc:8080"
+  URL_SERVIZIO_SPEDIZIONI: "http://spedizioni-svc:8080"
+  # pagina del frontend a cui punta il link della mail di recupero password (+ ?token=...)
+  LINK_RECUPERO_PASSWORD: "https://lastmile.test/"

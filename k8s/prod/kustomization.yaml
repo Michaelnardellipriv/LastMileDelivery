@@ -1,0 +1,52 @@
+# Ambiente PROD: gli stessi manifest di TEST (k8s/base), con quello che in produzione
+# deve essere diverso. Procedura completa: docs/deployment.md, "PROD".
+#   kubectl apply -k k8s/prod
+#
+# Prima di usarlo vanno decisi e scritti qui (cercare "veloce24.example"):
+#   - il dominio vero (ingress, CORS_ORIGIN in configmap-patch.yaml);
+#   - il registry da cui il cluster scarica le immagini (images, qui sotto).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# un namespace suo: oggetti, Secret e volumi di PROD separati da tutto il resto
+namespace: lastmile-prod
+
+resources:
+  - namespace.yaml
+  - ../base
+  - backup.yaml
+
+# Immagini dal registry di produzione, con tag fisso (mai latest). I database usano le
+# immagini "-prod": solo lo schema, senza i dati di prova e i loro utenti dalla password
+# nota (db/Dockerfile, DATI=nessuno).
+images:
+  - name: localhost:32000/lastmile/db-globale
+    newName: registry.veloce24.example/lastmile/db-globale
+    newTag: 2.4.0-prod
+  - name: localhost:32000/lastmile/db-spedizioni
+    newName: registry.veloce24.example/lastmile/db-spedizioni
+    newTag: 2.4.0-prod
+  - name: localhost:32000/lastmile/utenti
+    newName: registry.veloce24.example/lastmile/utenti
+    newTag: 2.5.0
+  - name: localhost:32000/lastmile/spedizioni
+    newName: registry.veloce24.example/lastmile/spedizioni
+    newTag: 2.5.0
+  - name: localhost:32000/lastmile/frontend
+    newName: registry.veloce24.example/lastmile/frontend
+    newTag: 1.6.0
+
+patches:
+  # valori non sensibili di PROD
+  - path: configmap-patch.yaml
+  # nome vero e certificato riconosciuto (Let's Encrypt tramite cert-manager)
+  - path: ingress-patch.yaml
+    target: { kind: Ingress, name: lastmile-ingress }
+  # più spazio per i dati, più memoria per i database
+  - path: database-patch.yaml
+  # il servizio spedizioni riceve quasi tutto il traffico (corrieri, GPS)
+  - patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 3
+    target: { kind: Deployment, name: spedizioni }

@@ -3,40 +3,44 @@ package spedizioni
 import "time"
 
 type Spedizione struct {
-	ID                       int32
+	ID                       int64
+	IDSede                   int64
 	CodOrdine                string
 	Stato                    Stato
 	IsReso                   bool
 	CreataIl                 time.Time
 	DataoraRichiesta         time.Time
 	RitirataIl               *time.Time
-	IDClienteMittente        int32
-	IDClienteDestinatario    int32
-	IDIndirizzoRitiro        int32
-	IDIndirizzoSpedizione    int32
-	IDCorriere               *int32
+	IDClienteMittente        int64
+	IDClienteDestinatario    int64
+	IDIndirizzoRitiro        int64
+	IDIndirizzoSpedizione    int64
+	IDCorriere               *int64
 	AnnullataIl              *time.Time
 	TentativiRitiroFalliti   int
 	TentativiConsegnaFalliti int
-	UsciteInConsegna         int
+	// TentativoInUscita: nell'uscita in corso (dall'ultimo passaggio a "in consegna") il
+	// corriere ha registrato almeno un tentativo di consegna fallito. Solo allora l'operatore
+	// può riportare la spedizione in ritirata.
+	TentativoInUscita bool
 }
 
 type NuovaSpedizione struct {
 	CodOrdine             string
-	IDClienteMittente     int32
-	IDClienteDestinatario int32
-	IDIndirizzoRitiro     int32
-	IDIndirizzoSpedizione int32
+	IDClienteMittente     int64
+	IDClienteDestinatario int64
+	IDIndirizzoRitiro     int64
+	IDIndirizzoSpedizione int64
 	DataoraRichiesta      time.Time
-	IDCorriere            *int32
+	IDCorriere            *int64
 }
 
 type DatiSpedizione struct {
 	IsReso                *bool
-	IDClienteMittente     *int32
-	IDClienteDestinatario *int32
-	IDIndirizzoRitiro     *int32
-	IDIndirizzoSpedizione *int32
+	IDClienteMittente     *int64
+	IDClienteDestinatario *int64
+	IDIndirizzoRitiro     *int64
+	IDIndirizzoSpedizione *int64
 	DataoraRichiesta      *time.Time
 }
 
@@ -73,7 +77,7 @@ type TentativoFallito struct {
 type Modifica struct {
 	NessunaModifica bool
 	NuovoStato      Stato
-	NuovoCorriere   *int32
+	NuovoCorriere   *int64
 	Annulla         bool
 	Nota            *NotaDaSalvare
 	Tentativo       TipoTentativo
